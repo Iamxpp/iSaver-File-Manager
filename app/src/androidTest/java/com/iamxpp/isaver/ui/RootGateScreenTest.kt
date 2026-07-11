@@ -24,7 +24,7 @@ class RootGateScreenTest {
             )
         }
 
-        composeRule.onNode(hasProgressBarRangeInfo(ProgressBarRangeInfo(0.5f, 0f..1f)))
+        composeRule.onNode(hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate))
             .assertIsDisplayed()
         composeRule.onNodeWithText("正在检查 Root 权限").assertIsDisplayed()
     }

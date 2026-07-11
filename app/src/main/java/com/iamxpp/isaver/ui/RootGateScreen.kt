@@ -59,10 +59,7 @@ fun RootGateScreen(
 @Composable
 private fun CheckingCard() {
     GateCard {
-        CircularProgressIndicator(
-            progress = { 0.5f },
-            color = ISaverBlue,
-        )
+        CircularProgressIndicator(color = ISaverBlue)
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "正在检查 Root 权限",
