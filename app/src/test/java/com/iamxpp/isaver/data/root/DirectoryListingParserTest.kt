@@ -50,6 +50,24 @@ class DirectoryListingParserTest {
     }
 
     @Test
+    fun `base64 containing invalid utf8 fails the whole listing without throwing`() {
+        assertMalformed("/w==\t${b64("/p")}\tfile\t0\t0\t1\t1\t0")
+    }
+
+    @Test
+    fun `malformed record after a valid record fails the whole batch`() {
+        val result = DirectoryListingParser.parse(
+            listOf(
+                record("valid", "/valid", "file", "1", "2", "1", "1", "0"),
+                "missing\tfields",
+            ),
+        )
+
+        assertTrue(result is OperationResult.Failure)
+        assertEquals(ErrorCode.COMMAND_FAILED, (result as OperationResult.Failure).code)
+    }
+
+    @Test
     fun `missing fields fail the whole listing`() {
         assertMalformed("${b64("a")}\t${b64("/a")}\tfile")
     }

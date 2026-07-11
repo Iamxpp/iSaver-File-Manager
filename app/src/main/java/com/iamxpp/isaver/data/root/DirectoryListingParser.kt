@@ -6,6 +6,7 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.util.Base64
@@ -16,12 +17,16 @@ internal object DirectoryListingParser {
     fun parse(lines: List<String>): OperationResult<List<DirectoryEntry>> = try {
         OperationResult.Success(lines.map(::parseLine))
     } catch (_: IllegalArgumentException) {
-        OperationResult.Failure(
-            code = ErrorCode.COMMAND_FAILED,
-            userMessage = "无法读取目录信息",
-            technicalMessage = "Malformed structured directory output",
-        )
+        malformedOutput()
+    } catch (_: CharacterCodingException) {
+        malformedOutput()
     }
+
+    private fun malformedOutput() = OperationResult.Failure(
+        code = ErrorCode.COMMAND_FAILED,
+        userMessage = "无法读取目录信息",
+        technicalMessage = "Malformed structured directory output",
+    )
 
     private fun parseLine(line: String): DirectoryEntry {
         val fields = line.split('\t')
