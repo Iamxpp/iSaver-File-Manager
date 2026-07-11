@@ -6,10 +6,12 @@ import com.iamxpp.isaver.data.root.RootUidCheckResult
 import com.iamxpp.isaver.data.root.RootUidChecker
 import com.iamxpp.isaver.domain.RootStatus
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -18,6 +20,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -97,8 +100,31 @@ class RootGateViewModelTest {
 
         viewModel.retry()
 
-        assertEquals(1, rootSession.invalidations)
         dispatcher.scheduler.runCurrent()
+        assertEquals(1, rootSession.invalidations)
+    }
+
+    @Test
+    fun `retry waits for old check cleanup before invalidating and starting a new check`() {
+        val events = mutableListOf<String>()
+        val rootSession = RetryOrderingRootSession(events)
+        val viewModel = RootGateViewModel(rootSession, dispatcher)
+        dispatcher.scheduler.runCurrent()
+
+        viewModel.retry()
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(
+            listOf(
+                "old-check-started",
+                "old-check-cancelled",
+                "old-check-cleanup",
+                "session-invalidated",
+                "new-check-started",
+            ),
+            events,
+        )
+        assertEquals(RootGateUiState.Granted, viewModel.state.value)
     }
 
     @Test
@@ -108,7 +134,7 @@ class RootGateViewModelTest {
                 error("sensitive technical stderr")
             }
 
-            override fun invalidate() = Unit
+            override suspend fun invalidate() = Unit
         }
         val viewModel = RootGateViewModel(rootSession, dispatcher)
 
@@ -150,7 +176,7 @@ private class FakeRootSession(
 
     override suspend fun check(): RootStatus = statuses.removeFirst()
 
-    override fun invalidate() {
+    override suspend fun invalidate() {
         invalidations += 1
     }
 }
@@ -164,7 +190,35 @@ private class ControlledRootSession(
         results.removeFirst().await()
     }
 
-    override fun invalidate() = Unit
+    override suspend fun invalidate() = Unit
+}
+
+private class RetryOrderingRootSession(
+    private val events: MutableList<String>,
+) : RootSession {
+    private var checks = 0
+
+    override suspend fun check(): RootStatus {
+        checks += 1
+        if (checks == 1) {
+            events += "old-check-started"
+            try {
+                awaitCancellation()
+            } catch (cancelled: CancellationException) {
+                events += "old-check-cancelled"
+                throw cancelled
+            } finally {
+                events += "old-check-cleanup"
+            }
+        }
+
+        events += "new-check-started"
+        return RootStatus.Available
+    }
+
+    override suspend fun invalidate() {
+        events += "session-invalidated"
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -240,19 +294,25 @@ class LibsuRootSessionTest {
     }
 
     @Test
-    fun `invalidate closes the cached uid checker session`() {
+    fun `invalidate closes the cached uid checker session`() = runTest {
         var invalidated = false
+        val ioDispatcher = StandardTestDispatcher(testScheduler)
         val checker = object : RootUidChecker {
             override suspend fun check() = RootUidCheckResult(0, listOf("0"))
 
-            override fun invalidate() {
+            override suspend fun invalidate() {
                 invalidated = true
             }
         }
-        val session = LibsuRootSession(checker, Dispatchers.Unconfined, 5_000)
+        val session = LibsuRootSession(checker, ioDispatcher, 5_000)
 
-        session.invalidate()
+        val invalidationJob = launch(UnconfinedTestDispatcher(testScheduler)) {
+            session.invalidate()
+        }
 
+        assertFalse(invalidated)
+        testScheduler.runCurrent()
+        invalidationJob.join()
         assertTrue(invalidated)
     }
 }

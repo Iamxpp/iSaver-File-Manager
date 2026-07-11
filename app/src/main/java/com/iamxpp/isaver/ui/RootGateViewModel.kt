@@ -7,10 +7,13 @@ import com.iamxpp.isaver.domain.RootStatus
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 sealed interface RootGateUiState {
@@ -28,39 +31,51 @@ class RootGateViewModel(
     private val mutableState = MutableStateFlow<RootGateUiState>(RootGateUiState.Checking)
     private var checkJob: Job? = null
     private var checkGeneration = 0L
+    private val orchestrationMutex = Mutex()
 
     val state: StateFlow<RootGateUiState> = mutableState.asStateFlow()
 
     init {
-        checkRoot()
+        orchestrateCheck(invalidateSession = false)
     }
 
     fun retry() {
         mutableState.value = RootGateUiState.Checking
-        rootSession.invalidate()
-        checkRoot()
+        orchestrateCheck(invalidateSession = true)
     }
 
-    private fun checkRoot() {
+    private fun orchestrateCheck(invalidateSession: Boolean) {
         val generation = ++checkGeneration
-        checkJob?.cancel()
-        checkJob = viewModelScope.launch {
-            try {
-                val status = withContext(checkDispatcher) { rootSession.check() }
-                if (generation != checkGeneration) return@launch
+        viewModelScope.launch {
+            orchestrationMutex.withLock {
+                checkJob?.cancelAndJoin()
+                checkJob = null
 
-                when (status) {
-                    RootStatus.Available -> mutableState.value = RootGateUiState.Granted
-                    is RootStatus.Unavailable -> {
-                        mutableState.value = RootGateUiState.Denied(status.reason)
-                    }
+                if (generation != checkGeneration) return@withLock
+                if (invalidateSession) rootSession.invalidate()
+                if (generation != checkGeneration) return@withLock
+
+                checkJob = launchCheck(generation)
+            }
+        }
+    }
+
+    private fun launchCheck(generation: Long): Job = viewModelScope.launch {
+        try {
+            val status = withContext(checkDispatcher) { rootSession.check() }
+            if (generation != checkGeneration) return@launch
+
+            when (status) {
+                RootStatus.Available -> mutableState.value = RootGateUiState.Granted
+                is RootStatus.Unavailable -> {
+                    mutableState.value = RootGateUiState.Denied(status.reason)
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (generation == checkGeneration) {
-                    mutableState.value = RootGateUiState.Denied(ROOT_CHECK_FAILED_MESSAGE)
-                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (generation == checkGeneration) {
+                mutableState.value = RootGateUiState.Denied(ROOT_CHECK_FAILED_MESSAGE)
             }
         }
     }

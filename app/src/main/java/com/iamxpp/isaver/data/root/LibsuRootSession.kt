@@ -18,7 +18,7 @@ internal data class RootUidCheckResult(
 internal fun interface RootUidChecker {
     suspend fun check(): RootUidCheckResult
 
-    fun invalidate() = Unit
+    suspend fun invalidate() = Unit
 }
 
 class LibsuRootSession internal constructor(
@@ -50,8 +50,8 @@ class LibsuRootSession internal constructor(
         }
     }
 
-    override fun invalidate() {
-        rootUidChecker.invalidate()
+    override suspend fun invalidate() {
+        withContext(ioDispatcher) { rootUidChecker.invalidate() }
     }
 
     private companion object {
@@ -68,7 +68,7 @@ private object LibsuRootUidChecker : RootUidChecker {
         )
     }
 
-    override fun invalidate() {
+    override suspend fun invalidate() {
         runCatching { Shell.getCachedShell()?.close() }
     }
 }
