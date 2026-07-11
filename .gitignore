@@ -18,3 +18,10 @@ signing.properties
 *.key
 *.p12
 *.log
+.env
+.env.*
+!.env.example
+secrets.properties
+google-services.json
+*service-account*.json
+serviceAccount*.json
