@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
                         ViewModelProvider(this, BrowserViewModelFactory((application as ISaverApplication).rootFileSystem))[BrowserViewModel::class.java]
                     }
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
-                    BrowserScreen(browserState, browserViewModel::enterDirectory, { browserViewModel.back() }, browserViewModel::retry, browserViewModel::loadMore)
+                    BrowserScreen(browserState, { browserViewModel.enterDirectory(it) }, { browserViewModel.back() }, browserViewModel::retry, browserViewModel::loadMore)
                 } else RootGateScreen(uiState, rootGateViewModel::retry, ::finish)
             }
         }

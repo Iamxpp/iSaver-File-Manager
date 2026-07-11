@@ -15,11 +15,17 @@ import org.junit.Test
 class BrowserScreenTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun loading_empty_and_error_states_are_visible() {
+    @Test fun `loading state is visible`() {
         compose.setContent { BrowserScreen(state(loading = true), {}, {}, {}, {}) }
         compose.onNodeWithText("正在读取目录").assertIsDisplayed()
+    }
+
+    @Test fun `empty state is visible`() {
         compose.setContent { BrowserScreen(state(loading = false), {}, {}, {}, {}) }
         compose.onNodeWithText("此目录为空").assertIsDisplayed()
+    }
+
+    @Test fun `error state retries`() {
         var retried = false
         compose.setContent { BrowserScreen(state(loading = false, errorMessage = "目录不可读"), {}, {}, { retried = true }, {}) }
         compose.onNodeWithText("目录不可读").assertIsDisplayed()

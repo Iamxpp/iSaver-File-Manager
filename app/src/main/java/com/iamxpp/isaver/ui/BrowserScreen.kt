@@ -10,6 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
@@ -34,7 +36,7 @@ fun BrowserScreen(
             ) { Text("‹ 返回") }
             Column {
                 Text("文件位置", style = MaterialTheme.typography.titleLarge)
-                Text(state.currentPath.value, color = ISaverSecondaryText, style = MaterialTheme.typography.bodySmall)
+                Text(state.currentPath.value, color = ISaverSecondaryText, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -45,11 +47,14 @@ fun BrowserScreen(
             else -> LazyColumn {
                 items(state.entries, key = { it.path.value }) { entry ->
                     Row(
-                        Modifier.fillMaxWidth().then(if (entry.type == EntryType.DIRECTORY) Modifier.clickable { onEnterDirectory(entry) } else Modifier).padding(vertical = 12.dp),
+                        Modifier.fillMaxWidth()
+                            .semantics(mergeDescendants = true) {}
+                            .then(if (entry.type == EntryType.DIRECTORY) Modifier.clickable(role = Role.Button) { onEnterDirectory(entry) } else Modifier)
+                            .padding(vertical = 12.dp),
                     ) {
                         Text(if (entry.type == EntryType.DIRECTORY) "📁" else "📄")
                         Spacer(Modifier.width(12.dp))
-                        Column { Text(entry.name); Text(metadata(entry), color = ISaverSecondaryText, style = MaterialTheme.typography.bodySmall) }
+                        Column { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(metadata(entry), color = ISaverSecondaryText, style = MaterialTheme.typography.bodySmall) }
                     }
                     HorizontalDivider()
                 }
