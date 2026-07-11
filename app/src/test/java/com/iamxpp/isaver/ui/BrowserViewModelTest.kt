@@ -10,6 +10,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -81,7 +85,7 @@ class BrowserViewModelTest {
     @Test fun `late old navigation result cannot overwrite newer directory`() = runTest {
         val old = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fresh = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
-        val fs = FakeFileSystem { path -> if (path.value.endsWith("old")) old.await() else if (path.value.endsWith("new")) fresh.await() else OperationResult.Success(emptyList()) }
+        val fs = FakeFileSystem { path -> if (path.value.endsWith("old")) withContext(NonCancellable) { old.await() } else if (path.value.endsWith("new")) fresh.await() else OperationResult.Success(emptyList()) }
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler)); advanceUntilIdle()
         vm.enterDirectory(entry("old", EntryType.DIRECTORY, "/storage/emulated/0/old")); testScheduler.runCurrent()
         vm.enterDirectory(entry("new", EntryType.DIRECTORY, "/storage/emulated/0/new")); testScheduler.runCurrent()
@@ -95,6 +99,21 @@ class BrowserViewModelTest {
         val vm = BrowserViewModel(FakeFileSystem { throw CancellationException("cancel") }, StandardTestDispatcher(testScheduler))
         advanceUntilIdle()
         assertNull(vm.state.value.errorMessage)
+        assertFalse(vm.state.value.loading)
+    }
+
+    @Test fun `sorting executes inside injected background dispatcher`() = runTest {
+        val marker = ThreadLocal<Boolean>()
+        val dispatcher = MarkerDispatcher(StandardTestDispatcher(testScheduler), marker)
+        var sortedWithMarker = false
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(entry("b", EntryType.FILE), entry("a", EntryType.FILE))) },
+            dispatcher,
+            sorter = { entries -> sortedWithMarker = marker.get() == true; BrowserViewModel.sortEntries(entries) },
+        )
+        advanceUntilIdle()
+        assertTrue(sortedWithMarker)
+        assertEquals(listOf("a", "b"), vm.state.value.entries.map { it.name })
     }
 
     @Test fun `large results remain complete and reveal 200 entries per page`() = runTest {
@@ -110,6 +129,16 @@ class BrowserViewModelTest {
         val listed = mutableListOf<String>()
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> { listed += path.value; return listBlock(path) }
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = error("unused")
+    }
+
+    private class MarkerDispatcher(
+        private val delegate: CoroutineDispatcher,
+        private val marker: ThreadLocal<Boolean>,
+    ) : CoroutineDispatcher() {
+        override fun dispatch(context: CoroutineContext, block: Runnable) = delegate.dispatch(context) {
+            marker.set(true)
+            try { block.run() } finally { marker.remove() }
+        }
     }
 
     private fun entry(name: String, type: EntryType, path: String = "/x/$name") = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, 1, 2, true, false, false)
