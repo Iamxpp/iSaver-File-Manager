@@ -1,12 +1,25 @@
 package com.iamxpp.isaver.data.root
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class RootCommandCodecTest {
     @Test
     fun `escapes single quotes with posix shell quoting`() {
         assertEquals("'has'\\''quote'", RootCommandCodec.quote("has'quote"))
+    }
+
+    @Test
+    fun `escapes consecutive single quotes exactly`() {
+        assertEquals("'a'\\'''\\''b'", RootCommandCodec.quote("a''b"))
+    }
+
+    @Test
+    fun `rejects nul characters`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            RootCommandCodec.quote("bad\u0000value")
+        }
     }
 
     @Test
