@@ -52,7 +52,18 @@ class RootGateViewModel(
                 checkJob = null
 
                 if (generation != checkGeneration) return@withLock
-                if (invalidateSession) rootSession.invalidate()
+                if (invalidateSession) {
+                    try {
+                        rootSession.invalidate()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (generation == checkGeneration) {
+                            mutableState.value = RootGateUiState.Denied(ROOT_CHECK_FAILED_MESSAGE)
+                        }
+                        return@withLock
+                    }
+                }
                 if (generation != checkGeneration) return@withLock
 
                 checkJob = launchCheck(generation)

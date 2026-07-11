@@ -128,6 +128,39 @@ class RootGateViewModelTest {
     }
 
     @Test
+    fun `retry reset exception becomes a safe denial without starting a new check`() {
+        val rootSession = ResetFailingRootSession(
+            failure = IllegalStateException("sensitive root manager reset failure"),
+        )
+        val viewModel = RootGateViewModel(rootSession, dispatcher)
+        dispatcher.scheduler.runCurrent()
+
+        viewModel.retry()
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(
+            RootGateUiState.Denied("无法确认 Root 权限，请重试"),
+            viewModel.state.value,
+        )
+        assertEquals(1, rootSession.checks)
+    }
+
+    @Test
+    fun `retry reset cancellation is not converted into a denial`() {
+        val rootSession = ResetFailingRootSession(
+            failure = CancellationException("reset cancelled"),
+        )
+        val viewModel = RootGateViewModel(rootSession, dispatcher)
+        dispatcher.scheduler.runCurrent()
+
+        viewModel.retry()
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(RootGateUiState.Checking, viewModel.state.value)
+        assertEquals(1, rootSession.checks)
+    }
+
+    @Test
     fun `session exception becomes a safe denial instead of crashing`() {
         val rootSession = object : RootSession {
             override suspend fun check(): RootStatus {
@@ -219,6 +252,20 @@ private class RetryOrderingRootSession(
     override suspend fun invalidate() {
         events += "session-invalidated"
     }
+}
+
+private class ResetFailingRootSession(
+    private val failure: Exception,
+) : RootSession {
+    var checks = 0
+        private set
+
+    override suspend fun check(): RootStatus {
+        checks += 1
+        return RootStatus.Available
+    }
+
+    override suspend fun invalidate(): Nothing = throw failure
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
