@@ -4,12 +4,10 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
-import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
@@ -24,14 +22,20 @@ internal fun interface RootCommandRunner {
 }
 
 class LibsuRootFileSystem internal constructor(
-    private val commandRunner: RootCommandRunner,
+    internal val shellCoordinator: RootShellCoordinator,
     private val ioDispatcher: CoroutineDispatcher,
     private val timeoutMillis: Long,
 ) : RootFileSystem {
     constructor(
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    ) : this(LibsuCommandRunner, ioDispatcher, timeoutMillis)
+    ) : this(ApplicationRootShellCoordinator, ioDispatcher, timeoutMillis)
+
+    internal constructor(
+        commandRunner: RootCommandRunner,
+        ioDispatcher: CoroutineDispatcher,
+        timeoutMillis: Long,
+    ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis)
 
     override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> =
         execute(buildListCommand(path)).flatMap { DirectoryListingParser.parse(it) }
@@ -48,14 +52,14 @@ class LibsuRootFileSystem internal constructor(
     private suspend fun execute(command: String): OperationResult<List<String>> {
         val result = try {
             withTimeout(timeoutMillis) {
-                withContext(ioDispatcher) { commandRunner.run(command) }
+                withContext(ioDispatcher) { shellCoordinator.execute(command) }
             }
         } catch (_: TimeoutCancellationException) {
             return failure(ErrorCode.COMMAND_FAILED, "Root 操作超时", "Root command timed out")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            return failure(ErrorCode.ROOT_UNAVAILABLE, "Root 权限不可用", "Root command execution failed")
+            return failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Root command execution failed")
         }
         if (result.exitCode != 0) return mapExitCode(result.exitCode, result.stderr.isNotEmpty())
         return OperationResult.Success(result.stdout)
@@ -95,6 +99,11 @@ class LibsuRootFileSystem internal constructor(
         """.trimIndent().withRecordEmitter()
     }
 
+    /**
+     * Emits one safe record per entry. This M1 implementation performs per-entry stat and Base64
+     * subprocess work; Task6 must consume it asynchronously and limit visible batches for large
+     * directories without truncating this protocol.
+     */
     private fun String.withRecordEmitter(): String = """
         emit_isaver_record() {
           item="${'$'}1"
@@ -104,8 +113,9 @@ class LibsuRootFileSystem internal constructor(
           [ -r "${'$'}item" ] && readable=1 || readable=0
           [ -w "${'$'}item" ] && writable=1 || writable=0
           [ -L "${'$'}item" ] && symlink=1 || symlink=0
-          name=${'$'}{item##*/}
-          [ -n "${'$'}name" ] || name=/
+          trimmed="${'$'}item"
+          while [ "${'$'}trimmed" != / ] && [ "${'$'}{trimmed%/}" != "${'$'}trimmed" ]; do trimmed=${'$'}{trimmed%/}; done
+          if [ "${'$'}trimmed" = / ]; then name=/; else name=${'$'}{trimmed##*/}; fi
           name64=${'$'}(printf '%s' "${'$'}name" | base64 -w 0) || exit 47
           path64=${'$'}(printf '%s' "${'$'}item" | base64 -w 0) || exit 47
           printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${'$'}name64" "${'$'}path64" "${'$'}kind" "${'$'}size" "${'$'}mtime" "${'$'}readable" "${'$'}writable" "${'$'}symlink"
@@ -121,11 +131,12 @@ class LibsuRootFileSystem internal constructor(
     }
 }
 
-private object LibsuCommandRunner : RootCommandRunner {
-    override suspend fun run(command: String): RootCommandResult = runInterruptible {
-        val result = Shell.cmd(command).exec()
-        RootCommandResult(result.code, result.out.toList(), result.err.toList())
-    }
+private class CommandRunnerCoordinator(
+    private val commandRunner: RootCommandRunner,
+) : RootShellCoordinator {
+    override suspend fun execute(command: String): RootCommandResult = commandRunner.run(command)
+
+    override suspend fun invalidate() = Unit
 }
 
 private inline fun <T, R> OperationResult<T>.flatMap(transform: (T) -> OperationResult<R>): OperationResult<R> =

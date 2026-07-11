@@ -1,12 +1,10 @@
 package com.iamxpp.isaver.data.root
 
-import com.topjohnwu.superuser.Shell
 import com.iamxpp.isaver.domain.RootStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
@@ -22,19 +20,28 @@ internal fun interface RootUidChecker {
 }
 
 class LibsuRootSession internal constructor(
-    private val rootUidChecker: RootUidChecker,
+    internal val shellCoordinator: RootShellCoordinator,
     private val ioDispatcher: CoroutineDispatcher,
     private val timeoutMillis: Long,
 ) : RootSession {
     constructor(
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    ) : this(LibsuRootUidChecker, ioDispatcher, timeoutMillis)
+    ) : this(ApplicationRootShellCoordinator, ioDispatcher, timeoutMillis)
+
+    internal constructor(
+        rootUidChecker: RootUidChecker,
+        ioDispatcher: CoroutineDispatcher,
+        timeoutMillis: Long,
+    ) : this(UidCheckerCoordinator(rootUidChecker), ioDispatcher, timeoutMillis)
 
     override suspend fun check(): RootStatus {
         val result = try {
             withTimeout(timeoutMillis) {
-                withContext(ioDispatcher) { rootUidChecker.check() }
+                withContext(ioDispatcher) {
+                    val command = shellCoordinator.execute("id -u")
+                    RootUidCheckResult(command.exitCode, command.stdout)
+                }
             }
         } catch (_: TimeoutCancellationException) {
             return RootStatus.Unavailable("Root 检测超时，请授权后重试")
@@ -51,7 +58,7 @@ class LibsuRootSession internal constructor(
     }
 
     override suspend fun invalidate() {
-        withContext(ioDispatcher) { rootUidChecker.invalidate() }
+        withContext(ioDispatcher) { shellCoordinator.invalidate() }
     }
 
     private companion object {
@@ -59,16 +66,14 @@ class LibsuRootSession internal constructor(
     }
 }
 
-private object LibsuRootUidChecker : RootUidChecker {
-    override suspend fun check(): RootUidCheckResult = runInterruptible {
-        val result = Shell.cmd("id -u").exec()
-        RootUidCheckResult(
-            exitCode = result.code,
-            stdout = result.out.toList(),
-        )
+private class UidCheckerCoordinator(
+    private val checker: RootUidChecker,
+) : RootShellCoordinator {
+    override suspend fun execute(command: String): RootCommandResult {
+        require(command == "id -u")
+        val result = checker.check()
+        return RootCommandResult(result.exitCode, result.stdout, emptyList())
     }
 
-    override suspend fun invalidate() {
-        runCatching { Shell.getCachedShell()?.close() }
-    }
+    override suspend fun invalidate() = checker.invalidate()
 }

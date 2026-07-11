@@ -57,7 +57,29 @@ class LibsuRootFileSystemTest {
 
         fileSystem.stat(path(hostile))
 
-        assertTrue(runner.command!!.contains("target=${RootCommandCodec.quote(hostile)}"))
+        assertTrue(runner.command!!.contains("target='/tmp/a'\\'' ; \$(id) `whoami`\n-thing'"))
+    }
+
+    @Test
+    fun `stat strips trailing slashes for basename but keeps root name`() = runTest {
+        val runner = FakeRunner(RootCommandResult(44, emptyList(), emptyList()))
+        val fileSystem = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
+
+        fileSystem.stat(path("/tmp/"))
+
+        assertTrue(runner.command!!.contains("while [ \"\$trimmed\" != / ]"))
+        assertTrue(runner.command!!.contains("name=\${trimmed##*/}"))
+        assertTrue(runner.command!!.contains("name=/"))
+    }
+
+    @Test
+    fun `unexpected execution exception maps to command failed`() = runTest {
+        val runner = RootCommandRunner { error("boom") }
+        val fileSystem = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
+
+        val result = fileSystem.stat(path("/tmp"))
+
+        assertEquals(ErrorCode.COMMAND_FAILED, (result as OperationResult.Failure).code)
     }
 
     @Test
@@ -67,7 +89,7 @@ class LibsuRootFileSystemTest {
 
         fileSystem.stat(path("/tmp/name"))
 
-        assertTrue(runner.command!!.contains("name=\${item##*/}"))
+        assertTrue(runner.command!!.contains("name=\${trimmed##*/}"))
         assertFalse(runner.command!!.contains("basename --"))
     }
 
