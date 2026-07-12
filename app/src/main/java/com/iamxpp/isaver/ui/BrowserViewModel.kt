@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
+import com.iamxpp.isaver.domain.ErrorCode
+import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import kotlinx.coroutines.CancellationException
@@ -26,6 +28,7 @@ class BrowserViewModel(
     private val stack = ArrayDeque<RootPath>()
     private val mutableState = MutableStateFlow(BrowserUiState(currentPath = initialPath))
     private var loadJob: Job? = null
+    private var createDirectoryJob: Job? = null
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
 
@@ -40,13 +43,68 @@ class BrowserViewModel(
         return true
     }
 
-    fun back(): Boolean {
-        val previous = stack.removeLastOrNull() ?: return false
+    fun openRoot(path: RootPath, title: String) {
+        stack.clear()
+        mutableState.value = mutableState.value.copy(rootTitle = title)
+        load(path)
+    }
+
+    fun back(): BrowserBackResult {
+        val previous = stack.removeLastOrNull() ?: return BrowserBackResult.RETURN_HOME
         load(previous)
-        return true
+        return BrowserBackResult.NAVIGATED
     }
 
     fun retry() = load(mutableState.value.currentPath)
+
+    fun createDirectory(rawName: String) {
+        if (createDirectoryJob?.isActive == true) return
+        if (!mutableState.value.canCreateDirectory) {
+            mutableState.value = mutableState.value.copy(
+                createDirectoryError = BrowserOperationError(ErrorCode.NOT_WRITABLE, "目录不可写"),
+            )
+            return
+        }
+        val name = FolderName.parse(rawName).getOrElse {
+            mutableState.value = mutableState.value.copy(
+                createDirectoryError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "文件夹名称无效"),
+            )
+            return
+        }
+        val parent = mutableState.value.currentPath
+        mutableState.value = mutableState.value.copy(
+            creatingDirectory = true,
+            createDirectoryError = null,
+            locationTarget = null,
+        )
+        createDirectoryJob = viewModelScope.launch {
+            try {
+                when (val result = withContext(ioDispatcher) { rootFileSystem.createDirectory(parent, name) }) {
+                    is OperationResult.Failure -> if (mutableState.value.currentPath == parent) {
+                        mutableState.value = mutableState.value.copy(
+                            creatingDirectory = false,
+                            createDirectoryError = BrowserOperationError(result.code, result.userMessage),
+                        )
+                    }
+                    is OperationResult.Success -> if (mutableState.value.currentPath == parent) {
+                        load(parent, result.value.path)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                if (mutableState.value.currentPath == parent) {
+                    mutableState.value = mutableState.value.copy(creatingDirectory = false)
+                }
+                throw cancelled
+            } catch (_: Exception) {
+                if (mutableState.value.currentPath == parent) {
+                    mutableState.value = mutableState.value.copy(
+                        creatingDirectory = false,
+                        createDirectoryError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "新建文件夹失败"),
+                    )
+                }
+            }
+        }
+    }
 
     fun loadMore() {
         val current = mutableState.value
@@ -58,22 +116,42 @@ class BrowserViewModel(
         )
     }
 
-    private fun load(path: RootPath) {
+    private fun load(path: RootPath, locationTarget: RootPath? = null) {
         val request = ++generation
         loadJob?.cancel()
         visibleCount = PAGE_SIZE
-        mutableState.value = BrowserUiState(currentPath = path, canGoBack = stack.isNotEmpty())
+        mutableState.value = BrowserUiState(
+            currentPath = path,
+            rootTitle = mutableState.value.rootTitle,
+            canGoBack = stack.isNotEmpty(),
+            locationTarget = locationTarget,
+        )
         loadJob = viewModelScope.launch {
             try {
-                val result = withContext(ioDispatcher) {
-                    when (val listed = rootFileSystem.list(path)) {
-                        is OperationResult.Failure -> listed
-                        is OperationResult.Success -> OperationResult.Success(sorter(listed.value))
+                val (result, canCreateDirectory) = withContext(ioDispatcher) {
+                    val listed = when (val value = rootFileSystem.list(path)) {
+                        is OperationResult.Failure -> value
+                        is OperationResult.Success -> OperationResult.Success(sorter(value.value))
                     }
+                    val writable = try {
+                        when (val stat = rootFileSystem.stat(path)) {
+                            is OperationResult.Failure -> false
+                            is OperationResult.Success -> stat.value.type == EntryType.DIRECTORY && stat.value.writable
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        false
+                    }
+                    listed to writable
                 }
                 when (result) {
                     is OperationResult.Failure -> if (request == generation) {
-                        mutableState.value = mutableState.value.copy(loading = false, errorMessage = result.userMessage)
+                        mutableState.value = mutableState.value.copy(
+                            loading = false,
+                            errorMessage = result.userMessage,
+                            canCreateDirectory = false,
+                        )
                     }
                     is OperationResult.Success -> if (request == generation) {
                         val sorted = result.value
@@ -83,6 +161,7 @@ class BrowserViewModel(
                             totalCount = sorted.size,
                             loading = false,
                             hasMore = sorted.size > PAGE_SIZE,
+                            canCreateDirectory = canCreateDirectory,
                         )
                     }
                 }
@@ -126,4 +205,9 @@ class BrowserViewModel(
         private val CHUNKS = Regex("\\d+|\\D+")
         private data class SortableEntry(val entry: DirectoryEntry, val typeRank: Int, val key: List<String>)
     }
+}
+
+enum class BrowserBackResult {
+    NAVIGATED,
+    RETURN_HOME,
 }

@@ -4,6 +4,7 @@ import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
+import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import kotlinx.coroutines.CompletableDeferred
@@ -72,14 +73,133 @@ class BrowserViewModelTest {
         val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler))
         advanceUntilIdle()
         assertFalse(vm.enterDirectory(entry("file", EntryType.FILE)))
-        assertFalse(vm.back())
+        assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
         val directory = entry("child", EntryType.DIRECTORY, "/storage/emulated/0/child")
         assertTrue(vm.enterDirectory(directory)); advanceUntilIdle()
         assertEquals(directory.path, vm.state.value.currentPath)
         assertTrue(vm.state.value.canGoBack)
-        assertTrue(vm.back()); advanceUntilIdle()
+        assertEquals(BrowserBackResult.NAVIGATED, vm.back()); advanceUntilIdle()
         assertEquals("/storage/emulated/0", vm.state.value.currentPath.value)
-        assertFalse(vm.back())
+        assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
+    }
+
+    @Test fun `openRoot clears old navigation and loads requested location`() = runTest {
+        val fs = FakeFileSystem { OperationResult.Success(emptyList()) }
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+        vm.enterDirectory(entry("child", EntryType.DIRECTORY, "/storage/emulated/0/child"))
+        advanceUntilIdle()
+
+        vm.openRoot(RootPath.parse("/data/local/tmp").getOrThrow(), "测试位置")
+        advanceUntilIdle()
+
+        assertEquals("/data/local/tmp", vm.state.value.currentPath.value)
+        assertEquals("测试位置", vm.state.value.rootTitle)
+        assertFalse(vm.state.value.canGoBack)
+        assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
+        assertEquals("/data/local/tmp", fs.listed.last())
+    }
+
+    @Test fun `back at an opened location root requests the locations home`() = runTest {
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+        vm.openRoot(RootPath.parse("/data/local/tmp").getOrThrow(), "测试位置")
+        advanceUntilIdle()
+
+        assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
+    }
+
+    @Test fun `create directory uses typed name then refreshes and exposes location target`() = runTest {
+        val created = entry("中文 folder", EntryType.DIRECTORY, "/storage/emulated/0/中文 folder")
+        var listCount = 0
+        val fs = FakeFileSystem(
+            listBlock = {
+                listCount += 1
+                OperationResult.Success(if (listCount == 1) emptyList() else listOf(created))
+            },
+            createBlock = { parent, name ->
+                assertEquals("/storage/emulated/0", parent.value)
+                assertEquals("中文 folder", name.value)
+                OperationResult.Success(created)
+            },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+
+        vm.createDirectory("中文 folder")
+        advanceUntilIdle()
+
+        assertEquals(2, listCount)
+        assertEquals(created.path, vm.state.value.locationTarget)
+        assertNull(vm.state.value.createDirectoryError)
+    }
+
+    @Test fun `create directory exposes the structured filesystem failure without refreshing`() = runTest {
+        var listCount = 0
+        val fs = FakeFileSystem(
+            createBlock = { _, _ -> OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "文件夹已存在", "exists") },
+            listBlock = { listCount += 1; OperationResult.Success(emptyList()) },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+
+        vm.createDirectory("existing")
+        advanceUntilIdle()
+
+        assertEquals(1, listCount)
+        assertEquals(ErrorCode.ALREADY_EXISTS, vm.state.value.createDirectoryError?.code)
+        assertEquals("文件夹已存在", vm.state.value.createDirectoryError?.userMessage)
+        assertFalse(vm.state.value.creatingDirectory)
+    }
+
+    @Test fun `read only current directory disables and rejects folder creation`() = runTest {
+        var createCalls = 0
+        val fs = FakeFileSystem(
+            statBlock = { path -> OperationResult.Success(entry("readonly", EntryType.DIRECTORY, path.value, writable = false)) },
+            createBlock = { _, _ -> createCalls += 1; error("must not create") },
+            listBlock = { OperationResult.Success(emptyList()) },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.canCreateDirectory)
+        vm.createDirectory("blocked")
+        advanceUntilIdle()
+
+        assertEquals(0, createCalls)
+        assertEquals(ErrorCode.NOT_WRITABLE, vm.state.value.createDirectoryError?.code)
+    }
+
+    @Test fun `invalid folder name is rejected before the root filesystem call`() = runTest {
+        var createCalls = 0
+        val fs = FakeFileSystem(
+            createBlock = { _, _ -> createCalls += 1; error("must not create") },
+            listBlock = { OperationResult.Success(emptyList()) },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+
+        vm.createDirectory("..")
+
+        assertEquals(0, createCalls)
+        assertEquals(ErrorCode.COMMAND_FAILED, vm.state.value.createDirectoryError?.code)
+        assertEquals("文件夹名称无效", vm.state.value.createDirectoryError?.userMessage)
+    }
+
+    @Test fun `unexpected create exception becomes a structured failure`() = runTest {
+        val fs = FakeFileSystem(
+            createBlock = { _, _ -> error("boom") },
+            listBlock = { OperationResult.Success(emptyList()) },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+
+        vm.createDirectory("folder")
+        advanceUntilIdle()
+
+        assertEquals(ErrorCode.COMMAND_FAILED, vm.state.value.createDirectoryError?.code)
+        assertEquals("新建文件夹失败", vm.state.value.createDirectoryError?.userMessage)
+        assertFalse(vm.state.value.creatingDirectory)
     }
 
     @Test fun `late old navigation result cannot overwrite newer directory`() = runTest {
@@ -125,12 +245,18 @@ class BrowserViewModelTest {
         assertEquals(450, vm.state.value.allEntries.size)
     }
 
-    private class FakeFileSystem(val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>) : RootFileSystem {
+    private class FakeFileSystem(
+        val statBlock: suspend (RootPath) -> OperationResult<DirectoryEntry> = { path ->
+            OperationResult.Success(DirectoryEntry(path, "current", EntryType.DIRECTORY, 0, 0, true, true, false))
+        },
+        val createBlock: suspend (RootPath, FolderName) -> OperationResult<DirectoryEntry> = { _, _ -> error("unused") },
+        val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>,
+    ) : RootFileSystem {
         val listed = mutableListOf<String>()
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> { listed += path.value; return listBlock(path) }
-        override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = error("unused")
+        override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = statBlock(path)
         override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = error("unused")
-        override suspend fun createDirectory(parent:RootPath,name:com.iamxpp.isaver.domain.FolderName):OperationResult<DirectoryEntry> = error("unused")
+        override suspend fun createDirectory(parent: RootPath, name: FolderName): OperationResult<DirectoryEntry> = createBlock(parent, name)
     }
 
     private class MarkerDispatcher(
@@ -143,5 +269,10 @@ class BrowserViewModelTest {
         }
     }
 
-    private fun entry(name: String, type: EntryType, path: String = "/x/$name") = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, 1, 2, true, false, false)
+    private fun entry(
+        name: String,
+        type: EntryType,
+        path: String = "/x/$name",
+        writable: Boolean = false,
+    ) = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, 1, 2, true, writable, false)
 }
