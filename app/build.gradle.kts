@@ -35,6 +35,7 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
     implementation(libs.coroutines.android)
+    implementation(libs.datastore.preferences)
     implementation(libs.libsu.core)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
