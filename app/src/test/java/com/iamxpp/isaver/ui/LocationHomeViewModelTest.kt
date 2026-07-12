@@ -80,6 +80,14 @@ class LocationHomeViewModelTest {
         testScheduler.runCurrent();store.removeGate!!.complete(CustomLocationResult.NotFound);advanceUntilIdle()
         assertEquals(0,store.addCalls);assertEquals(0,fs.statCalls);assertFalse(vm.state.value.operationInProgress);assertEquals("位置不存在",vm.state.value.addError)
     }
+    @Test fun `in flight store side effects are serialized in call order`()=runTest{
+        val store=FakeStore().apply{blockMutations=true};val fs=FakeFs().apply{stats["/a"]=entry("/a",EntryType.DIRECTORY,true,true);stats["/b"]=entry("/b",EntryType.DIRECTORY,true,true)}
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle()
+        vm.addCustomLocation("a","/a");testScheduler.runCurrent();vm.editCustomLocation(LocationId.of("b"),"b","/b");testScheduler.runCurrent()
+        assertEquals(1,store.maxActive);assertEquals(listOf("add"),store.started)
+        store.releaseOne.complete(Unit);testScheduler.runCurrent();assertEquals(listOf("add","update"),store.started);assertEquals(1,store.maxActive)
+        store.releaseTwo.complete(Unit);advanceUntilIdle()
+    }
 
     private class FakeStore:LocationHomeCustomStore{
         val flow=MutableStateFlow<List<StorageLocation.Direct>>(emptyList())
@@ -87,9 +95,10 @@ class LocationHomeViewModelTest {
         var addCalls=0
         var updatedId:LocationId?=null;var updatedName:String?=null;var updatedPath:RootPath?=null
         var removeGate:CompletableDeferred<CustomLocationResult>?=null
+        var blockMutations=false;val releaseOne=CompletableDeferred<Unit>();val releaseTwo=CompletableDeferred<Unit>();var active=0;var maxActive=0;val started=mutableListOf<String>()
         override fun observeAll()=flow
-        override suspend fun add(name:String,path:RootPath):CustomLocationResult{addCalls++;addedName=name;addedPath=path;return addResult}
-        override suspend fun update(id:LocationId,name:String,path:RootPath):CustomLocationResult{updatedId=id;updatedName=name;updatedPath=path;return CustomLocationResult.Success}
+        override suspend fun add(name:String,path:RootPath):CustomLocationResult{started+="add";active++;maxActive=maxOf(maxActive,active);if(blockMutations)releaseOne.await();active--;addCalls++;addedName=name;addedPath=path;return addResult}
+        override suspend fun update(id:LocationId,name:String,path:RootPath):CustomLocationResult{started+="update";active++;maxActive=maxOf(maxActive,active);if(blockMutations)releaseTwo.await();active--;updatedId=id;updatedName=name;updatedPath=path;return CustomLocationResult.Success}
         override suspend fun remove(id:LocationId):CustomLocationResult{removed=id;return removeGate?.await()?:CustomLocationResult.Success}
     }
     private class FakeFs:RootFileSystem{
