@@ -22,7 +22,7 @@ class LocationResolverTest {
         val result = LocationResolver(fs, StandardTestDispatcher(testScheduler)).resolve(template("/file", "/dup", "/one", "/blocked", "/missing"))
         assertEquals(listOf("dup"), result.children.map { it.displayName })
         assertEquals("/real", result.children.single().path.value)
-        assertEquals(4, result.unavailableCount)
+        assertEquals(3, result.unavailableCount)
         assertFalse(result.empty)
     }
 

@@ -36,7 +36,8 @@ class LocationResolver(
         var unavailable = 0
         val children = buildList {
             probed.forEach { direct ->
-                if (direct == null || !seen.add(direct.path.value)) unavailable++ else add(direct)
+                if (direct == null) unavailable++
+                else if (seen.add(direct.path.value)) add(direct)
             }
         }
         ResolvedAppLocation(template.id, template.displayName, children, unavailable)

@@ -10,6 +10,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 internal data class RootCommandResult(
     val exitCode: Int,
@@ -50,13 +55,7 @@ class LibsuRootFileSystem internal constructor(
         }
 
     override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> =
-        execute(buildCanonicalizeCommand(path)).flatMap { lines ->
-            if (lines.size != 1) malformedCanonicalOutput()
-            else RootPath.parse(lines.single()).fold(
-                onSuccess = { OperationResult.Success(it) },
-                onFailure = { malformedCanonicalOutput() },
-            )
-        }
+        execute(buildCanonicalizeCommand(path)).flatMap(::parseCanonicalOutput)
 
     private suspend fun execute(command: String): OperationResult<List<String>> {
         val result = try {
@@ -111,8 +110,27 @@ class LibsuRootFileSystem internal constructor(
     private fun buildCanonicalizeCommand(path: RootPath): String = """
         target=${RootCommandCodec.quote(path.value)}
         [ -e "${'$'}target" ] || [ -L "${'$'}target" ] || exit $EXIT_NOT_FOUND
-        readlink -f -- "${'$'}target" || exit 47
+        set -o pipefail
+        readlink -f -- "${'$'}target" | base64 -w 0 || exit 47
     """.trimIndent()
+
+    private fun parseCanonicalOutput(lines: List<String>): OperationResult<RootPath> = try {
+        require(lines.size == 1)
+        val bytes = Base64.getDecoder().decode(lines.single())
+        val decoded = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes)).toString()
+        require(decoded.endsWith('\n'))
+        RootPath.parse(decoded.dropLast(1)).fold(
+            onSuccess = { OperationResult.Success(it) },
+            onFailure = { malformedCanonicalOutput() },
+        )
+    } catch (_: IllegalArgumentException) {
+        malformedCanonicalOutput()
+    } catch (_: CharacterCodingException) {
+        malformedCanonicalOutput()
+    }
 
     /**
      * Emits one safe record per entry. This M1 implementation performs per-entry stat and Base64
