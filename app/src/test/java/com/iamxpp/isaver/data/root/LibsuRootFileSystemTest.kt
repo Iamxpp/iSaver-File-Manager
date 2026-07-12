@@ -129,12 +129,13 @@ class LibsuRootFileSystemTest {
             RootCommandResult(0,listOf(record("parent","/parent","directory","-","2","1","1","0")),emptyList()),
             RootCommandResult(44,emptyList(),emptyList()),
             RootCommandResult(0,emptyList(),emptyList()),
+            RootCommandResult(0,listOf(b64("/parent\n")),emptyList()),
             RootCommandResult(0,listOf(record("x';\n","/parent/x';\n","directory","-","2","1","1","0")),emptyList()),
         )))
         val fs=LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),5_000)
         val result=fs.createDirectory(path("/parent"),FolderName.parse("x';\n").getOrThrow())
         assertTrue(result is OperationResult.Success)
-        assertTrue(runner.commands.any{it.contains("child='/parent/x'\\'';\n'")&&it.contains("mkdir -- \"\$child\"")})
+        assertTrue(runner.commands.any{val a=it.indexOf("[ ! -L \"\$parent\" ]");val b=it.indexOf("[ -d \"\$parent\" ]");val c=it.indexOf("[ -w \"\$parent\" ]");val d=it.indexOf("mkdir -- \"\$child\"");it.contains("child='/parent/x'\\'';\n'")&&a>=0&&a<b&&b<c&&c<d})
     }
     @Test fun `create directory rejects invalid parent states before mkdir`()=runTest{
         val cases=listOf(
@@ -154,6 +155,12 @@ class LibsuRootFileSystemTest {
     @Test fun `create directory propagates cancellation and maps ordinary execution exception`()=runTest{
         val cancelled=RootCommandRunner{throw kotlinx.coroutines.CancellationException()};try{LibsuRootFileSystem(cancelled,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow());throw AssertionError("expected cancellation")}catch(_:kotlinx.coroutines.CancellationException){}
         val failed=RootCommandRunner{error("boom")};assertEquals(ErrorCode.COMMAND_FAILED,(LibsuRootFileSystem(failed,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow()) as OperationResult.Failure).code)
+    }
+    @Test fun `create directory rejects changed parent and non directory final child`()=runTest{
+        val parent=RootCommandResult(0,listOf(record("p","/p","directory","-","2","1","1","0")),emptyList());val missing=RootCommandResult(44,emptyList(),emptyList());val made=RootCommandResult(0,emptyList(),emptyList())
+        val changed=QueueRunner(ArrayDeque(listOf(RootCommandResult(0,listOf(b64("/p\n")),emptyList()),parent,missing,made,RootCommandResult(0,listOf(b64("/other\n")),emptyList()))))
+        assertEquals(ErrorCode.COMMAND_FAILED,(LibsuRootFileSystem(changed,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow()) as OperationResult.Failure).code)
+        listOf(record("x","/p/x","file","1","2","1","1","0"),record("x","/p/x","directory","-","2","1","1","1")).forEach{bad->val runner=QueueRunner(ArrayDeque(listOf(RootCommandResult(0,listOf(b64("/p\n")),emptyList()),parent,missing,made,RootCommandResult(0,listOf(b64("/p\n")),emptyList()),RootCommandResult(0,listOf(bad),emptyList()))));assertEquals(ErrorCode.COMMAND_FAILED,(LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow()) as OperationResult.Failure).code)}
     }
 
     private class FakeRunner(private val result: RootCommandResult) : RootCommandRunner {

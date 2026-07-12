@@ -70,7 +70,12 @@ class LibsuRootFileSystem internal constructor(
         when(val e=stat(child)){is OperationResult.Success->return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child exists");is OperationResult.Failure->if(e.code!=ErrorCode.NOT_FOUND)return e}
         val made=execute(buildMkdirCommand(canonical.value,child),"无法创建文件夹")
         if(made is OperationResult.Failure){if(stat(child) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child appeared");return made}
-        return stat(child)
+        val postParent=canonicalize(parent)
+        if(postParent !is OperationResult.Success||postParent.value!=canonical.value)return failure(ErrorCode.COMMAND_FAILED,"父目录已发生变化","Canonical parent changed")
+        val finalChild=stat(child)
+        if(finalChild !is OperationResult.Success)return finalChild
+        if(finalChild.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY||finalChild.value.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"创建结果不是安全目录","Created child was not a plain directory")
+        return finalChild
     }
 
     private suspend fun execute(command: String, failureMessage: String = "无法读取目录信息"): OperationResult<List<String>> {
@@ -134,9 +139,7 @@ class LibsuRootFileSystem internal constructor(
     private fun buildMkdirCommand(parent:RootPath,child:RootPath)="""
         parent=${RootCommandCodec.quote(parent.value)}
         child=${RootCommandCodec.quote(child.value)}
-        [ -d "${'$'}parent" ] || exit $EXIT_NOT_DIRECTORY
-        [ -w "${'$'}parent" ] || exit 48
-        mkdir -- "${'$'}child"
+        [ ! -L "${'$'}parent" ] && [ -d "${'$'}parent" ] && [ -w "${'$'}parent" ] && mkdir -- "${'$'}child"
     """.trimIndent()
 
     private fun parseCanonicalOutput(lines: List<String>): OperationResult<RootPath> = try {
