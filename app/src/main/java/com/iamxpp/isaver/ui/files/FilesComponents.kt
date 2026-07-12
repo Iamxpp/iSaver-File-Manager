@@ -40,8 +40,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.CollectionInfo
-import androidx.compose.ui.semantics.collectionInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -283,29 +281,19 @@ fun <T> FilesGrid(
     modifier: Modifier = Modifier,
     itemContent: @Composable LazyGridItemScope.(T) -> Unit,
 ) {
-    Box(
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(GRID_COLUMN_COUNT),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = modifier
-            .fillMaxSize()
-            .semantics {
-                collectionInfo = CollectionInfo(
-                    rowCount = (items.size + GRID_COLUMN_COUNT - 1) / GRID_COLUMN_COUNT,
-                    columnCount = GRID_COLUMN_COUNT,
-                )
-            },
+            .fillMaxSize(),
     ) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(GRID_COLUMN_COUNT),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(
-                items = items,
-                key = key,
-                itemContent = itemContent,
-            )
-        }
+        items(
+            items = items,
+            key = key,
+            itemContent = itemContent,
+        )
     }
 }
 

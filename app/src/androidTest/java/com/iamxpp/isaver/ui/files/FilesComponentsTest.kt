@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -135,14 +136,48 @@ class FilesComponentsTest {
             }
         }
 
-        val collectionInfo = compose.onNodeWithTag("files-grid")
-            .fetchSemanticsNode()
-            .config[SemanticsProperties.CollectionInfo]
-        assertEquals(2, collectionInfo.rowCount)
-        assertEquals(3, collectionInfo.columnCount)
-        entries.forEach { entry ->
-            compose.onNodeWithContentDescription("网格项：${entry.name}").assertIsDisplayed()
+        compose.onNodeWithTag("files-grid").assertIsDisplayed()
+        val bounds = entries.map { entry ->
+            compose.onNodeWithContentDescription("网格项：${entry.name}")
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot
         }
+        assertEquals(bounds[0].top, bounds[1].top, 1f)
+        assertEquals(bounds[0].top, bounds[2].top, 1f)
+        assertTrue(bounds[0].left < bounds[1].left)
+        assertTrue(bounds[1].left < bounds[2].left)
+        assertTrue(bounds[3].top > bounds[0].top)
+        assertEquals(bounds[0].left, bounds[3].left, 1f)
+    }
+
+    @Test
+    fun filesGridPublishesExactlyOneCollectionInUnmergedTree() {
+        val entries = (1..4).map { index -> directoryEntry("目录$index") }
+        compose.setContent {
+            FilesGrid(
+                items = entries,
+                key = { it.name },
+            ) { entry ->
+                FileGridCell(
+                    entry = entry,
+                    displayName = entry.name,
+                    metadata = "2项",
+                    onClick = {},
+                )
+            }
+        }
+
+        val collectionNodes = compose.onAllNodes(
+            matcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.CollectionInfo),
+            useUnmergedTree = true,
+        ).fetchSemanticsNodes()
+        val dimensions = collectionNodes.map { node ->
+            node.config[SemanticsProperties.CollectionInfo].let { info ->
+                "${info.rowCount}x${info.columnCount}"
+            }
+        }
+        assertEquals("collectionInfos=$dimensions", 1, collectionNodes.size)
     }
 
     @Test
