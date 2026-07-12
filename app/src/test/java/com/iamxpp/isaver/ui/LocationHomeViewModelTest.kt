@@ -70,14 +70,25 @@ class LocationHomeViewModelTest {
         vm.removeCustomLocation(LocationId.of("missing"));testScheduler.runCurrent();assertTrue(vm.state.value.operationInProgress)
         store.removeGate!!.complete(CustomLocationResult.NotFound);advanceUntilIdle();assertFalse(vm.state.value.operationInProgress);assertEquals("位置不存在",vm.state.value.addError);assertEquals(calls,fs.statCalls)
     }
+    @Test fun `queued stale mutation cannot execute or overwrite newer operation`()=runTest{
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store=FakeStore().apply{removeGate=CompletableDeferred()};val fs=FakeFs().apply{stats["/old"]=entry("/old",EntryType.DIRECTORY,true,true)}
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler))
+        vm.addCustomLocation("old","/old")
+        vm.removeCustomLocation(LocationId.of("new"))
+        assertTrue(vm.state.value.operationInProgress)
+        testScheduler.runCurrent();store.removeGate!!.complete(CustomLocationResult.NotFound);advanceUntilIdle()
+        assertEquals(0,store.addCalls);assertEquals(0,fs.statCalls);assertFalse(vm.state.value.operationInProgress);assertEquals("位置不存在",vm.state.value.addError)
+    }
 
     private class FakeStore:LocationHomeCustomStore{
         val flow=MutableStateFlow<List<StorageLocation.Direct>>(emptyList())
         var addedName:String?=null;var addedPath:RootPath?=null;var removed:LocationId?=null;var addResult:CustomLocationResult=CustomLocationResult.Success
+        var addCalls=0
         var updatedId:LocationId?=null;var updatedName:String?=null;var updatedPath:RootPath?=null
         var removeGate:CompletableDeferred<CustomLocationResult>?=null
         override fun observeAll()=flow
-        override suspend fun add(name:String,path:RootPath):CustomLocationResult{addedName=name;addedPath=path;return addResult}
+        override suspend fun add(name:String,path:RootPath):CustomLocationResult{addCalls++;addedName=name;addedPath=path;return addResult}
         override suspend fun update(id:LocationId,name:String,path:RootPath):CustomLocationResult{updatedId=id;updatedName=name;updatedPath=path;return CustomLocationResult.Success}
         override suspend fun remove(id:LocationId):CustomLocationResult{removed=id;return removeGate?.await()?:CustomLocationResult.Success}
     }
