@@ -49,6 +49,15 @@ class LibsuRootFileSystem internal constructor(
             }
         }
 
+    override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> =
+        execute(buildCanonicalizeCommand(path)).flatMap { lines ->
+            if (lines.size != 1) malformedCanonicalOutput()
+            else RootPath.parse(lines.single()).fold(
+                onSuccess = { OperationResult.Success(it) },
+                onFailure = { malformedCanonicalOutput() },
+            )
+        }
+
     private suspend fun execute(command: String): OperationResult<List<String>> {
         val result = try {
             withTimeout(timeoutMillis) {
@@ -98,6 +107,12 @@ class LibsuRootFileSystem internal constructor(
             emit_isaver_record "${'$'}target"
         """.trimIndent().withRecordEmitter()
     }
+
+    private fun buildCanonicalizeCommand(path: RootPath): String = """
+        target=${RootCommandCodec.quote(path.value)}
+        [ -e "${'$'}target" ] || [ -L "${'$'}target" ] || exit $EXIT_NOT_FOUND
+        readlink -f -- "${'$'}target" || exit 47
+    """.trimIndent()
 
     /**
      * Emits one safe record per entry. This M1 implementation performs per-entry stat and Base64
@@ -149,6 +164,12 @@ private fun malformedOutput() = failure(
     ErrorCode.COMMAND_FAILED,
     "无法读取目录信息",
     "Unexpected structured record count",
+)
+
+private fun malformedCanonicalOutput() = failure(
+    ErrorCode.COMMAND_FAILED,
+    "无法解析真实路径",
+    "Malformed canonical path output",
 )
 
 private fun failure(code: ErrorCode, userMessage: String, technicalMessage: String) =

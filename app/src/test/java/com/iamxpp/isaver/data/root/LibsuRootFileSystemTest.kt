@@ -93,6 +93,22 @@ class LibsuRootFileSystemTest {
         assertFalse(runner.command!!.contains("basename --"))
     }
 
+    @Test fun `canonicalize uses fixed readlink command and parses one absolute line`() = runTest {
+        val runner = FakeRunner(RootCommandResult(0, listOf("/real/path"), emptyList()))
+        val fs = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
+        val result = fs.canonicalize(path("/tmp/a b"))
+        assertEquals("/real/path", (result as OperationResult.Success).value.value)
+        assertTrue(runner.command!!.contains("readlink -f -- \"\$target\""))
+        assertTrue(runner.command!!.contains("target='/tmp/a b'"))
+    }
+
+    @Test fun `canonicalize rejects malformed output and maps command failure`() = runTest {
+        val malformed = LibsuRootFileSystem(FakeRunner(RootCommandResult(0, listOf("relative"), emptyList())), StandardTestDispatcher(testScheduler), 5_000)
+        assertEquals(ErrorCode.COMMAND_FAILED, (malformed.canonicalize(path("/a")) as OperationResult.Failure).code)
+        val failed = LibsuRootFileSystem(FakeRunner(RootCommandResult(44, emptyList(), emptyList())), StandardTestDispatcher(testScheduler), 5_000)
+        assertEquals(ErrorCode.NOT_FOUND, (failed.canonicalize(path("/missing")) as OperationResult.Failure).code)
+    }
+
     private class FakeRunner(private val result: RootCommandResult) : RootCommandRunner {
         var command: String? = null
         override suspend fun run(command: String): RootCommandResult {
