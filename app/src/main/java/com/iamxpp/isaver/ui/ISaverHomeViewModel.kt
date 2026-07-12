@@ -94,6 +94,9 @@ class ISaverHomeViewModel(
         } catch (_: IllegalArgumentException) {
             clearSavedState()
             ISaverHomeUiState()
+        } catch (_: ClassCastException) {
+            clearSavedState()
+            ISaverHomeUiState()
         }
     }
 

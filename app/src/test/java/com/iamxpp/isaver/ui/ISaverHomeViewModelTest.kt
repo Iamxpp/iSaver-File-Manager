@@ -64,6 +64,26 @@ class ISaverHomeViewModelTest {
     }
 
     @Test
+    fun `wrong saved primitive types fall back and clear only home state`() {
+        val handle = SavedStateHandle(
+            mapOf(
+                "home.selectedTab" to 7,
+                "home.destination" to true,
+                "home.path" to false,
+                "home.title" to 99,
+                "home.source" to 3,
+                "unrelated" to "keep",
+            ),
+        )
+
+        val restored = ISaverHomeViewModel(handle)
+
+        assertEquals(ISaverHomeUiState(), restored.state.value)
+        assertEquals(setOf("unrelated"), handle.keys())
+        assertEquals("keep", handle.get<String>("unrelated"))
+    }
+
+    @Test
     fun `restores the canonical browse root after recreation`() {
         val handle = SavedStateHandle()
         ISaverHomeViewModel(handle).selectTab(HomeTab.BROWSE)
