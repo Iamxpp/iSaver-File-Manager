@@ -87,6 +87,54 @@ class LibsuRootFileSystem internal constructor(
         return finalChild
     }
 
+    override suspend fun copyFromAppCache(source:AppCachePath,targetDirectory:RootPath,temporaryName:FolderName,expectedSizeBytes:Long):OperationResult<DirectoryEntry>{
+        val prepared=prepareWritableDirectory(targetDirectory);if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
+        val (canonical,identity)=prepared.value
+        val temporary=FolderName.join(canonical,temporaryName)
+        if(stat(temporary) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"临时文件已存在","Temporary exists")
+        val result=execute(buildCopyCommand(source,targetDirectory,canonical,temporary,identity,expectedSizeBytes),"无法缓存到目标目录")
+        if(result is OperationResult.Failure)return result
+        val verified=stat(temporary)
+        if(verified !is OperationResult.Success)return uncertain("Copied temporary could not be verified")
+        if(verified.value.symbolicLink||verified.value.type!=com.iamxpp.isaver.domain.EntryType.FILE||verified.value.sizeBytes!=expectedSizeBytes)return failure(ErrorCode.COMMAND_FAILED,"文件复制不完整","Temporary size mismatch")
+        return verified
+    }
+
+    override suspend fun moveTemporary(directory:RootPath,temporaryName:FolderName,finalName:FolderName):OperationResult<DirectoryEntry>{
+        if(!isTemporaryName(temporaryName.value))return failure(ErrorCode.COMMAND_FAILED,"临时文件名无效","Invalid temporary name")
+        val temporary=FolderName.join(directory,temporaryName);val final=FolderName.join(directory,finalName)
+        if(stat(final) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件已存在","Final exists")
+        val tempStat=stat(temporary);if(tempStat !is OperationResult.Success)return tempStat as OperationResult.Failure
+        if(tempStat.value.symbolicLink||tempStat.value.type!=com.iamxpp.isaver.domain.EntryType.FILE)return failure(ErrorCode.COMMAND_FAILED,"临时文件无效","Temporary not regular")
+        val moved=execute("temporary=${RootCommandCodec.quote(temporary.value)}\nfinal=${RootCommandCodec.quote(final.value)}\n[ -f \"\$temporary\" ] && [ ! -L \"\$temporary\" ] && [ ! -e \"\$final\" ] && [ ! -L \"\$final\" ] && mv -- \"\$temporary\" \"\$final\"","无法完成保存")
+        if(moved is OperationResult.Failure)return moved
+        val verified=stat(final);return if(verified is OperationResult.Success)verified else uncertain("Move outcome could not be verified")
+    }
+
+    override suspend fun removeTemporary(directory:RootPath,temporaryName:FolderName):OperationResult<Unit>{
+        if(!isTemporaryName(temporaryName.value))return failure(ErrorCode.COMMAND_FAILED,"临时文件名无效","Invalid temporary name")
+        val temporary=FolderName.join(directory,temporaryName)
+        return execute("temporary=${RootCommandCodec.quote(temporary.value)}\n[ ! -L \"\$temporary\" ] && rm -f -- \"\$temporary\"","无法清理临时文件").flatMap{OperationResult.Success(Unit)}
+    }
+
+    private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<Pair<RootPath,RootFileIdentity>>{
+        val first=stat(original);if(first !is OperationResult.Success)return first as OperationResult.Failure
+        if(first.value.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"目标目录不能是符号链接","Parent symlink")
+        val canonical=canonicalize(original);if(canonical !is OperationResult.Success)return canonical as OperationResult.Failure
+        val identity=readIdentity(canonical.value);if(identity !is OperationResult.Success)return identity as OperationResult.Failure
+        return OperationResult.Success(canonical.value to identity.value)
+    }
+
+    private fun buildCopyCommand(source:AppCachePath,original:RootPath,parent:RootPath,temporary:RootPath,identity:RootFileIdentity,expected:Long)="""
+        source=${RootCommandCodec.quote(source.value)}
+        original=${RootCommandCodec.quote(original.value)}
+        parent=${RootCommandCodec.quote(parent.value)}
+        temporary=${RootCommandCodec.quote(temporary.value)}
+        [ -f "${'$'}source" ] && [ ! -L "${'$'}source" ] && [ ! -L "${'$'}original" ] && current=${'$'}(stat -c '%d:%i' -- "${'$'}original") && mapped=${'$'}(readlink -f -- "${'$'}original" | base64 -w 0) && [ "${'$'}current" = '${identity.device}:${identity.inode}' ] && [ "${'$'}mapped" = ${RootCommandCodec.quote(canonicalLineBase64(parent))} ] && [ ! -e "${'$'}temporary" ] && [ ! -L "${'$'}temporary" ] && cp -- "${'$'}source" "${'$'}temporary" && [ "${'$'}(stat -c %s -- "${'$'}temporary")" = '$expected' ]
+    """.trimIndent()
+
+    private fun isTemporaryName(name:String)=Regex("\\.isaver-[0-9a-fA-F-]{36}\\.tmp").matches(name)
+
     private suspend fun execute(command: String, failureMessage: String = "无法读取目录信息"): OperationResult<List<String>> {
         val result = try {
             withTimeout(timeoutMillis) {

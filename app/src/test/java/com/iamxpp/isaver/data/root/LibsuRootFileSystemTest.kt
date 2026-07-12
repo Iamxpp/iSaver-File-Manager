@@ -211,6 +211,70 @@ class LibsuRootFileSystemTest {
         listOf(record("x","/p/x","file","1","2","1","1","0"),record("x","/p/x","directory","-","2","1","1","1")).forEach{bad->val runner=QueueRunner(ArrayDeque(listOf(parent,RootCommandResult(0,listOf(b64("/p\n")),emptyList()),parent,RootCommandResult(0,listOf("1:2"),emptyList()),missing,made,RootCommandResult(0,listOf("1:2"),emptyList()),RootCommandResult(0,listOf(b64("/p\n")),emptyList()),RootCommandResult(0,listOf(bad),emptyList()))));assertEquals(ErrorCode.OUTCOME_UNCERTAIN,(LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow()) as OperationResult.Failure).code)}
     }
 
+    @Test fun `copy from app cache revalidates destination and verifies temporary size`()=runTest{
+        val runner=TransferRunner()
+        val fs=LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),5_000)
+
+        val result=fs.copyFromAppCache(
+            source=AppCachePath.parse("/data/user/0/com.iamxpp.isaver/cache/incoming/source.tmp").getOrThrow(),
+            targetDirectory=path("/p"),
+            temporaryName=FolderName.parse(".isaver-123e4567-e89b-12d3-a456-426614174000.tmp").getOrThrow(),
+            expectedSizeBytes=4,
+        )
+
+        assertTrue(result is OperationResult.Success<*>)
+        val command=runner.commands.single{it.contains("cp --")}
+        assertTrue(command.contains("source='/data/user/0/com.iamxpp.isaver/cache/incoming/source.tmp'"))
+        assertTrue(command.contains("original='/p'"))
+        assertTrue(command.contains("temporary='/p/.isaver-123e4567-e89b-12d3-a456-426614174000.tmp'"))
+        assertTrue(command.contains("[ ! -L \"\$original\" ]"))
+        assertTrue(command.contains("[ \"\$current\" = '1:2' ]"))
+        assertTrue(command.contains("[ \"\$mapped\" = '${b64("/p\n")}' ]"))
+        assertTrue(command.contains("[ ! -e \"\$temporary\" ]"))
+        assertTrue(command.contains("[ ! -L \"\$temporary\" ]"))
+        assertTrue(command.contains("cp -- \"\$source\" \"\$temporary\""))
+        assertEquals(4L,(result as OperationResult.Success<*>).value.let{it as com.iamxpp.isaver.domain.DirectoryEntry}.sizeBytes)
+    }
+
+    @Test fun `move temporary is atomic and never overwrites an existing final file`()=runTest{
+        val runner=TransferRunner(temporaryExists=true)
+        val fs=LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),5_000)
+        val temporary=FolderName.parse(".isaver-123e4567-e89b-12d3-a456-426614174000.tmp").getOrThrow()
+
+        val moved=fs.moveTemporary(path("/p"),temporary,FolderName.parse("final.txt").getOrThrow())
+
+        assertTrue(moved is OperationResult.Success<*>)
+        val command=runner.commands.single{it.contains("mv --")}
+        assertTrue(command.contains("[ -f \"\$temporary\" ]"))
+        assertTrue(command.contains("[ ! -L \"\$temporary\" ]"))
+        assertTrue(command.contains("[ ! -e \"\$final\" ]"))
+        assertTrue(command.contains("[ ! -L \"\$final\" ]"))
+        assertTrue(command.contains("mv -- \"\$temporary\" \"\$final\""))
+
+        val collision=TransferRunner(temporaryExists=true,finalExists=true)
+        val collisionResult=LibsuRootFileSystem(collision,StandardTestDispatcher(testScheduler),5_000)
+            .moveTemporary(path("/p"),temporary,FolderName.parse("final.txt").getOrThrow())
+        assertEquals(ErrorCode.ALREADY_EXISTS,(collisionResult as OperationResult.Failure).code)
+        assertFalse(collision.commands.any{it.contains("mv --")})
+    }
+
+    @Test fun `remove temporary rejects ordinary names and removes only isaver uuid temporary`()=runTest{
+        val fsRunner=TransferRunner(temporaryExists=true)
+        val fs=LibsuRootFileSystem(fsRunner,StandardTestDispatcher(testScheduler),5_000)
+
+        val rejected=fs.removeTemporary(path("/p"),FolderName.parse("final.txt").getOrThrow())
+        assertEquals(ErrorCode.COMMAND_FAILED,(rejected as OperationResult.Failure).code)
+        assertFalse(fsRunner.commands.any{it.contains("rm -f --")})
+
+        val removed=fs.removeTemporary(
+            path("/p"),
+            FolderName.parse(".isaver-123e4567-e89b-12d3-a456-426614174000.tmp").getOrThrow(),
+        )
+        assertTrue(removed is OperationResult.Success<*>)
+        assertTrue(fsRunner.commands.single{it.contains("rm -f --")}
+            .contains("rm -f -- \"\$temporary\""))
+    }
+
     private class FakeRunner(private val result: RootCommandResult) : RootCommandRunner {
         var command: String? = null
         override suspend fun run(command: String): RootCommandResult {
@@ -219,6 +283,26 @@ class LibsuRootFileSystemTest {
         }
     }
     private class QueueRunner(private val results:ArrayDeque<RootCommandResult>):RootCommandRunner{val commands=mutableListOf<String>();override suspend fun run(command:String):RootCommandResult{commands+=command;return results.removeFirst()}}
+    private inner class TransferRunner(
+        private var temporaryExists:Boolean=false,
+        private var finalExists:Boolean=false,
+    ):RootCommandRunner{
+        val commands=mutableListOf<String>()
+        override suspend fun run(command:String):RootCommandResult{
+            commands+=command
+            return when{
+                command.contains("target='/p/.isaver-123e4567-e89b-12d3-a456-426614174000.tmp'")->if(temporaryExists)RootCommandResult(0,listOf(record(".isaver-123e4567-e89b-12d3-a456-426614174000.tmp","/p/.isaver-123e4567-e89b-12d3-a456-426614174000.tmp","file","4","2","1","1","0")),emptyList())else RootCommandResult(44,emptyList(),emptyList())
+                command.contains("target='/p/final.txt'")->if(finalExists)RootCommandResult(0,listOf(record("final.txt","/p/final.txt","file","4","2","1","1","0")),emptyList())else RootCommandResult(44,emptyList(),emptyList())
+                command.contains("target='/p'")&&command.contains("readlink -f")->RootCommandResult(0,listOf(b64("/p\n")),emptyList())
+                command.contains("target='/p'")&&command.contains("emit_isaver_record \"\$target\"")->RootCommandResult(0,listOf(record("p","/p","directory","-","2","1","1","0")),emptyList())
+                command.contains("stat -c '%d:%i'")&&!command.contains("cp --")&&!command.contains("mv --")&&!command.contains("rm -f --")->RootCommandResult(0,listOf("1:2"),emptyList())
+                command.contains("cp --")->{temporaryExists=true;RootCommandResult(0,emptyList(),emptyList())}
+                command.contains("mv --")->{temporaryExists=false;finalExists=true;RootCommandResult(0,emptyList(),emptyList())}
+                command.contains("rm -f --")->{temporaryExists=false;RootCommandResult(0,emptyList(),emptyList())}
+                else->error("Unexpected command: $command")
+            }
+        }
+    }
     private inner class OriginalSymlinkRunner:RootCommandRunner{
         val commands=mutableListOf<String>();private var made=false
         override suspend fun run(command:String):RootCommandResult{commands+=command;return when{
