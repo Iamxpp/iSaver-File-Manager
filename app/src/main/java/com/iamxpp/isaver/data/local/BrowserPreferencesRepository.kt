@@ -10,6 +10,7 @@ import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
@@ -19,10 +20,22 @@ data class BrowserPreferences(
     val sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
 )
 
+interface BrowserPreferencesStore {
+    val preferences: Flow<BrowserPreferences>
+    suspend fun setDisplayMode(displayMode: DisplayMode)
+    suspend fun setSort(sortSpec: SortSpec)
+
+    data object Default : BrowserPreferencesStore {
+        override val preferences: Flow<BrowserPreferences> = flowOf(BrowserPreferences())
+        override suspend fun setDisplayMode(displayMode: DisplayMode) = Unit
+        override suspend fun setSort(sortSpec: SortSpec) = Unit
+    }
+}
+
 class BrowserPreferencesRepository(
     private val dataStore: DataStore<Preferences>,
-) {
-    val preferences: Flow<BrowserPreferences> = dataStore.data
+) : BrowserPreferencesStore {
+    override val preferences: Flow<BrowserPreferences> = dataStore.data
         .catch { throwable ->
             if (throwable is IOException) {
                 emit(emptyPreferences())
@@ -32,13 +45,13 @@ class BrowserPreferencesRepository(
         }
         .map(::parsePreferences)
 
-    suspend fun setDisplayMode(displayMode: DisplayMode) {
+    override suspend fun setDisplayMode(displayMode: DisplayMode) {
         dataStore.edit { values ->
             values[DISPLAY_MODE_KEY] = displayMode.name
         }
     }
 
-    suspend fun setSort(sortSpec: SortSpec) {
+    override suspend fun setSort(sortSpec: SortSpec) {
         dataStore.edit { values ->
             values[SORT_FIELD_KEY] = sortSpec.field.name
             values[SORT_DIRECTION_KEY] = sortSpec.direction.name

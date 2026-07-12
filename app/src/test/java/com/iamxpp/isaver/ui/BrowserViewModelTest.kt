@@ -1,5 +1,7 @@
 package com.iamxpp.isaver.ui
 
+import com.iamxpp.isaver.data.local.BrowserPreferences
+import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
@@ -13,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -28,6 +31,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.After
 import org.junit.Before
+import com.iamxpp.isaver.ui.files.DisplayMode
+import com.iamxpp.isaver.ui.files.SortDirection
+import com.iamxpp.isaver.ui.files.SortField
+import com.iamxpp.isaver.ui.files.SortSpec
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class BrowserViewModelTest {
@@ -35,6 +42,152 @@ class BrowserViewModelTest {
 
     @Before fun setUp() = Dispatchers.setMain(mainDispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
+
+    @Test fun `collects browser preferences into presentation state`() = runTest {
+        val preferences = FakeBrowserPreferencesStore(
+            BrowserPreferences(
+                displayMode = DisplayMode.GRID,
+                sortSpec = SortSpec(SortField.SIZE, SortDirection.DESCENDING),
+            ),
+        )
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            preferences,
+        )
+
+        advanceUntilIdle()
+
+        assertEquals(DisplayMode.GRID, vm.state.value.displayMode)
+        assertEquals(SortSpec(SortField.SIZE, SortDirection.DESCENDING), vm.state.value.sortSpec)
+        assertEquals("", vm.state.value.searchQuery)
+    }
+
+    @Test fun `preference changes reorder loaded entries without listing again`() = runTest {
+        var listCalls = 0
+        val preferences = FakeBrowserPreferencesStore(BrowserPreferences())
+        val vm = BrowserViewModel(
+            FakeFileSystem {
+                listCalls += 1
+                OperationResult.Success(
+                    listOf(
+                        entry("small.txt", EntryType.FILE, size = 1),
+                        entry("large.txt", EntryType.FILE, size = 20),
+                    ),
+                )
+            },
+            StandardTestDispatcher(testScheduler),
+            preferences,
+        )
+        advanceUntilIdle()
+
+        preferences.emit(
+            BrowserPreferences(
+                displayMode = DisplayMode.GRID,
+                sortSpec = SortSpec(SortField.SIZE, SortDirection.DESCENDING),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(1, listCalls)
+        assertEquals(listOf("large.txt", "small.txt"), vm.state.value.entries.map { it.name })
+        assertEquals(listOf("small.txt", "large.txt"), vm.state.value.allEntries.map { it.name })
+    }
+
+    @Test fun `display and sort events delegate to preferences store`() = runTest {
+        val preferences = FakeBrowserPreferencesStore(BrowserPreferences())
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            preferences,
+        )
+        advanceUntilIdle()
+
+        vm.setDisplayMode(DisplayMode.GRID)
+        vm.setSort(SortSpec(SortField.TYPE, SortDirection.DESCENDING))
+        advanceUntilIdle()
+
+        assertEquals(listOf(DisplayMode.GRID), preferences.displayModeWrites)
+        assertEquals(
+            listOf(SortSpec(SortField.TYPE, SortDirection.DESCENDING)),
+            preferences.sortWrites,
+        )
+    }
+
+    @Test fun `search is case insensitive and paginates filtered sorted results without relisting`() = runTest {
+        var listCalls = 0
+        val all = (1..250).map { entry("Match$it", EntryType.FILE) } +
+            (1..25).map { entry("other$it", EntryType.FILE) }
+        val vm = BrowserViewModel(
+            FakeFileSystem {
+                listCalls += 1
+                OperationResult.Success(all.reversed())
+            },
+            StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+
+        vm.setSearchQuery("mAtCh")
+        advanceUntilIdle()
+
+        assertEquals(1, listCalls)
+        assertEquals(275, vm.state.value.allEntries.size)
+        assertEquals(250, vm.state.value.totalCount)
+        assertEquals(200, vm.state.value.entries.size)
+        assertTrue(vm.state.value.hasMore)
+        assertEquals("Match1", vm.state.value.entries.first().name)
+
+        vm.loadMore()
+
+        assertEquals(250, vm.state.value.entries.size)
+        assertFalse(vm.state.value.hasMore)
+    }
+
+    @Test fun `directory result uses the latest preference selected while loading`() = runTest {
+        val result = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
+        val preferences = FakeBrowserPreferencesStore(BrowserPreferences())
+        val vm = BrowserViewModel(
+            FakeFileSystem { result.await() },
+            StandardTestDispatcher(testScheduler),
+            preferences,
+        )
+        testScheduler.runCurrent()
+
+        preferences.emit(
+            BrowserPreferences(
+                sortSpec = SortSpec(SortField.SIZE, SortDirection.DESCENDING),
+            ),
+        )
+        result.complete(
+            OperationResult.Success(
+                listOf(
+                    entry("small", EntryType.FILE, size = 1),
+                    entry("large", EntryType.FILE, size = 10),
+                ),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(SortSpec(SortField.SIZE, SortDirection.DESCENDING), vm.state.value.sortSpec)
+        assertEquals(listOf("large", "small"), vm.state.value.entries.map { it.name })
+    }
+
+    @Test fun `opening browse root clears navigation and returns home from slash`() = runTest {
+        val fs = FakeFileSystem { OperationResult.Success(emptyList()) }
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+        vm.enterDirectory(entry("child", EntryType.DIRECTORY, "/storage/emulated/0/child"))
+        advanceUntilIdle()
+
+        vm.openRoot(RootPath.parse("/").getOrThrow(), "浏览")
+        advanceUntilIdle()
+
+        assertEquals("/", vm.state.value.currentPath.value)
+        assertEquals("浏览", vm.state.value.rootTitle)
+        assertFalse(vm.state.value.canGoBack)
+        assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
+    }
+
     @Test fun `init asynchronously loads storage root and exposes loading then success`() = runTest {
         val gate = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fs = FakeFileSystem { gate.await() }
@@ -244,7 +397,10 @@ class BrowserViewModelTest {
         val vm = BrowserViewModel(
             FakeFileSystem { OperationResult.Success(listOf(entry("b", EntryType.FILE), entry("a", EntryType.FILE))) },
             dispatcher,
-            sorter = { entries -> sortedWithMarker = marker.get() == true; BrowserViewModel.sortEntries(entries) },
+            sorter = { entries, spec ->
+                sortedWithMarker = marker.get() == true
+                com.iamxpp.isaver.ui.files.FileEntrySorter.sort(entries, spec)
+            },
         )
         advanceUntilIdle()
         assertTrue(sortedWithMarker)
@@ -274,6 +430,15 @@ class BrowserViewModelTest {
         override suspend fun createDirectory(parent: RootPath, name: FolderName): OperationResult<DirectoryEntry> = createBlock(parent, name)
     }
 
+    private class FakeBrowserPreferencesStore(initial: BrowserPreferences) : BrowserPreferencesStore {
+        override val preferences = MutableStateFlow(initial)
+        val displayModeWrites = mutableListOf<DisplayMode>()
+        val sortWrites = mutableListOf<SortSpec>()
+        override suspend fun setDisplayMode(displayMode: DisplayMode) { displayModeWrites += displayMode }
+        override suspend fun setSort(sortSpec: SortSpec) { sortWrites += sortSpec }
+        fun emit(value: BrowserPreferences) { preferences.value = value }
+    }
+
     private class MarkerDispatcher(
         private val delegate: CoroutineDispatcher,
         private val marker: ThreadLocal<Boolean>,
@@ -288,7 +453,8 @@ class BrowserViewModelTest {
         name: String,
         type: EntryType,
         path: String = "/x/$name",
+        size: Long? = 1,
         writable: Boolean = false,
         symbolicLink: Boolean = false,
-    ) = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, 1, 2, true, writable, symbolicLink)
+    ) = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, size, 2, true, writable, symbolicLink)
 }

@@ -3,6 +3,10 @@ package com.iamxpp.isaver.ui
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.ui.files.DisplayMode
+import com.iamxpp.isaver.ui.files.SortDirection
+import com.iamxpp.isaver.ui.files.SortField
+import com.iamxpp.isaver.ui.files.SortSpec
 
 data class BrowserUiState(
     val currentPath: RootPath,
@@ -18,6 +22,9 @@ data class BrowserUiState(
     val creatingDirectory: Boolean = false,
     val createDirectoryError: BrowserOperationError? = null,
     val locationTarget: RootPath? = null,
+    val displayMode: DisplayMode = DisplayMode.LIST,
+    val sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
+    val searchQuery: String = "",
 ) {
     val empty: Boolean get() = !loading && errorMessage == null && totalCount == 0
 }

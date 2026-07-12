@@ -2,6 +2,7 @@ package com.iamxpp.isaver.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
@@ -9,6 +10,9 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.ui.files.FileEntrySorter
+import com.iamxpp.isaver.ui.files.DisplayMode
+import com.iamxpp.isaver.ui.files.SortSpec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
@@ -17,24 +21,37 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Locale
 
 class BrowserViewModel(
     private val rootFileSystem: RootFileSystem,
     private val ioDispatcher: CoroutineDispatcher,
-    private val sorter: (List<DirectoryEntry>) -> List<DirectoryEntry> = ::sortEntries,
+    private val preferencesStore: BrowserPreferencesStore = BrowserPreferencesStore.Default,
+    private val sorter: (List<DirectoryEntry>, SortSpec) -> List<DirectoryEntry> = FileEntrySorter::sort,
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private val stack = ArrayDeque<RootPath>()
     private val mutableState = MutableStateFlow(BrowserUiState(currentPath = initialPath))
     private var loadJob: Job? = null
+    private var presentationJob: Job? = null
     private var createDirectoryJob: Job? = null
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
+    private var presentedEntries: List<DirectoryEntry> = emptyList()
 
     val state: StateFlow<BrowserUiState> = mutableState.asStateFlow()
 
-    init { load(initialPath) }
+    init {
+        viewModelScope.launch {
+            preferencesStore.preferences.collect { preferences ->
+                mutableState.value = mutableState.value.copy(
+                    displayMode = preferences.displayMode,
+                    sortSpec = preferences.sortSpec,
+                )
+                refreshPresentation()
+            }
+        }
+        load(initialPath)
+    }
 
     fun enterDirectory(entry: DirectoryEntry): Boolean {
         if (entry.type != EntryType.DIRECTORY) return false
@@ -56,6 +73,20 @@ class BrowserViewModel(
     }
 
     fun retry() = load(mutableState.value.currentPath)
+
+    fun setDisplayMode(displayMode: DisplayMode) {
+        viewModelScope.launch { preferencesStore.setDisplayMode(displayMode) }
+    }
+
+    fun setSort(sortSpec: SortSpec) {
+        viewModelScope.launch { preferencesStore.setSort(sortSpec) }
+    }
+
+    fun setSearchQuery(searchQuery: String) {
+        visibleCount = PAGE_SIZE
+        mutableState.value = mutableState.value.copy(searchQuery = searchQuery)
+        refreshPresentation()
+    }
 
     fun createDirectory(rawName: String) {
         if (createDirectoryJob?.isActive == true) return
@@ -111,7 +142,7 @@ class BrowserViewModel(
         if (!current.hasMore) return
         visibleCount = (visibleCount + PAGE_SIZE).coerceAtMost(current.totalCount)
         mutableState.value = current.copy(
-            entries = current.allEntries.take(visibleCount),
+            entries = presentedEntries.take(visibleCount),
             hasMore = visibleCount < current.totalCount,
         )
     }
@@ -125,14 +156,14 @@ class BrowserViewModel(
             rootTitle = mutableState.value.rootTitle,
             canGoBack = stack.isNotEmpty(),
             locationTarget = locationTarget,
+            displayMode = mutableState.value.displayMode,
+            sortSpec = mutableState.value.sortSpec,
+            searchQuery = mutableState.value.searchQuery,
         )
         loadJob = viewModelScope.launch {
             try {
                 val (result, canCreateDirectory) = withContext(ioDispatcher) {
-                    val listed = when (val value = rootFileSystem.list(path)) {
-                        is OperationResult.Failure -> value
-                        is OperationResult.Success -> OperationResult.Success(sorter(value.value))
-                    }
+                    val listed = rootFileSystem.list(path)
                     val writable = try {
                         when (val stat = rootFileSystem.stat(path)) {
                             is OperationResult.Failure -> false
@@ -156,15 +187,13 @@ class BrowserViewModel(
                         )
                     }
                     is OperationResult.Success -> if (request == generation) {
-                        val sorted = result.value
+                        val allEntries = result.value
                         mutableState.value = mutableState.value.copy(
-                            allEntries = sorted,
-                            entries = sorted.take(PAGE_SIZE),
-                            totalCount = sorted.size,
+                            allEntries = allEntries,
                             loading = false,
-                            hasMore = sorted.size > PAGE_SIZE,
                             canCreateDirectory = canCreateDirectory,
                         )
+                        refreshPresentation()
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -180,32 +209,36 @@ class BrowserViewModel(
         }
     }
 
+    private fun refreshPresentation() {
+        val current = mutableState.value
+        presentationJob?.cancel()
+        presentationJob = viewModelScope.launch {
+            val derived = withContext(ioDispatcher) {
+                sorter(
+                    current.allEntries.filter { entry ->
+                        current.searchQuery.isEmpty() || entry.name.contains(current.searchQuery, ignoreCase = true)
+                    },
+                    current.sortSpec,
+                )
+            }
+            if (
+                mutableState.value.allEntries == current.allEntries &&
+                mutableState.value.sortSpec == current.sortSpec &&
+                mutableState.value.searchQuery == current.searchQuery
+            ) {
+                presentedEntries = derived
+                mutableState.value = mutableState.value.copy(
+                    entries = derived.take(visibleCount),
+                    totalCount = derived.size,
+                    hasMore = visibleCount < derived.size,
+                )
+            }
+        }
+    }
+
     internal companion object {
         const val INITIAL_PATH = "/storage/emulated/0"
         const val PAGE_SIZE = 200
-        internal fun sortEntries(entries: List<DirectoryEntry>): List<DirectoryEntry> = entries
-            .map { entry -> SortableEntry(entry, typeRank(entry.type), naturalKey(entry.name)) }
-            .sortedWith(compareBy<SortableEntry> { it.typeRank }.thenComparator { left, right -> compareKeys(left.key, right.key) })
-            .map { it.entry }
-
-        private fun typeRank(type: EntryType) = if (type == EntryType.DIRECTORY) 0 else 1
-
-        private fun naturalKey(name: String) = CHUNKS.findAll(name.lowercase(Locale.ROOT)).map { it.value }.toList()
-
-        private fun compareKeys(a: List<String>, b: List<String>): Int {
-            for (i in 0 until minOf(a.size, b.size)) {
-                val x = a[i]; val y = b[i]
-                val comparison = if (x.first().isDigit() && y.first().isDigit()) {
-                    val nx = x.trimStart('0').ifEmpty { "0" }; val ny = y.trimStart('0').ifEmpty { "0" }
-                    nx.length.compareTo(ny.length).takeIf { it != 0 } ?: nx.compareTo(ny)
-                } else x.compareTo(y)
-                if (comparison != 0) return comparison
-            }
-            return a.size.compareTo(b.size)
-        }
-
-        private val CHUNKS = Regex("\\d+|\\D+")
-        private data class SortableEntry(val entry: DirectoryEntry, val typeRank: Int, val key: List<String>)
     }
 }
 
