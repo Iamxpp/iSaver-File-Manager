@@ -58,19 +58,33 @@ class LocationHomeViewModelTest {
         fresh.complete(ResolvedAppLocation(LocationCatalog.weChat.id,"fresh",emptyList(),0));testScheduler.runCurrent();old.complete(ResolvedAppLocation(LocationCatalog.weChat.id,"old",emptyList(),0));advanceUntilIdle()
         assertEquals("fresh",vm.state.value.appGroups.single().displayName)
     }
+    @Test fun `custom probes run concurrently at max four and preserve order`()=runTest{
+        val store=FakeStore();store.flow.value=(1..6).map{StorageLocation.Direct(LocationId.of("custom.$it"),"$it",root("/$it"),StorageLocation.Source.CUSTOM)}
+        val fs=FakeFs().apply{blockStats=true;(1..6).forEach{stats["/$it"]=entry("/$it",EntryType.DIRECTORY,true,true)}}
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));testScheduler.runCurrent()
+        assertEquals(4,fs.maxActive);assertTrue(fs.maxActive>1);fs.release.complete(Unit);advanceUntilIdle()
+        assertEquals((1..6).map{it.toString()},vm.state.value.customLocations.map{it.location.displayName})
+    }
+    @Test fun `remove exposes progress maps not found and never stats`()=runTest{
+        val store=FakeStore();store.removeGate=CompletableDeferred();val fs=FakeFs();val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle();val calls=fs.statCalls
+        vm.removeCustomLocation(LocationId.of("missing"));testScheduler.runCurrent();assertTrue(vm.state.value.operationInProgress)
+        store.removeGate!!.complete(CustomLocationResult.NotFound);advanceUntilIdle();assertFalse(vm.state.value.operationInProgress);assertEquals("位置不存在",vm.state.value.addError);assertEquals(calls,fs.statCalls)
+    }
 
     private class FakeStore:LocationHomeCustomStore{
         val flow=MutableStateFlow<List<StorageLocation.Direct>>(emptyList())
         var addedName:String?=null;var addedPath:RootPath?=null;var removed:LocationId?=null;var addResult:CustomLocationResult=CustomLocationResult.Success
         var updatedId:LocationId?=null;var updatedName:String?=null;var updatedPath:RootPath?=null
+        var removeGate:CompletableDeferred<CustomLocationResult>?=null
         override fun observeAll()=flow
         override suspend fun add(name:String,path:RootPath):CustomLocationResult{addedName=name;addedPath=path;return addResult}
         override suspend fun update(id:LocationId,name:String,path:RootPath):CustomLocationResult{updatedId=id;updatedName=name;updatedPath=path;return CustomLocationResult.Success}
-        override suspend fun remove(id:LocationId):CustomLocationResult{removed=id;return CustomLocationResult.Success}
+        override suspend fun remove(id:LocationId):CustomLocationResult{removed=id;return removeGate?.await()?:CustomLocationResult.Success}
     }
     private class FakeFs:RootFileSystem{
         val stats=mutableMapOf<String,DirectoryEntry>()
-        var statCalls=0;override suspend fun stat(path:RootPath):OperationResult<DirectoryEntry>{statCalls++;return stats[path.value]?.let{OperationResult.Success(it)}?:OperationResult.Failure(ErrorCode.NOT_FOUND,"missing")}
+        var blockStats=false;val release=CompletableDeferred<Unit>();var active=0;var maxActive=0
+        var statCalls=0;override suspend fun stat(path:RootPath):OperationResult<DirectoryEntry>{statCalls++;active++;maxActive=maxOf(maxActive,active);if(blockStats)release.await();active--;return stats[path.value]?.let{OperationResult.Success(it)}?:OperationResult.Failure(ErrorCode.NOT_FOUND,"missing")}
         override suspend fun list(path:RootPath):OperationResult<List<DirectoryEntry>> = error("unused")
         override suspend fun canonicalize(path:RootPath):OperationResult<RootPath> = error("unused")
     }
