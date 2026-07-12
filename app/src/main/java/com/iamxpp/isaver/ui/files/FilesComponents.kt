@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -18,6 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridItemScope
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +40,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CollectionInfo
+import androidx.compose.ui.semantics.collectionInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -180,50 +187,55 @@ fun FileListRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 78.dp)
             .semantics(mergeDescendants = true) {
                 contentDescription = "列表项：$displayName"
             }
-            .clickable(onClick = onClick)
-            .padding(start = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(onClick = onClick),
     ) {
-        EntryGlyph(entry = entry, modifier = Modifier.size(width = 58.dp, height = 48.dp))
-        Column(
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
+                .fillMaxWidth()
+                .heightIn(min = 78.dp)
+                .padding(start = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = displayName,
-                color = ISaverPrimaryText,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = metadata,
-                color = ISaverSecondaryText,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+            EntryGlyph(entry = entry, modifier = Modifier.size(width = 58.dp, height = 48.dp))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
+            ) {
+                Text(
+                    text = displayName,
+                    color = ISaverPrimaryText,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = metadata,
+                    color = ISaverSecondaryText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (entry.type == EntryType.DIRECTORY) {
+                ChevronGlyph(Modifier.padding(horizontal = 14.dp))
+            } else {
+                Spacer(Modifier.width(16.dp))
+            }
         }
-        if (entry.type == EntryType.DIRECTORY) {
-            ChevronGlyph(Modifier.padding(horizontal = 14.dp))
-        } else {
-            Spacer(Modifier.width(16.dp))
-        }
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 86.dp),
+            thickness = 0.5.dp,
+            color = ISaverDivider,
+        )
     }
-    HorizontalDivider(
-        modifier = modifier.padding(start = 86.dp),
-        thickness = 0.5.dp,
-        color = ISaverDivider,
-    )
 }
 
 @Composable
@@ -261,6 +273,39 @@ fun FileGridCell(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 2.dp),
         )
+    }
+}
+
+@Composable
+fun <T> FilesGrid(
+    items: List<T>,
+    key: (T) -> Any,
+    modifier: Modifier = Modifier,
+    itemContent: @Composable LazyGridItemScope.(T) -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .semantics {
+                collectionInfo = CollectionInfo(
+                    rowCount = (items.size + GRID_COLUMN_COUNT - 1) / GRID_COLUMN_COUNT,
+                    columnCount = GRID_COLUMN_COUNT,
+                )
+            },
+    ) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(GRID_COLUMN_COUNT),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(
+                items = items,
+                key = key,
+                itemContent = itemContent,
+            )
+        }
     }
 }
 
@@ -359,6 +404,8 @@ private val DisplayMode.label: String
         DisplayMode.LIST -> "列表"
         DisplayMode.GRID -> "图标"
     }
+
+private const val GRID_COLUMN_COUNT = 3
 
 private val SortField.label: String
     get() = when (this) {

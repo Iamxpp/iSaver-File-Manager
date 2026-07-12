@@ -4,12 +4,17 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPath
@@ -95,6 +100,52 @@ class FilesComponentsTest {
     }
 
     @Test
+    fun listRowAppliesCallerModifierToExactlyOneClickableNode() {
+        var clicks = 0
+        compose.setContent {
+            FileListRow(
+                entry = directoryEntry(),
+                displayName = "工作",
+                metadata = "2项",
+                onClick = { clicks += 1 },
+                modifier = androidx.compose.ui.Modifier.testTag("files-list-row"),
+            )
+        }
+
+        compose.onAllNodesWithTag("files-list-row").assertCountEquals(1)
+        compose.onNodeWithTag("files-list-row").performClick()
+        assertEquals(1, clicks)
+    }
+
+    @Test
+    fun filesGridExposesFixedThreeColumnCollectionAndMultipleCells() {
+        val entries = (1..4).map { index -> directoryEntry("目录$index") }
+        compose.setContent {
+            FilesGrid(
+                items = entries,
+                key = { it.name },
+                modifier = androidx.compose.ui.Modifier.testTag("files-grid"),
+            ) { entry ->
+                FileGridCell(
+                    entry = entry,
+                    displayName = entry.name,
+                    metadata = "2项",
+                    onClick = {},
+                )
+            }
+        }
+
+        val collectionInfo = compose.onNodeWithTag("files-grid")
+            .fetchSemanticsNode()
+            .config[SemanticsProperties.CollectionInfo]
+        assertEquals(2, collectionInfo.rowCount)
+        assertEquals(3, collectionInfo.columnCount)
+        entries.forEach { entry ->
+            compose.onNodeWithContentDescription("网格项：${entry.name}").assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun overflowMenuExposesSelectedPresentationAndCapabilityStates() {
         var selectedField: SortField? = null
         compose.setContent {
@@ -126,9 +177,9 @@ class FilesComponentsTest {
         }
     }
 
-    private fun directoryEntry() = DirectoryEntry(
-        path = RootPath.parse("/data/local/tmp/work").getOrThrow(),
-        name = "work",
+    private fun directoryEntry(name: String = "work") = DirectoryEntry(
+        path = RootPath.parse("/data/local/tmp/$name").getOrThrow(),
+        name = name,
         type = EntryType.DIRECTORY,
         sizeBytes = null,
         modifiedAtEpochSeconds = 1_720_800_000,
