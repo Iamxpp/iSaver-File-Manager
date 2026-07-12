@@ -10,6 +10,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
 data class ResolvedAppLocation(
     val templateId: LocationId,
@@ -44,10 +45,16 @@ class LocationResolver(
     }
 
     private suspend fun probe(candidate: PathCandidate): StorageLocation.Direct? {
-        val stat = rootFileSystem.stat(candidate.path)
-        if (stat !is OperationResult.Success || stat.value.type != EntryType.DIRECTORY || !stat.value.readable) return null
-        val canonical = rootFileSystem.canonicalize(candidate.path)
-        if (canonical !is OperationResult.Success) return null
-        return StorageLocation.Direct(candidate.id, candidate.displayName, canonical.value, StorageLocation.Source.APP_TEMPLATE)
+        return try {
+            val stat = rootFileSystem.stat(candidate.path)
+            if (stat !is OperationResult.Success || stat.value.type != EntryType.DIRECTORY || !stat.value.readable) return null
+            val canonical = rootFileSystem.canonicalize(candidate.path)
+            if (canonical !is OperationResult.Success) return null
+            StorageLocation.Direct(candidate.id, candidate.displayName, canonical.value, StorageLocation.Source.APP_TEMPLATE)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
     }
 }

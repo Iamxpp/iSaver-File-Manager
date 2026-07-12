@@ -55,14 +55,33 @@ class LocationResolverTest {
         LocationResolver(fs, StandardTestDispatcher(testScheduler)).resolve(template("/a"))
     }
 
+    @Test fun `stat exception only marks that candidate unavailable`() = runTest {
+        val fs = FakeFs(); fs.entries["/good"] = entry("/good", EntryType.DIRECTORY, true); fs.canonical["/good"] = root("/real")
+        fs.statExceptions += "/bad"
+        val result = LocationResolver(fs, StandardTestDispatcher(testScheduler)).resolve(template("/bad", "/good"))
+        assertEquals(listOf("good"), result.children.map { it.displayName }); assertEquals(1, result.unavailableCount)
+    }
+
+    @Test fun `canonicalize exception only marks that candidate unavailable`() = runTest {
+        val fs = FakeFs(); listOf("/bad", "/good").forEach { fs.entries[it] = entry(it, EntryType.DIRECTORY, true) }
+        fs.canonicalExceptions += "/bad"; fs.canonical["/good"] = root("/real")
+        val result = LocationResolver(fs, StandardTestDispatcher(testScheduler)).resolve(template("/bad", "/good"))
+        assertEquals(listOf("good"), result.children.map { it.displayName }); assertEquals(1, result.unavailableCount)
+    }
+
     private class FakeFs(private val delay: Boolean = false) : RootFileSystem {
         val entries = mutableMapOf<String, DirectoryEntry>(); val canonical = mutableMapOf<String, RootPath>()
+        val statExceptions = mutableSetOf<String>(); val canonicalExceptions = mutableSetOf<String>()
         val release = CompletableDeferred<Unit>(); var active=0; var maxActive=0
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> {
+            if (path.value in statExceptions) error("stat failed")
             active++; maxActive=maxOf(maxActive,active); if(delay) release.await(); active--
             return entries[path.value]?.let { OperationResult.Success(it) } ?: OperationResult.Failure(ErrorCode.NOT_FOUND,"missing")
         }
-        override suspend fun canonicalize(path: RootPath) = canonical[path.value]?.let { OperationResult.Success(it) } ?: OperationResult.Failure(ErrorCode.NOT_FOUND,"missing")
+        override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> {
+            if (path.value in canonicalExceptions) error("canonical failed")
+            return canonical[path.value]?.let { OperationResult.Success(it) } ?: OperationResult.Failure(ErrorCode.NOT_FOUND,"missing")
+        }
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> = error("unused")
     }
     private fun template(vararg paths:String) = AppPathTemplate(LocationId.of("template.resolve"),"T",listOf("pkg"),paths.mapIndexed { i,p -> PathCandidate(LocationId.of("candidate.$i"), p.substringAfterLast('/'),root(p),i) })

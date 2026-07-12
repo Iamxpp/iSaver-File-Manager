@@ -55,9 +55,9 @@ class LibsuRootFileSystem internal constructor(
         }
 
     override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> =
-        execute(buildCanonicalizeCommand(path)).flatMap(::parseCanonicalOutput)
+        execute(buildCanonicalizeCommand(path), "无法解析真实路径").flatMap(::parseCanonicalOutput)
 
-    private suspend fun execute(command: String): OperationResult<List<String>> {
+    private suspend fun execute(command: String, failureMessage: String = "无法读取目录信息"): OperationResult<List<String>> {
         val result = try {
             withTimeout(timeoutMillis) {
                 withContext(ioDispatcher) { shellCoordinator.execute(command) }
@@ -67,19 +67,19 @@ class LibsuRootFileSystem internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            return failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Root command execution failed")
+            return failure(ErrorCode.COMMAND_FAILED, failureMessage, "Root command execution failed")
         }
-        if (result.exitCode != 0) return mapExitCode(result.exitCode, result.stderr.isNotEmpty())
+        if (result.exitCode != 0) return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), failureMessage)
         return OperationResult.Success(result.stdout)
     }
 
-    private fun mapExitCode(exitCode: Int, hadStderr: Boolean): OperationResult.Failure = when (exitCode) {
+    private fun mapExitCode(exitCode: Int, hadStderr: Boolean, failureMessage: String): OperationResult.Failure = when (exitCode) {
         EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
         EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
         EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
         else -> failure(
             ErrorCode.COMMAND_FAILED,
-            "无法读取目录信息",
+            failureMessage,
             if (hadStderr) "Root command failed with diagnostic output" else "Root command failed",
         )
     }
@@ -107,6 +107,7 @@ class LibsuRootFileSystem internal constructor(
         """.trimIndent().withRecordEmitter()
     }
 
+    /** Uses Android's `/system/bin/sh` mksh behavior available on the min API 29 target. */
     private fun buildCanonicalizeCommand(path: RootPath): String = """
         target=${RootCommandCodec.quote(path.value)}
         [ -e "${'$'}target" ] || [ -L "${'$'}target" ] || exit $EXIT_NOT_FOUND
