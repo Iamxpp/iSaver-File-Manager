@@ -8,6 +8,7 @@ import com.iamxpp.isaver.domain.FolderName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -71,8 +72,11 @@ class LibsuRootFileSystem internal constructor(
         val preIdentity=readIdentity(canonical.value);if(preIdentity !is OperationResult.Success)return preIdentity as OperationResult.Failure
         val child=FolderName.join(canonical.value,name)
         when(val e=stat(child)){is OperationResult.Success->return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child exists");is OperationResult.Failure->if(e.code!=ErrorCode.NOT_FOUND)return e}
-        val made=execute(buildMkdirCommand(parent,canonical.value,child,preIdentity.value),"无法创建文件夹")
-        if(made is OperationResult.Failure){if(stat(child) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child appeared");return made}
+        val made=try{execute(buildMkdirCommand(parent,canonical.value,child,preIdentity.value),"无法创建文件夹")}catch(cancelled:CancellationException){
+            try{withContext(NonCancellable){stat(child)}}catch(_:Exception){}
+            throw cancelled
+        }
+        if(made is OperationResult.Failure){if(stat(child) is OperationResult.Success)return uncertain("Mkdir outcome unknown after child appeared");return made}
         val postIdentity=readIdentity(canonical.value)
         if(postIdentity !is OperationResult.Success||postIdentity.value!=preIdentity.value)return uncertain("Parent identity changed")
         val postParent=canonicalize(parent)

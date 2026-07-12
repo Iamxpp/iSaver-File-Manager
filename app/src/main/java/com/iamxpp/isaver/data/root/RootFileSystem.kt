@@ -11,5 +11,10 @@ interface RootFileSystem {
     suspend fun stat(path: RootPath): OperationResult<DirectoryEntry>
 
     suspend fun canonicalize(path: RootPath): OperationResult<RootPath>
+    /**
+     * Creates one directory without retrying the write. If the mkdir dispatch is cancelled,
+     * implementations perform at most one non-cancellable read-only post-check and then rethrow
+     * the original cancellation; they do not clean up or claim a definite outcome.
+     */
     suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>
 }

@@ -5,6 +5,7 @@ import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.FolderName
 import java.util.Base64
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -172,12 +173,32 @@ class LibsuRootFileSystemTest {
         val mkdir=command.indexOf("mkdir -- \"\$child\"",mapping)
         assertTrue(noLink>=0&&noLink<identity&&identity<mapping&&mapping<mkdir)
     }
-    @Test fun `create directory maps existing and mkdir race to already exists`()=runTest{
+    @Test fun `create directory reports uncertain when mkdir side effect precedes exception or timeout`()=runTest{
+        listOf(PostMkdirFailure.EXCEPTION,PostMkdirFailure.TIMEOUT).forEach{failureMode->
+            val runner=PostMkdirFailureRunner(failureMode)
+            val result=LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),10)
+                .createDirectory(path("/p"),FolderName.parse("x").getOrThrow())
+
+            assertEquals(ErrorCode.OUTCOME_UNCERTAIN,(result as OperationResult.Failure).code)
+            assertEquals(1,runner.postSideEffectStatChecks)
+        }
+    }
+    @Test fun `create directory verifies in non cancellable context then preserves cancellation`()=runTest{
+        val runner=PostMkdirFailureRunner(PostMkdirFailure.CANCEL)
+        try{
+            LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),5_000)
+                .createDirectory(path("/p"),FolderName.parse("x").getOrThrow())
+            throw AssertionError("expected cancellation")
+        }catch(_:kotlinx.coroutines.CancellationException){}
+
+        assertEquals(1,runner.postSideEffectStatChecks)
+    }
+    @Test fun `create directory distinguishes preexisting child from uncertain post mkdir appearance`()=runTest{
         val parent=RootCommandResult(0,listOf(record("p","/p","directory","-","2","1","1","0")),emptyList());val child=RootCommandResult(0,listOf(record("x","/p/x","directory","-","2","1","1","0")),emptyList())
         val existing=QueueRunner(ArrayDeque(listOf(parent,RootCommandResult(0,listOf(b64("/p\n")),emptyList()),parent,RootCommandResult(0,listOf("1:2"),emptyList()),child)))
         assertEquals(ErrorCode.ALREADY_EXISTS,(LibsuRootFileSystem(existing,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow()) as OperationResult.Failure).code)
         val race=QueueRunner(ArrayDeque(listOf(parent,RootCommandResult(0,listOf(b64("/p\n")),emptyList()),parent,RootCommandResult(0,listOf("1:2"),emptyList()),RootCommandResult(44,emptyList(),emptyList()),RootCommandResult(47,emptyList(),emptyList()),child)))
-        assertEquals(ErrorCode.ALREADY_EXISTS,(LibsuRootFileSystem(race,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow()) as OperationResult.Failure).code)
+        assertEquals(ErrorCode.OUTCOME_UNCERTAIN,(LibsuRootFileSystem(race,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow()) as OperationResult.Failure).code)
     }
     @Test fun `create directory propagates cancellation and maps ordinary execution exception`()=runTest{
         val cancelled=RootCommandRunner{throw kotlinx.coroutines.CancellationException()};try{LibsuRootFileSystem(cancelled,StandardTestDispatcher(testScheduler),5_000).createDirectory(path("/p"),FolderName.parse("x").getOrThrow());throw AssertionError("expected cancellation")}catch(_:kotlinx.coroutines.CancellationException){}
@@ -227,6 +248,28 @@ class LibsuRootFileSystemTest {
             }
             else->error("Unexpected command: $command")
         }}
+    }
+    private enum class PostMkdirFailure{EXCEPTION,TIMEOUT,CANCEL}
+    private inner class PostMkdirFailureRunner(private val failure:PostMkdirFailure):RootCommandRunner{
+        var postSideEffectStatChecks=0;private var mkdirAttempted=false
+        override suspend fun run(command:String):RootCommandResult=when{
+            command.contains("target='/p/x'")->{
+                if(mkdirAttempted){postSideEffectStatChecks++;RootCommandResult(0,listOf(record("x","/p/x","directory","-","2","1","1","0")),emptyList())}
+                else RootCommandResult(44,emptyList(),emptyList())
+            }
+            command.contains("target='/p'")&&command.contains("emit_isaver_record \"\$target\"")->RootCommandResult(0,listOf(record("p","/p","directory","-","2","1","1","0")),emptyList())
+            command.contains("target='/p'")&&command.contains("readlink -f")->RootCommandResult(0,listOf(b64("/p\n")),emptyList())
+            command.contains("stat -c '%d:%i'")&&!command.contains("mkdir --")->RootCommandResult(0,listOf("1:2"),emptyList())
+            command.contains("mkdir --")->{
+                mkdirAttempted=true
+                when(failure){
+                    PostMkdirFailure.EXCEPTION->error("shell result lost")
+                    PostMkdirFailure.TIMEOUT->{delay(100);RootCommandResult(0,emptyList(),emptyList())}
+                    PostMkdirFailure.CANCEL->throw kotlinx.coroutines.CancellationException("cancel after mkdir")
+                }
+            }
+            else->error("Unexpected command: $command")
+        }
     }
 
     private fun path(value: String) = RootPath.parse(value).getOrThrow()
