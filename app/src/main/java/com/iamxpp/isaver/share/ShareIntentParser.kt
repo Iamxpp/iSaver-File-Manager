@@ -3,6 +3,7 @@ package com.iamxpp.isaver.share
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 
@@ -17,9 +18,13 @@ class ShareIntentParser(context: Context) {
             )
         }
 
-        @Suppress("DEPRECATION")
-        val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-            ?: return failure(ShareIntentFailureReason.MISSING_STREAM, "未接收到文件")
+        val uri = when (val stream = extractStreamUri(intent)) {
+            StreamExtra.Missing ->
+                return failure(ShareIntentFailureReason.MISSING_STREAM, "未接收到文件")
+            StreamExtra.Invalid ->
+                return failure(ShareIntentFailureReason.INVALID_SHARE, "分享文件信息无效")
+            is StreamExtra.Valid -> stream.uri
+        }
 
         if (uri.scheme != "content") {
             return failure(
@@ -27,13 +32,6 @@ class ShareIntentParser(context: Context) {
                 "仅支持安全的内容 Uri",
             )
         }
-        if (intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION == 0) {
-            return failure(
-                ShareIntentFailureReason.SOURCE_UNREADABLE,
-                "无法读取来源文件",
-            )
-        }
-
         return try {
             val mimeType = contentResolver.getType(uri) ?: intent.type
             val projection = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
@@ -57,7 +55,7 @@ class ShareIntentParser(context: Context) {
                     mimeType = mimeType,
                 ),
             )
-        } catch (_: SecurityException) {
+        } catch (_: RuntimeException) {
             failure(ShareIntentFailureReason.SOURCE_UNREADABLE, "无法读取来源文件")
         }
     }
@@ -73,6 +71,21 @@ class ShareIntentParser(context: Context) {
         return if (extension == null) "未命名文件" else "未命名文件.$extension"
     }
 
+    private fun extractStreamUri(intent: Intent): StreamExtra {
+        return try {
+            if (!intent.hasExtra(Intent.EXTRA_STREAM)) return StreamExtra.Missing
+            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                (intent.extras?.get(Intent.EXTRA_STREAM) as? Uri)
+            }
+            uri?.let(StreamExtra::Valid) ?: StreamExtra.Invalid
+        } catch (_: RuntimeException) {
+            StreamExtra.Invalid
+        }
+    }
+
     private fun failure(
         reason: ShareIntentFailureReason,
         userMessage: String,
@@ -83,5 +96,11 @@ class ShareIntentParser(context: Context) {
 
     private companion object {
         val SAFE_MIME_SUBTYPE = Regex("[A-Za-z0-9]{1,10}")
+    }
+
+    private sealed interface StreamExtra {
+        data object Missing : StreamExtra
+        data object Invalid : StreamExtra
+        data class Valid(val uri: Uri) : StreamExtra
     }
 }

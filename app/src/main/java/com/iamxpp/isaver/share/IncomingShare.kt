@@ -24,6 +24,7 @@ sealed interface ShareIntentParseResult {
 enum class ShareIntentFailureReason {
     UNSUPPORTED_INTENT,
     MISSING_STREAM,
+    INVALID_SHARE,
     UNSUPPORTED_URI,
     SOURCE_UNREADABLE,
 }

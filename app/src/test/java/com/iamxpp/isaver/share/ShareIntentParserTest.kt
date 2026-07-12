@@ -4,9 +4,12 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Intent
 import android.database.Cursor
+import android.database.CursorIndexOutOfBoundsException
 import android.database.MatrixCursor
+import android.database.sqlite.SQLiteException
 import android.net.Uri
 import android.os.Bundle
+import android.os.BadParcelableException
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
@@ -51,6 +54,24 @@ class ShareIntentParserTest {
     }
 
     @Test
+    @Config(sdk = [29])
+    fun `parses a valid Uri on Android 10`() {
+        assertTrue(ShareIntentParser(context).parse(sendIntent()) is ShareIntentParseResult.Success)
+    }
+
+    @Test
+    @Config(sdk = [33])
+    fun `parses a valid Uri with typed Parcelable API on Android 13`() {
+        assertTrue(ShareIntentParser(context).parse(sendIntent()) is ShareIntentParseResult.Success)
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun `parses a valid Uri with typed Parcelable API on Android 15`() {
+        assertTrue(ShareIntentParser(context).parse(sendIntent()) is ShareIntentParseResult.Success)
+    }
+
+    @Test
     fun `rejects an intent without a stream`() {
         val result = ShareIntentParser(context).parse(
             Intent(Intent.ACTION_SEND).apply {
@@ -89,6 +110,38 @@ class ShareIntentParserTest {
     }
 
     @Test
+    @Config(sdk = [29])
+    fun `returns invalid share for String stream extra on Android 10`() {
+        val result = ShareIntentParser(context).parse(
+            Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, "content://share.test/document/42")
+            },
+        )
+
+        assertFailure(result, ShareIntentFailureReason.INVALID_SHARE, "分享文件信息无效")
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun `returns invalid share for list stream extra on Android 15`() {
+        val result = ShareIntentParser(context).parse(
+            Intent(Intent.ACTION_SEND).apply {
+                putStringArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(uri.toString()))
+            },
+        )
+
+        assertFailure(result, ShareIntentFailureReason.INVALID_SHARE, "分享文件信息无效")
+    }
+
+    @Test
+    @Config(sdk = [29])
+    fun `returns invalid share when lazy Bundle unparcel throws`() {
+        val result = ShareIntentParser(context).parse(ThrowingExtrasIntent())
+
+        assertFailure(result, ShareIntentFailureReason.INVALID_SHARE, "分享文件信息无效")
+    }
+
+    @Test
     fun `rejects file Uri without converting it to a path`() {
         val fileUri = Uri.parse("file:///storage/emulated/0/report.pdf")
         val result = ShareIntentParser(context).parse(
@@ -103,7 +156,7 @@ class ShareIntentParserTest {
     }
 
     @Test
-    fun `rejects a stream without a temporary read grant`() {
+    fun `parses a stream without a flag when provider access succeeds`() {
         val result = ShareIntentParser(context).parse(
             Intent(Intent.ACTION_SEND).apply {
                 type = "application/pdf"
@@ -111,7 +164,7 @@ class ShareIntentParserTest {
             },
         )
 
-        assertFailure(result, ShareIntentFailureReason.SOURCE_UNREADABLE, "无法读取来源文件")
+        assertTrue(result is ShareIntentParseResult.Success)
     }
 
     @Test
@@ -134,6 +187,54 @@ class ShareIntentParserTest {
         val result = ShareIntentParser(context).parse(sendIntent())
 
         assertFailure(result, ShareIntentFailureReason.SOURCE_UNREADABLE, "无法读取来源文件")
+    }
+
+    @Test
+    fun `falls back when metadata columns are missing`() {
+        registerProvider(omitMetadataColumns = true, mimeType = "application/pdf")
+
+        val result = ShareIntentParser(context).parse(sendIntent())
+
+        assertTrue(result is ShareIntentParseResult.Success)
+        val share = (result as ShareIntentParseResult.Success).share
+        assertEquals("未命名文件.pdf", share.displayName)
+        assertEquals(null, share.sizeBytes)
+    }
+
+    @Test
+    fun `returns unreadable failure for provider runtime metadata errors`() {
+        listOf(
+            IllegalArgumentException("bad projection"),
+            SQLiteException("database unavailable"),
+            CursorIndexOutOfBoundsException(4, 2),
+            RuntimeException("provider failure"),
+        ).forEach { exception ->
+            registerProvider(queryFailure = exception)
+
+            val result = ShareIntentParser(context).parse(sendIntent())
+
+            assertFailure(result, ShareIntentFailureReason.SOURCE_UNREADABLE, "无法读取来源文件")
+        }
+    }
+
+    @Test
+    fun `closes cursor and returns unreadable failure when size has wrong type`() {
+        val provider = registerProvider(sizeValue = "not-a-number")
+
+        val result = ShareIntentParser(context).parse(sendIntent())
+
+        assertFailure(result, ShareIntentFailureReason.SOURCE_UNREADABLE, "无法读取来源文件")
+        assertTrue(provider.lastCursor?.wasClosed == true)
+    }
+
+    @Test
+    fun `closes cursor and returns unreadable failure when name has wrong type`() {
+        val provider = registerProvider(throwOnDisplayName = true)
+
+        val result = ShareIntentParser(context).parse(sendIntent())
+
+        assertFailure(result, ShareIntentFailureReason.SOURCE_UNREADABLE, "无法读取来源文件")
+        assertTrue(provider.lastCursor?.wasClosed == true)
     }
 
     @Test
@@ -165,19 +266,37 @@ class ShareIntentParserTest {
         size: Long? = 4096L,
         mimeType: String? = "application/pdf",
         denyQuery: Boolean = false,
-    ) {
+        omitMetadataColumns: Boolean = false,
+        queryFailure: RuntimeException? = null,
+        sizeValue: Any? = size,
+        throwOnDisplayName: Boolean = false,
+    ): MetadataProvider {
+        val provider = MetadataProvider(
+            displayName = displayName,
+            sizeValue = sizeValue,
+            mimeType = mimeType,
+            queryFailure = queryFailure ?: if (denyQuery) SecurityException("permission denied") else null,
+            omitMetadataColumns = omitMetadataColumns,
+            throwOnDisplayName = throwOnDisplayName,
+        )
         ShadowContentResolver.registerProviderInternal(
             "share.test",
-            MetadataProvider(displayName, size, mimeType, denyQuery),
+            provider,
         )
+        return provider
     }
 
     private class MetadataProvider(
         private val displayName: String?,
-        private val size: Long?,
+        private val sizeValue: Any?,
         private val mimeType: String?,
-        private val denyQuery: Boolean,
+        private val queryFailure: RuntimeException?,
+        private val omitMetadataColumns: Boolean,
+        private val throwOnDisplayName: Boolean,
     ) : ContentProvider() {
+        var lastCursor: TrackingMatrixCursor? = null
+            private set
+
         override fun onCreate() = true
 
         override fun getType(uri: Uri): String? = mimeType
@@ -198,16 +317,28 @@ class ShareIntentParserTest {
         ): Cursor = metadataCursor(projection)
 
         private fun metadataCursor(projection: Array<out String>?): Cursor {
-            if (denyQuery) throw SecurityException("permission denied")
-            val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
-            return MatrixCursor(columns).apply {
+            queryFailure?.let { throw it }
+            val columns = if (omitMetadataColumns) {
+                arrayOf("ignored")
+            } else {
+                projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+            }
+            return TrackingMatrixCursor(
+                columns = columns,
+                throwingStringColumn = if (throwOnDisplayName) {
+                    columns.indexOf(OpenableColumns.DISPLAY_NAME)
+                } else {
+                    -1
+                },
+            ).apply {
                 addRow(columns.map { column ->
                     when (column) {
                         OpenableColumns.DISPLAY_NAME -> displayName
-                        OpenableColumns.SIZE -> size
+                        OpenableColumns.SIZE -> sizeValue
                         else -> null
                     }
                 })
+                lastCursor = this
             }
         }
 
@@ -215,5 +346,31 @@ class ShareIntentParserTest {
         override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
         override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
         override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? = null
+    }
+
+    private class TrackingMatrixCursor(
+        columns: Array<out String>,
+        private val throwingStringColumn: Int,
+    ) : MatrixCursor(columns) {
+        var wasClosed = false
+            private set
+
+        override fun close() {
+            wasClosed = true
+            super.close()
+        }
+
+        override fun getString(column: Int): String? {
+            if (column == throwingStringColumn) throw ClassCastException("wrong display name type")
+            return super.getString(column)
+        }
+    }
+
+    private class ThrowingExtrasIntent : Intent(ACTION_SEND) {
+        override fun hasExtra(name: String?): Boolean = name == EXTRA_STREAM
+
+        override fun getExtras(): Bundle {
+            throw BadParcelableException("malformed parcel")
+        }
     }
 }
