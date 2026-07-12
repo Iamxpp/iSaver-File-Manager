@@ -92,29 +92,67 @@ class LibsuRootFileSystem internal constructor(
         val (canonical,identity)=prepared.value
         val temporary=FolderName.join(canonical,temporaryName)
         if(stat(temporary) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"临时文件已存在","Temporary exists")
-        val result=execute(buildCopyCommand(source,targetDirectory,canonical,temporary,identity,expectedSizeBytes),"无法缓存到目标目录")
-        if(result is OperationResult.Failure)return result
+        val result=try{execute(buildCopyCommand(source,targetDirectory,canonical,temporary,identity,expectedSizeBytes),"无法缓存到目标目录")}catch(cancelled:CancellationException){
+            withContext(NonCancellable){cleanupIncompleteTemporary(canonical,temporaryName,expectedSizeBytes)}
+            throw cancelled
+        }
+        if(result is OperationResult.Failure){
+            val post=stat(temporary)
+            if(post is OperationResult.Success&&post.value.type==com.iamxpp.isaver.domain.EntryType.FILE&&!post.value.symbolicLink&&post.value.sizeBytes==expectedSizeBytes)return uncertain("Copy result lost after complete temporary appeared")
+            if(post is OperationResult.Success)removeTemporary(canonical,temporaryName)
+            return result
+        }
         val verified=stat(temporary)
         if(verified !is OperationResult.Success)return uncertain("Copied temporary could not be verified")
         if(verified.value.symbolicLink||verified.value.type!=com.iamxpp.isaver.domain.EntryType.FILE||verified.value.sizeBytes!=expectedSizeBytes)return failure(ErrorCode.COMMAND_FAILED,"文件复制不完整","Temporary size mismatch")
         return verified
     }
 
+    private suspend fun cleanupIncompleteTemporary(directory:RootPath,name:FolderName,expected:Long){
+        val temporary=FolderName.join(directory,name);val post=stat(temporary)
+        if(post is OperationResult.Success&&!(post.value.type==com.iamxpp.isaver.domain.EntryType.FILE&&!post.value.symbolicLink&&post.value.sizeBytes==expected))removeTemporary(directory,name)
+    }
+
     override suspend fun moveTemporary(directory:RootPath,temporaryName:FolderName,finalName:FolderName):OperationResult<DirectoryEntry>{
         if(!isTemporaryName(temporaryName.value))return failure(ErrorCode.COMMAND_FAILED,"临时文件名无效","Invalid temporary name")
-        val temporary=FolderName.join(directory,temporaryName);val final=FolderName.join(directory,finalName)
+        val prepared=prepareWritableDirectory(directory);if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
+        val (canonical,identity)=prepared.value
+        val temporary=FolderName.join(canonical,temporaryName);val final=FolderName.join(canonical,finalName)
         if(stat(final) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件已存在","Final exists")
         val tempStat=stat(temporary);if(tempStat !is OperationResult.Success)return tempStat as OperationResult.Failure
         if(tempStat.value.symbolicLink||tempStat.value.type!=com.iamxpp.isaver.domain.EntryType.FILE)return failure(ErrorCode.COMMAND_FAILED,"临时文件无效","Temporary not regular")
-        val moved=execute("temporary=${RootCommandCodec.quote(temporary.value)}\nfinal=${RootCommandCodec.quote(final.value)}\n[ -f \"\$temporary\" ] && [ ! -L \"\$temporary\" ] && [ ! -e \"\$final\" ] && [ ! -L \"\$final\" ] && mv -- \"\$temporary\" \"\$final\"","无法完成保存")
-        if(moved is OperationResult.Failure)return moved
+        val moved=try{execute("""
+            temporary=${RootCommandCodec.quote(temporary.value)}
+            final=${RootCommandCodec.quote(final.value)}
+            original=${RootCommandCodec.quote(directory.value)}
+            [ ! -L "${'$'}original" ] && current=${'$'}(stat -c '%d:%i' -- "${'$'}original") && mapped=${'$'}(readlink -f -- "${'$'}original" | base64 -w 0) && [ "${'$'}current" = '${identity.device}:${identity.inode}' ] && [ "${'$'}mapped" = ${RootCommandCodec.quote(canonicalLineBase64(canonical))} ] || exit 47
+            [ -f "${'$'}temporary" ] && [ ! -L "${'$'}temporary" ] || exit 47
+            set -C
+            : > "${'$'}final" || exit 49
+            reservation=${'$'}(stat -c '%d:%i' -- "${'$'}final") || exit 47
+            [ "${'$'}(stat -c %s -- "${'$'}final")" = 0 ] && [ "${'$'}(stat -c '%d:%i' -- "${'$'}final")" = "${'$'}reservation" ] || { [ "${'$'}(stat -c '%d:%i' -- "${'$'}final" 2>/dev/null)" = "${'$'}reservation" ] && rm -f -- "${'$'}final"; exit 47; }
+            mv -- "${'$'}temporary" "${'$'}final"
+        """.trimIndent(),"无法完成保存")}catch(cancelled:CancellationException){
+            withContext(NonCancellable){postMoveOutcome(final,temporary)}
+            throw cancelled
+        }
+        if(moved is OperationResult.Failure){
+            if(postMoveOutcome(final,temporary))return uncertain("Move result lost after final appeared")
+            return moved
+        }
         val verified=stat(final);return if(verified is OperationResult.Success)verified else uncertain("Move outcome could not be verified")
+    }
+
+    private suspend fun postMoveOutcome(final:RootPath,temporary:RootPath):Boolean{
+        val finalState=stat(final);val temporaryState=stat(temporary)
+        return finalState is OperationResult.Success&&finalState.value.type==com.iamxpp.isaver.domain.EntryType.FILE&&!finalState.value.symbolicLink&&temporaryState is OperationResult.Failure&&temporaryState.code==ErrorCode.NOT_FOUND
     }
 
     override suspend fun removeTemporary(directory:RootPath,temporaryName:FolderName):OperationResult<Unit>{
         if(!isTemporaryName(temporaryName.value))return failure(ErrorCode.COMMAND_FAILED,"临时文件名无效","Invalid temporary name")
-        val temporary=FolderName.join(directory,temporaryName)
-        return execute("temporary=${RootCommandCodec.quote(temporary.value)}\n[ ! -L \"\$temporary\" ] && rm -f -- \"\$temporary\"","无法清理临时文件").flatMap{OperationResult.Success(Unit)}
+        val prepared=prepareWritableDirectory(directory);if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
+        val (canonical,identity)=prepared.value;val temporary=FolderName.join(canonical,temporaryName)
+        return execute("original=${RootCommandCodec.quote(directory.value)}\ntemporary=${RootCommandCodec.quote(temporary.value)}\n[ ! -L \"\$original\" ] && current=\$(stat -c '%d:%i' -- \"\$original\") && mapped=\$(readlink -f -- \"\$original\" | base64 -w 0) && [ \"\$current\" = '${identity.device}:${identity.inode}' ] && [ \"\$mapped\" = ${RootCommandCodec.quote(canonicalLineBase64(canonical))} ] && [ ! -L \"\$temporary\" ] && rm -f -- \"\$temporary\"","无法清理临时文件").flatMap{OperationResult.Success(Unit)}
     }
 
     private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<Pair<RootPath,RootFileIdentity>>{
@@ -156,6 +194,8 @@ class LibsuRootFileSystem internal constructor(
         EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
         EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
         48 -> failure(ErrorCode.NOT_WRITABLE, "目录不可写", "Path was not writable")
+        49 -> failure(ErrorCode.ALREADY_EXISTS, "文件已存在", "Final reservation already exists")
+        50 -> failure(ErrorCode.NO_SPACE, "存储空间不足", "No space left on device")
         else -> failure(
             ErrorCode.COMMAND_FAILED,
             failureMessage,

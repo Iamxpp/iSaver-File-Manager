@@ -1,6 +1,7 @@
 package com.iamxpp.isaver.transfer
 
 import android.content.ContentResolver
+import com.iamxpp.isaver.data.root.AppCachePath
 import android.system.ErrnoException
 import android.system.OsConstants
 import com.iamxpp.isaver.share.IncomingShare
@@ -17,7 +18,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
-data class CachedIncomingFile(val file: File, val sizeBytes: Long)
+data class CachedIncomingFile(val file: File, val sizeBytes: Long, val appCachePath:AppCachePath)
 
 sealed interface IncomingFileCacheResult {
     data class Success(val file: CachedIncomingFile) : IncomingFileCacheResult
@@ -64,7 +65,7 @@ class IncomingFileCache internal constructor(
                 }
                 if (share.sizeBytes != null && copied != share.sizeBytes) {
                     target.delete(); failure(IncomingFileCacheFailure.SIZE_MISMATCH)
-                } else IncomingFileCacheResult.Success(CachedIncomingFile(target, copied))
+                } else IncomingFileCacheResult.Success(CachedIncomingFile(target, copied,AppCachePath.fromIncomingCacheFile(requireNotNull(incomingDir.parentFile),target).getOrThrow()))
             } catch (cancelled: CancellationException) {
                 target.delete(); throw cancelled
             } catch (_: SourceReadException) {

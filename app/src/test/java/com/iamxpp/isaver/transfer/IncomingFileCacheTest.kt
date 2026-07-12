@@ -43,6 +43,7 @@ class IncomingFileCacheTest {
         assertArrayEquals(bytes, file.file.readBytes())
         assertEquals(File(context.cacheDir, "incoming").canonicalFile, file.file.parentFile!!.canonicalFile)
         assertTrue(file.file.name.endsWith(".tmp")); UUID.fromString(file.file.name.removeSuffix(".tmp"))
+        assertEquals(file.file.canonicalPath, file.appCachePath.value)
         assertFalse(file.file.name.contains("report")); assertEquals(bytes.size.toLong(), file.sizeBytes)
         assertEquals(bytes.size.toLong(), progress.last()); assertTrue(progress.zipWithNext().all { it.first <= it.second })
     }
@@ -100,7 +101,7 @@ class IncomingFileCacheTest {
         register { ByteArrayInputStream(byteArrayOf(1)) }; val cache=cache(); val cached=(cache.cache(share(1)){} as IncomingFileCacheResult.Success).file
         assertTrue(cache.cleanup(cached)); assertTrue(cache.cleanup(cached))
         val outside=File(context.cacheDir,"outside.tmp").apply{writeText("x")}
-        assertFalse(cache.cleanup(CachedIncomingFile(outside,1))); assertTrue(outside.exists())
+        assertFalse(cache.cleanup(CachedIncomingFile(outside,1,cached.appCachePath))); assertTrue(outside.exists())
     }
 
     @Test fun `cleanup deletes cached file from already cancelled coroutine`() = runTest {

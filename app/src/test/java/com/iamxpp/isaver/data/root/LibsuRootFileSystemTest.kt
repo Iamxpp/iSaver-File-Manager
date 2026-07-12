@@ -215,8 +215,9 @@ class LibsuRootFileSystemTest {
         val runner=TransferRunner()
         val fs=LibsuRootFileSystem(runner,StandardTestDispatcher(testScheduler),5_000)
 
+        val source=AppCachePath.fromIncomingCacheFile(java.io.File("/data/user/0/com.iamxpp.isaver/cache"),java.io.File("/data/user/0/com.iamxpp.isaver/cache/incoming/123e4567-e89b-12d3-a456-426614174000.tmp")).getOrThrow()
         val result=fs.copyFromAppCache(
-            source=AppCachePath.parse("/data/user/0/com.iamxpp.isaver/cache/incoming/source.tmp").getOrThrow(),
+            source=source,
             targetDirectory=path("/p"),
             temporaryName=FolderName.parse(".isaver-123e4567-e89b-12d3-a456-426614174000.tmp").getOrThrow(),
             expectedSizeBytes=4,
@@ -224,7 +225,7 @@ class LibsuRootFileSystemTest {
 
         assertTrue(result is OperationResult.Success<*>)
         val command=runner.commands.single{it.contains("cp --")}
-        assertTrue(command.contains("source='/data/user/0/com.iamxpp.isaver/cache/incoming/source.tmp'"))
+        assertTrue(command.contains("source=${RootCommandCodec.quote(source.value)}"))
         assertTrue(command.contains("original='/p'"))
         assertTrue(command.contains("temporary='/p/.isaver-123e4567-e89b-12d3-a456-426614174000.tmp'"))
         assertTrue(command.contains("[ ! -L \"\$original\" ]"))
@@ -247,9 +248,12 @@ class LibsuRootFileSystemTest {
         val command=runner.commands.single{it.contains("mv --")}
         assertTrue(command.contains("[ -f \"\$temporary\" ]"))
         assertTrue(command.contains("[ ! -L \"\$temporary\" ]"))
-        assertTrue(command.contains("[ ! -e \"\$final\" ]"))
-        assertTrue(command.contains("[ ! -L \"\$final\" ]"))
         assertTrue(command.contains("mv -- \"\$temporary\" \"\$final\""))
+        assertTrue(command.contains("set -C"))
+        assertTrue(command.contains(": > \"\$final\""))
+        assertTrue(command.contains("reservation=\$(stat -c '%d:%i' -- \"\$final\")"))
+        assertTrue(command.contains("[ \"\$(stat -c %s -- \"\$final\")\" = 0 ]"))
+        assertTrue(command.contains("[ \"\$(stat -c '%d:%i' -- \"\$final\")\" = \"\$reservation\" ]"))
 
         val collision=TransferRunner(temporaryExists=true,finalExists=true)
         val collisionResult=LibsuRootFileSystem(collision,StandardTestDispatcher(testScheduler),5_000)
