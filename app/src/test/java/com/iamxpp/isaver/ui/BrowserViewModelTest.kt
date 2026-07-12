@@ -130,6 +130,7 @@ class BrowserViewModelTest {
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> { listed += path.value; return listBlock(path) }
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = error("unused")
         override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = error("unused")
+        override suspend fun createDirectory(parent:RootPath,name:com.iamxpp.isaver.domain.FolderName):OperationResult<DirectoryEntry> = error("unused")
     }
 
     private class MarkerDispatcher(

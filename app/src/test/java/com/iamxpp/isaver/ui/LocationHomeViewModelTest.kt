@@ -107,6 +107,7 @@ class LocationHomeViewModelTest {
         var statCalls=0;override suspend fun stat(path:RootPath):OperationResult<DirectoryEntry>{statCalls++;active++;maxActive=maxOf(maxActive,active);if(blockStats)release.await();active--;return stats[path.value]?.let{OperationResult.Success(it)}?:OperationResult.Failure(ErrorCode.NOT_FOUND,"missing")}
         override suspend fun list(path:RootPath):OperationResult<List<DirectoryEntry>> = error("unused")
         override suspend fun canonicalize(path:RootPath):OperationResult<RootPath> = error("unused")
+        override suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry> = error("unused")
     }
     private fun root(v:String)=RootPath.parse(v).getOrThrow()
     private fun entry(p:String,t:EntryType,r:Boolean,w:Boolean)=DirectoryEntry(root(p),p.substringAfterLast('/'),t,null,null,r,w,false)

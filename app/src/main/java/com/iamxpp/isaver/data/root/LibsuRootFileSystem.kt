@@ -4,6 +4,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.FolderName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,21 @@ class LibsuRootFileSystem internal constructor(
     override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> =
         execute(buildCanonicalizeCommand(path), "无法解析真实路径").flatMap(::parseCanonicalOutput)
 
+    override suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>{
+        val canonical=canonicalize(parent);if(canonical !is OperationResult.Success)return canonical as OperationResult.Failure
+        val parentStat=stat(canonical.value);if(parentStat !is OperationResult.Success)return parentStat as OperationResult.Failure
+        val p=parentStat.value
+        if(p.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY)return failure(ErrorCode.NOT_DIRECTORY,"路径不是目录","Parent was not directory")
+        if(p.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"无法在符号链接目录中创建文件夹","Canonical parent was symlink")
+        if(!p.readable)return failure(ErrorCode.NOT_READABLE,"目录不可读","Parent not readable")
+        if(!p.writable)return failure(ErrorCode.NOT_WRITABLE,"目录不可写","Parent not writable")
+        val child=FolderName.join(canonical.value,name)
+        when(val e=stat(child)){is OperationResult.Success->return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child exists");is OperationResult.Failure->if(e.code!=ErrorCode.NOT_FOUND)return e}
+        val made=execute(buildMkdirCommand(canonical.value,child),"无法创建文件夹")
+        if(made is OperationResult.Failure){if(stat(child) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child appeared");return made}
+        return stat(child)
+    }
+
     private suspend fun execute(command: String, failureMessage: String = "无法读取目录信息"): OperationResult<List<String>> {
         val result = try {
             withTimeout(timeoutMillis) {
@@ -77,6 +93,7 @@ class LibsuRootFileSystem internal constructor(
         EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
         EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
         EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
+        48 -> failure(ErrorCode.NOT_WRITABLE, "目录不可写", "Path was not writable")
         else -> failure(
             ErrorCode.COMMAND_FAILED,
             failureMessage,
@@ -113,6 +130,13 @@ class LibsuRootFileSystem internal constructor(
         [ -e "${'$'}target" ] || [ -L "${'$'}target" ] || exit $EXIT_NOT_FOUND
         set -o pipefail
         readlink -f -- "${'$'}target" | base64 -w 0 || exit 47
+    """.trimIndent()
+    private fun buildMkdirCommand(parent:RootPath,child:RootPath)="""
+        parent=${RootCommandCodec.quote(parent.value)}
+        child=${RootCommandCodec.quote(child.value)}
+        [ -d "${'$'}parent" ] || exit $EXIT_NOT_DIRECTORY
+        [ -w "${'$'}parent" ] || exit 48
+        mkdir -- "${'$'}child"
     """.trimIndent()
 
     private fun parseCanonicalOutput(lines: List<String>): OperationResult<RootPath> = try {

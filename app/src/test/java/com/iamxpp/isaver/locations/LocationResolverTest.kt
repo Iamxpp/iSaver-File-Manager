@@ -51,6 +51,7 @@ class LocationResolverTest {
             override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = throw CancellationException()
             override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> = error("unused")
             override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = error("unused")
+            override suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry> = error("unused")
         }
         LocationResolver(fs, StandardTestDispatcher(testScheduler)).resolve(template("/a"))
     }
@@ -83,6 +84,7 @@ class LocationResolverTest {
             return canonical[path.value]?.let { OperationResult.Success(it) } ?: OperationResult.Failure(ErrorCode.NOT_FOUND,"missing")
         }
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> = error("unused")
+        override suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry> = error("unused")
     }
     private fun template(vararg paths:String) = AppPathTemplate(LocationId.of("template.resolve"),"T",listOf("pkg"),paths.mapIndexed { i,p -> PathCandidate(LocationId.of("candidate.$i"), p.substringAfterLast('/'),root(p),i) })
     private fun entry(path:String,type:EntryType,readable:Boolean)=DirectoryEntry(root(path),path.substringAfterLast('/'),type,null,null,readable,true,false)
