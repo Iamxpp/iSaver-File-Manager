@@ -1,0 +1,42 @@
+package com.iamxpp.isaver
+
+import androidx.test.core.app.ApplicationProvider
+import androidx.room.RoomDatabase
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.After
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(application = ISaverApplication::class, sdk = [34])
+class ISaverApplicationTest {
+    private val application: ISaverApplication = ApplicationProvider.getApplicationContext()
+
+    @Test
+    fun applicationOwnsSingleLocationGraph() {
+        assertSame(application.database, application.database)
+        assertSame(application.customLocationRepository, application.customLocationRepository)
+        assertSame(application.locationResolver, application.locationResolver)
+        assertSame(application.locationHomeAppResolver, application.locationHomeAppResolver)
+        assertSame(application.locationHomeCustomStore, application.locationHomeCustomStore)
+        assertSame(application.browserPreferencesStore, application.browserPreferencesStore)
+    }
+
+    @Test
+    fun productionRoomDoesNotEnableMainThreadQueries() {
+        val allowMainThreadQueries = RoomDatabase::class.java
+            .getDeclaredField("allowMainThreadQueries")
+            .apply { isAccessible = true }
+            .getBoolean(application.database)
+
+        assertFalse(allowMainThreadQueries)
+    }
+
+    @After
+    fun closeDatabase() {
+        application.database.close()
+    }
+}
