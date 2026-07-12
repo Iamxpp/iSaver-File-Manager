@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -89,47 +91,47 @@ fun LocationHomeScreen(
                 modifier = Modifier.weight(1f),
             )
         } else {
-            val entries = buildList {
-                visibleApps.forEach { addAll(it.children.map { location -> PresentedLocation(location, location.path.value) }) }
-                addAll(visibleCommon.map { PresentedLocation(it, it.path.value) })
-                addAll(visibleCustom.map { PresentedLocation(it.location, it.availability.label, it.availability) })
-            }
-            Column(Modifier.weight(1f)) {
-                Text("应用位置", modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            LazyColumn(Modifier.weight(1f)) {
+                item { SectionTitle("应用位置", Modifier.testTag("section-app")) }
                 visibleApps.forEach { group ->
-                    Text(group.displayName, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
-                    if (group.empty) Text("未找到可用${group.displayName}目录", modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
-                }
-                Text("通用位置 · 自定义位置", modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                FilesGrid(
-                    items = entries,
-                    key = { it.location.id.value },
-                    modifier = Modifier.weight(1f),
-                ) { item ->
-                    Column {
-                        FileGridCell(
-                            entry = item.location.asDirectoryEntry(),
-                            displayName = item.location.displayName,
-                            metadata = item.metadata,
-                            onClick = {
-                                if (item.availability == null || item.availability is LocationAvailability.Available) {
-                                    onOpenLocation(item.location.path, item.location.displayName)
-                                }
-                            },
-                        )
-                        if (item.location.source == StorageLocation.Source.CUSTOM) {
-                            Row {
-                                TextButton(
-                                    onClick = { editor = item.location },
-                                    modifier = Modifier.semantics { contentDescription = "编辑视图：${item.location.displayName}" },
-                                ) { Text("编辑") }
-                                TextButton(
-                                    onClick = { removal = item.location },
-                                    modifier = Modifier.semantics { contentDescription = "移除视图：${item.location.displayName}" },
-                                ) { Text("移除") }
-                            }
+                    item(key = group.templateId.value) { Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp)) }
+                    if (group.empty) {
+                        item(key = "${group.templateId.value}.empty") {
+                            Text("未找到可用${group.displayName}目录", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                        }
+                    } else {
+                        item(key = "${group.templateId.value}.grid") {
+                            LocationGrid(
+                                entries = group.children.map { PresentedLocation(it, it.path.value) },
+                                testTag = "grid-app",
+                                onOpenLocation = onOpenLocation,
+                                onEdit = { editor = it },
+                                onRemove = { removal = it },
+                            )
                         }
                     }
+                }
+                item { SectionTitle("通用位置", Modifier.testTag("section-common")) }
+                if (visibleCommon.isEmpty()) item { Text("暂无通用位置", modifier = Modifier.padding(16.dp)) }
+                else item {
+                    LocationGrid(
+                        entries = visibleCommon.map { PresentedLocation(it, it.path.value) },
+                        testTag = "grid-common",
+                        onOpenLocation = onOpenLocation,
+                        onEdit = { editor = it },
+                        onRemove = { removal = it },
+                    )
+                }
+                item { SectionTitle("自定义位置", Modifier.testTag("section-custom")) }
+                if (visibleCustom.isEmpty()) item { Text("暂无自定义位置", modifier = Modifier.padding(16.dp)) }
+                else item {
+                    LocationGrid(
+                        entries = visibleCustom.map { PresentedLocation(it.location, it.availability.label, it.availability) },
+                        testTag = "grid-custom",
+                        onOpenLocation = onOpenLocation,
+                        onEdit = { editor = it },
+                        onRemove = { removal = it },
+                    )
                 }
             }
         }
@@ -203,10 +205,8 @@ private fun LocationList(
 
         item { SectionTitle("自定义位置") }
         items(custom, key = { it.location.id.value }) { item ->
-            LocationRow(item.location, item.availability.label) {
-                if (item.availability is LocationAvailability.Available) {
-                    onOpenLocation(item.location.path, item.location.displayName)
-                }
+            LocationRow(item.location, item.availability.label, item.availability) {
+                onOpenLocation(item.location.path, item.location.displayName)
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 TextButton(
@@ -224,16 +224,62 @@ private fun LocationList(
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(text, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp))
 }
 
 @Composable
-private fun LocationRow(location: StorageLocation.Direct, metadata: String, onClick: () -> Unit) {
+private fun LocationGrid(
+    entries: List<PresentedLocation>,
+    testTag: String,
+    onOpenLocation: (RootPath, String) -> Unit,
+    onEdit: (StorageLocation.Direct) -> Unit,
+    onRemove: (StorageLocation.Direct) -> Unit,
+) {
+    val rowCount = (entries.size + 2) / 3
+    FilesGrid(
+        items = entries,
+        key = { it.location.id.value },
+        modifier = Modifier
+            .height((rowCount * 210).dp)
+            .testTag(testTag),
+    ) { item ->
+        Column {
+            FileGridCell(
+                entry = item.location.asDirectoryEntry(item.availability),
+                displayName = item.location.displayName,
+                metadata = item.metadata,
+                enabled = item.availability.isOpenable,
+                onClick = { onOpenLocation(item.location.path, item.location.displayName) },
+            )
+            if (item.location.source == StorageLocation.Source.CUSTOM) {
+                Row {
+                    TextButton(
+                        onClick = { onEdit(item.location) },
+                        modifier = Modifier.semantics { contentDescription = "编辑视图：${item.location.displayName}" },
+                    ) { Text("编辑") }
+                    TextButton(
+                        onClick = { onRemove(item.location) },
+                        modifier = Modifier.semantics { contentDescription = "移除视图：${item.location.displayName}" },
+                    ) { Text("移除") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationRow(
+    location: StorageLocation.Direct,
+    metadata: String,
+    availability: LocationAvailability? = null,
+    onClick: () -> Unit,
+) {
     FileListRow(
-        entry = location.asDirectoryEntry(),
+        entry = location.asDirectoryEntry(availability),
         displayName = location.displayName,
         metadata = metadata,
+        enabled = availability.isOpenable,
         onClick = onClick,
     )
 }
@@ -257,13 +303,16 @@ private val LocationAvailability.label: String
         is LocationAvailability.Unavailable -> reason
     }
 
-private fun StorageLocation.Direct.asDirectoryEntry() = DirectoryEntry(
+private val LocationAvailability?.isOpenable: Boolean
+    get() = this == null || this is LocationAvailability.Available && readable
+
+private fun StorageLocation.Direct.asDirectoryEntry(availability: LocationAvailability? = null) = DirectoryEntry(
     path = path,
     name = displayName,
     type = EntryType.DIRECTORY,
     sizeBytes = null,
     modifiedAtEpochSeconds = null,
-    readable = true,
-    writable = true,
+    readable = (availability as? LocationAvailability.Available)?.readable ?: (availability == null),
+    writable = (availability as? LocationAvailability.Available)?.writable ?: (availability == null),
     symbolicLink = false,
 )

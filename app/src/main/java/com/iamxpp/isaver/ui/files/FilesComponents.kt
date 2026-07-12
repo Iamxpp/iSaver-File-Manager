@@ -183,6 +183,7 @@ fun FileListRow(
     displayName: String,
     metadata: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -191,7 +192,7 @@ fun FileListRow(
             .semantics(mergeDescendants = true) {
                 contentDescription = "列表项：$displayName"
             }
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
     ) {
         Row(
             modifier = Modifier
@@ -222,7 +223,7 @@ fun FileListRow(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            if (entry.type == EntryType.DIRECTORY) {
+            if (entry.type == EntryType.DIRECTORY && enabled) {
                 ChevronGlyph(Modifier.padding(horizontal = 14.dp))
             } else {
                 Spacer(Modifier.width(16.dp))
@@ -242,6 +243,7 @@ fun FileGridCell(
     displayName: String,
     metadata: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -250,7 +252,7 @@ fun FileGridCell(
             .semantics(mergeDescendants = true) {
                 contentDescription = "网格项：$displayName"
             }
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

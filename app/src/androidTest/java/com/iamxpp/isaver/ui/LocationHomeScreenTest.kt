@@ -1,15 +1,24 @@
 package com.iamxpp.isaver.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.ResolvedAppLocation
@@ -148,6 +157,63 @@ class LocationHomeScreenTest {
     }
 
     @Test
+    fun gridKeepsAppCommonAndCustomItemsInsideTheirOwnSections() {
+        val candidate = direct("wechat.media", "微信媒体", "/wechat", StorageLocation.Source.APP_TEMPLATE)
+        val common = direct("common.downloads", "下载", "/download", StorageLocation.Source.BUILT_IN)
+        val custom = direct("custom.work", "工作", "/work", StorageLocation.Source.CUSTOM)
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(
+                    loading = false,
+                    appGroups = listOf(ResolvedAppLocation(LocationId.of("template.wechat"), "微信", listOf(candidate), 0)),
+                    commonLocations = listOf(common),
+                    customLocations = listOf(CustomLocationState(custom, LocationAvailability.Available(true, true))),
+                ),
+                displayMode = DisplayMode.GRID,
+                onOpenLocation = { _, _ -> }, onAdd = { _, _ -> }, onEdit = { _, _, _ -> }, onRemove = {}, onRetry = {},
+            )
+        }
+
+        compose.onNodeWithTag("section-app").assertIsDisplayed()
+        compose.onNodeWithTag("section-common").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("section-custom").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("网格项：微信媒体")
+            .assert(hasAnyAncestor(hasTestTag("grid-app")))
+        compose.onNodeWithContentDescription("网格项：下载")
+            .assert(hasAnyAncestor(hasTestTag("grid-common")))
+        compose.onNodeWithContentDescription("网格项：工作")
+            .assert(hasAnyAncestor(hasTestTag("grid-custom")))
+    }
+
+    @Test
+    fun checkingAndUnavailableCustomLocationsAreDisabledInListAndGrid() {
+        val unavailable = direct("custom.missing", "失效视图", "/missing", StorageLocation.Source.CUSTOM)
+        val checking = direct("custom.checking", "检查中视图", "/checking", StorageLocation.Source.CUSTOM)
+        var opens = 0
+        var mode by mutableStateOf(DisplayMode.LIST)
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(
+                    loading = false,
+                    customLocations = listOf(
+                        CustomLocationState(unavailable, LocationAvailability.Unavailable("路径不存在")),
+                        CustomLocationState(checking, LocationAvailability.Checking),
+                    ),
+                ),
+                displayMode = mode,
+                onOpenLocation = { _, _ -> opens += 1 }, onAdd = { _, _ -> }, onEdit = { _, _, _ -> }, onRemove = {}, onRetry = {},
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：失效视图").performScrollTo().assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithContentDescription("列表项：检查中视图").performScrollTo().assertIsNotEnabled().performTouchInput { click() }
+        compose.runOnIdle { mode = DisplayMode.GRID }
+        compose.onNodeWithContentDescription("网格项：失效视图").performScrollTo().assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithContentDescription("网格项：检查中视图").performScrollTo().assertIsNotEnabled().performTouchInput { click() }
+        compose.runOnIdle { assertEquals(0, opens) }
+    }
+
+    @Test
     fun addDialogTrimsRemarkButPreservesRawAbsolutePath() {
         var added: Pair<String, String>? = null
         compose.setContent {
@@ -179,6 +245,7 @@ class LocationHomeScreenTest {
 
         compose.onNodeWithText("添加位置").performClick()
         compose.onNodeWithText("该路径已存在").assertIsDisplayed()
+        compose.onNodeWithContentDescription("正在保存位置").assertIsDisplayed()
         compose.onNodeWithText("确定").assertIsNotEnabled()
         compose.onNodeWithText("取消").assertIsNotEnabled()
     }
