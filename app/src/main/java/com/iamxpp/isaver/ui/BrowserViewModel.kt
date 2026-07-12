@@ -29,6 +29,7 @@ class BrowserViewModel(
     private val sorter: (List<DirectoryEntry>, SortSpec) -> List<DirectoryEntry> = FileEntrySorter::sort,
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
+    private var selectedRootPath = initialPath
     private val stack = ArrayDeque<RootPath>()
     private val mutableState = MutableStateFlow(BrowserUiState(currentPath = initialPath))
     private var loadJob: Job? = null
@@ -64,6 +65,7 @@ class BrowserViewModel(
 
     fun openRoot(path: RootPath, title: String) {
         stack.clear()
+        selectedRootPath = path
         mutableState.value = mutableState.value.copy(rootTitle = title)
         load(path)
     }
@@ -156,6 +158,7 @@ class BrowserViewModel(
         mutableState.value = BrowserUiState(
             currentPath = path,
             rootTitle = mutableState.value.rootTitle,
+            title = displayTitle(path),
             canGoBack = stack.isNotEmpty(),
             locationTarget = locationTarget,
             displayMode = mutableState.value.displayMode,
@@ -210,6 +213,12 @@ class BrowserViewModel(
                 }
             }
         }
+    }
+
+    private fun displayTitle(path: RootPath): String = when {
+        path == selectedRootPath && path.value == "/" -> "/"
+        path == selectedRootPath -> mutableState.value.rootTitle
+        else -> path.value.substringAfterLast('/').ifEmpty { "/" }
     }
 
     private fun resetPresentationWindow() {

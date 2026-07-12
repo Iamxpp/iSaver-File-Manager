@@ -56,6 +56,48 @@ class BrowserScreenTest {
         assertEquals(SortSpec(SortField.MODIFIED_AT, SortDirection.ASCENDING), sort)
     }
 
+    @Test fun visibleTitleUsesNavigationTitleInsteadOfLocationRemark() {
+        compose.setContent {
+            BrowserScreen(
+                state = state(rootTitle = "浏览", title = "/"),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+            )
+        }
+        compose.onNodeWithText("/").assertIsDisplayed()
+        compose.onNodeWithText("浏览").assertDoesNotExist()
+    }
+
+    @Test fun everySortFieldDirectionAndFileMetadataAreWired() {
+        var currentSort by mutableStateOf(SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING))
+        val selected = mutableListOf<SortSpec>()
+        val file = entry("报告.pdf", EntryType.FILE)
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file), allEntries = listOf(file), sortSpec = currentSort),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onSortChange = { currentSort = it; selected += it },
+            )
+        }
+        listOf(
+            "名称" to SortField.DISPLAY_NAME,
+            "种类" to SortField.TYPE,
+            "日期" to SortField.MODIFIED_AT,
+            "大小" to SortField.SIZE,
+        ).forEach { (label, field) ->
+            compose.onNodeWithContentDescription("更多操作").performClick()
+            compose.onNodeWithText(label).performClick()
+            assertEquals(field, selected.last().field)
+        }
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("升序").performClick()
+        assertEquals(SortDirection.DESCENDING, selected.last().direction)
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("降序").performClick()
+        assertEquals(SortDirection.ASCENDING, selected.last().direction)
+        compose.onNodeWithText("1 KB", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("2023", substring = true).assertIsDisplayed()
+    }
+
     @Test fun createFolderCapabilityDialogAndCallbackAreWired() {
         var created: String? = null
         compose.setContent {
@@ -182,15 +224,17 @@ class BrowserScreenTest {
         presentationError: String? = null,
         locationTarget: RootPath? = null,
         searchQuery: String = "",
+        title: String = rootTitle,
+        sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
         loading: Boolean = false,
         errorMessage: String? = null,
         canGoBack: Boolean = true,
         hasMore: Boolean = false,
     ) = BrowserUiState(
-        currentPath = RootPath.parse("/").getOrThrow(), rootTitle = rootTitle,
+        currentPath = RootPath.parse("/").getOrThrow(), rootTitle = rootTitle, title = title,
         entries = entries, allEntries = allEntries, totalCount = entries.size,
         loading = loading, errorMessage = errorMessage, canGoBack = canGoBack,
-        hasMore = hasMore, displayMode = displayMode,
+        hasMore = hasMore, displayMode = displayMode, sortSpec = sortSpec,
         canCreateDirectory = canCreateDirectory, creatingDirectory = creatingDirectory,
         createDirectoryError = createDirectoryError, presentationError = presentationError,
         locationTarget = locationTarget, searchQuery = searchQuery,

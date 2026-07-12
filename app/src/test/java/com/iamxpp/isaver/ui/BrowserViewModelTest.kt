@@ -281,6 +281,56 @@ class BrowserViewModelTest {
         assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
     }
 
+    @Test fun `title follows browse root custom root child and back navigation`() = runTest {
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+        advanceUntilIdle()
+
+        vm.openRoot(RootPath.parse("/").getOrThrow(), "浏览")
+        advanceUntilIdle()
+        assertEquals("/", vm.state.value.title)
+
+        vm.openRoot(RootPath.parse("/data/local/tmp").getOrThrow(), "测试备注")
+        advanceUntilIdle()
+        assertEquals("测试备注", vm.state.value.title)
+
+        vm.enterDirectory(entry("child", EntryType.DIRECTORY, "/data/local/tmp/child"))
+        advanceUntilIdle()
+        assertEquals("child", vm.state.value.title)
+
+        assertEquals(BrowserBackResult.NAVIGATED, vm.back())
+        advanceUntilIdle()
+        assertEquals("测试备注", vm.state.value.title)
+    }
+
+    @Test fun `late old navigation result cannot overwrite latest title`() = runTest {
+        val old = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
+        val fresh = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
+        val fs = FakeFileSystem { path ->
+            when {
+                path.value.endsWith("old") -> withContext(NonCancellable) { old.await() }
+                path.value.endsWith("new") -> fresh.await()
+                else -> OperationResult.Success(emptyList())
+            }
+        }
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        advanceUntilIdle()
+
+        vm.enterDirectory(entry("old", EntryType.DIRECTORY, "/storage/emulated/0/old"))
+        testScheduler.runCurrent()
+        vm.enterDirectory(entry("new", EntryType.DIRECTORY, "/storage/emulated/0/new"))
+        testScheduler.runCurrent()
+        fresh.complete(OperationResult.Success(emptyList()))
+        advanceUntilIdle()
+        old.complete(OperationResult.Success(emptyList()))
+        advanceUntilIdle()
+
+        assertEquals("new", vm.state.value.title)
+    }
+
     @Test fun `init asynchronously loads storage root and exposes loading then success`() = runTest {
         val gate = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fs = FakeFileSystem { gate.await() }

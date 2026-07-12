@@ -11,6 +11,7 @@ import com.iamxpp.isaver.ui.files.SortSpec
 data class BrowserUiState(
     val currentPath: RootPath,
     val rootTitle: String = "内部存储",
+    val title: String = rootTitle,
     val allEntries: List<DirectoryEntry> = emptyList(),
     val entries: List<DirectoryEntry> = emptyList(),
     val totalCount: Int = 0,

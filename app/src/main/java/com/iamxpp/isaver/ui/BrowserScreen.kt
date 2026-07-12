@@ -71,7 +71,7 @@ fun BrowserScreen(
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
         Box {
             FilesLargeTitleHeader(
-                title = state.rootTitle,
+                title = state.title,
                 onBack = if (state.canGoBack) onBack else null,
                 onOverflow = { menuExpanded = true },
             )
