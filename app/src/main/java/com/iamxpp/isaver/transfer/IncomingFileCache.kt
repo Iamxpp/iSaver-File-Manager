@@ -1,15 +1,18 @@
 package com.iamxpp.isaver.transfer
 
 import android.content.ContentResolver
+import android.system.ErrnoException
+import android.system.OsConstants
 import com.iamxpp.isaver.share.IncomingShare
 import java.io.File
-import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
@@ -28,6 +31,7 @@ class IncomingFileCache internal constructor(
     cacheDir: File,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val openInput: (IncomingShare) -> InputStream? = { resolver.openInputStream(it.uri) },
+    private val openOutput: (File) -> OutputStream = { it.outputStream().buffered() },
 ) {
     private val incomingDir = File(cacheDir, "incoming")
 
@@ -37,15 +41,19 @@ class IncomingFileCache internal constructor(
             try {
                 if (!incomingDir.exists() && !incomingDir.mkdirs()) throw IOException("cannot create cache directory")
                 val input = try { openInput(share) } catch (_: SecurityException) { return@withContext failure(IncomingFileCacheFailure.SOURCE_UNREADABLE) }
-                    catch (_: FileNotFoundException) { return@withContext failure(IncomingFileCacheFailure.SOURCE_UNREADABLE) }
+                    catch (_: IOException) { return@withContext failure(IncomingFileCacheFailure.SOURCE_UNREADABLE) }
                     ?: return@withContext failure(IncomingFileCacheFailure.SOURCE_UNREADABLE)
                 var copied = 0L
                 input.use { source ->
-                    target.outputStream().buffered().use { output ->
+                    openOutput(target).use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         while (true) {
                             coroutineContext.ensureActive()
-                            val count = source.read(buffer)
+                            val count = try {
+                                source.read(buffer)
+                            } catch (error: IOException) {
+                                throw SourceReadException(error)
+                            }
                             if (count < 0) break
                             if (count == 0) continue
                             output.write(buffer, 0, count)
@@ -59,17 +67,19 @@ class IncomingFileCache internal constructor(
                 } else IncomingFileCacheResult.Success(CachedIncomingFile(target, copied))
             } catch (cancelled: CancellationException) {
                 target.delete(); throw cancelled
+            } catch (_: SourceReadException) {
+                target.delete(); failure(IncomingFileCacheFailure.SOURCE_UNREADABLE)
             } catch (error: IOException) {
                 target.delete()
                 val noSpace = generateSequence<Throwable>(error) { it.cause }
-                    .any { it.message?.let { message -> message.contains("space", true) || message.contains("full", true) } == true }
+                    .any { it is ErrnoException && it.errno == OsConstants.ENOSPC }
                 failure(if (noSpace) IncomingFileCacheFailure.NO_SPACE else IncomingFileCacheFailure.CACHE_WRITE_FAILED)
             } catch (_: SecurityException) {
                 target.delete(); failure(IncomingFileCacheFailure.SOURCE_UNREADABLE)
             }
         }
 
-    suspend fun cleanup(cached: CachedIncomingFile): Boolean = withContext(ioDispatcher) {
+    suspend fun cleanup(cached: CachedIncomingFile): Boolean = withContext(NonCancellable + ioDispatcher) {
         val root = incomingDir.canonicalFile
         val candidate = cached.file.canonicalFile
         if (candidate.parentFile != root) return@withContext false
@@ -77,4 +87,6 @@ class IncomingFileCache internal constructor(
     }
 
     private fun failure(reason: IncomingFileCacheFailure) = IncomingFileCacheResult.Failure(reason)
+
+    private class SourceReadException(cause: IOException) : RuntimeException(cause)
 }

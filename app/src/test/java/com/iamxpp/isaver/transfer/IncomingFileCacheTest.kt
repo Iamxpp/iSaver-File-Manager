@@ -6,6 +6,8 @@ import android.content.Context
 import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.system.ErrnoException
+import android.system.OsConstants
 import androidx.test.core.app.ApplicationProvider
 import com.iamxpp.isaver.share.IncomingShare
 import java.io.ByteArrayInputStream
@@ -13,9 +15,13 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -35,7 +41,7 @@ class IncomingFileCacheTest {
         val result = cache.cache(share(bytes.size.toLong())) { progress += it }
         val file = (result as IncomingFileCacheResult.Success).file
         assertArrayEquals(bytes, file.file.readBytes())
-        assertEquals(File(context.cacheDir, "incoming").canonicalFile, file.file.parentFile.canonicalFile)
+        assertEquals(File(context.cacheDir, "incoming").canonicalFile, file.file.parentFile!!.canonicalFile)
         assertTrue(file.file.name.endsWith(".tmp")); UUID.fromString(file.file.name.removeSuffix(".tmp"))
         assertFalse(file.file.name.contains("report")); assertEquals(bytes.size.toLong(), file.sizeBytes)
         assertEquals(bytes.size.toLong(), progress.last()); assertTrue(progress.zipWithNext().all { it.first <= it.second })
@@ -55,16 +61,32 @@ class IncomingFileCacheTest {
     }
 
     @Test fun `open security and io failures are typed`() = runTest {
-        listOf(SecurityException() to IncomingFileCacheFailure.SOURCE_UNREADABLE, FileNotFoundException() to IncomingFileCacheFailure.SOURCE_UNREADABLE).forEach { (error, expected) ->
+        listOf(SecurityException(), FileNotFoundException(), IOException("disk full")).forEach { error ->
             register { throw error }; val result = cache().cache(share(null)) {}
-            assertEquals(expected, (result as IncomingFileCacheResult.Failure).reason)
+            assertEquals(IncomingFileCacheFailure.SOURCE_UNREADABLE, (result as IncomingFileCacheResult.Failure).reason)
         }
     }
 
-    @Test fun `copy IO and no space failures are typed and clean partial`() = runTest {
-        listOf(IOException("disk full") to IncomingFileCacheFailure.NO_SPACE, IOException("broken") to IncomingFileCacheFailure.CACHE_WRITE_FAILED).forEach { (error, expected) ->
+    @Test fun `source read IO is always source unreadable even when message says disk full`() = runTest {
+        listOf(IOException("disk full"), IOException("broken")).forEach { error ->
             register { object: InputStream() { var read = false; override fun read(): Int = if (!read) { read=true; 1 } else throw error } }
-            val result = cache().cache(share(null)) {}; assertEquals(expected, (result as IncomingFileCacheResult.Failure).reason); assertIncomingEmpty()
+            val result = cache().cache(share(null)) {}
+            assertEquals(IncomingFileCacheFailure.SOURCE_UNREADABLE, (result as IncomingFileCacheResult.Failure).reason)
+            assertIncomingEmpty()
+        }
+    }
+
+    @Test fun `destination IO uses structural ENOSPC mapping and cleans partial`() = runTest {
+        val cases = listOf(
+            IOException("broken") to IncomingFileCacheFailure.CACHE_WRITE_FAILED,
+            IOException("disk full") to IncomingFileCacheFailure.CACHE_WRITE_FAILED,
+            IOException("write failed", ErrnoException("write", OsConstants.ENOSPC)) to IncomingFileCacheFailure.NO_SPACE,
+        )
+        cases.forEach { (error, expected) ->
+            register { ByteArrayInputStream(byteArrayOf(1, 2)) }
+            val result = cache(openOutput = { ThrowingOutputStream(error) }).cache(share(null)) {}
+            assertEquals(expected, (result as IncomingFileCacheResult.Failure).reason)
+            assertIncomingEmpty()
         }
     }
 
@@ -81,10 +103,31 @@ class IncomingFileCacheTest {
         assertFalse(cache.cleanup(CachedIncomingFile(outside,1))); assertTrue(outside.exists())
     }
 
-    private fun cache()=IncomingFileCache(context.contentResolver, context.cacheDir, Dispatchers.Unconfined) { opener() }
+    @Test fun `cleanup deletes cached file from already cancelled coroutine`() = runTest {
+        register { ByteArrayInputStream(byteArrayOf(1)) }
+        val cache = cache()
+        val cached = (cache.cache(share(1)) {} as IncomingFileCacheResult.Success).file
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                cache.cleanup(cached)
+            }
+        }
+        job.cancel()
+        job.join()
+        assertFalse(cached.file.exists())
+    }
+
+    private fun cache(openOutput: (File) -> OutputStream = { it.outputStream().buffered() }) =
+        IncomingFileCache(context.contentResolver, context.cacheDir, Dispatchers.Unconfined, { opener() }, openOutput)
     private fun share(size:Long?)=IncomingShare(uri,"report.pdf",size,"application/pdf")
     private fun register(open:()->InputStream){ opener=open; ShadowContentResolver.registerProviderInternal("cache.test",Provider(open)) }
     private fun assertIncomingEmpty(){ assertTrue(File(context.cacheDir,"incoming").listFiles().orEmpty().isEmpty()) }
+    private class ThrowingOutputStream(private val error: IOException) : OutputStream() {
+        override fun write(value: Int) = throw error
+        override fun write(buffer: ByteArray, offset: Int, length: Int) = throw error
+    }
     private class Provider(private val open:()->InputStream):ContentProvider(){
         override fun onCreate()=true
         override fun openFile(uri:Uri,mode:String):ParcelFileDescriptor?=null
