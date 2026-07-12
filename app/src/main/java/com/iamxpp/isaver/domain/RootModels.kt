@@ -41,4 +41,5 @@ enum class ErrorCode {
     SOURCE_UNREADABLE,
     COMMAND_FAILED,
     CANCELLED,
+    OUTCOME_UNCERTAIN,
 }

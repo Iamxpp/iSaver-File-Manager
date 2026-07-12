@@ -66,15 +66,18 @@ class LibsuRootFileSystem internal constructor(
         if(p.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"无法在符号链接目录中创建文件夹","Canonical parent was symlink")
         if(!p.readable)return failure(ErrorCode.NOT_READABLE,"目录不可读","Parent not readable")
         if(!p.writable)return failure(ErrorCode.NOT_WRITABLE,"目录不可写","Parent not writable")
+        val preIdentity=readIdentity(canonical.value);if(preIdentity !is OperationResult.Success)return preIdentity as OperationResult.Failure
         val child=FolderName.join(canonical.value,name)
         when(val e=stat(child)){is OperationResult.Success->return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child exists");is OperationResult.Failure->if(e.code!=ErrorCode.NOT_FOUND)return e}
-        val made=execute(buildMkdirCommand(canonical.value,child),"无法创建文件夹")
+        val made=execute(buildMkdirCommand(canonical.value,child,preIdentity.value),"无法创建文件夹")
         if(made is OperationResult.Failure){if(stat(child) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child appeared");return made}
+        val postIdentity=readIdentity(canonical.value)
+        if(postIdentity !is OperationResult.Success||postIdentity.value!=preIdentity.value)return uncertain("Parent identity changed")
         val postParent=canonicalize(parent)
-        if(postParent !is OperationResult.Success||postParent.value!=canonical.value)return failure(ErrorCode.COMMAND_FAILED,"父目录已发生变化","Canonical parent changed")
+        if(postParent !is OperationResult.Success||postParent.value!=canonical.value)return uncertain("Canonical parent changed")
         val finalChild=stat(child)
-        if(finalChild !is OperationResult.Success)return finalChild
-        if(finalChild.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY||finalChild.value.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"创建结果不是安全目录","Created child was not a plain directory")
+        if(finalChild !is OperationResult.Success)return uncertain("Created child could not be verified")
+        if(finalChild.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY||finalChild.value.symbolicLink)return uncertain("Created child was not a plain directory")
         return finalChild
     }
 
@@ -136,11 +139,14 @@ class LibsuRootFileSystem internal constructor(
         set -o pipefail
         readlink -f -- "${'$'}target" | base64 -w 0 || exit 47
     """.trimIndent()
-    private fun buildMkdirCommand(parent:RootPath,child:RootPath)="""
+    /** Shell checks reduce but cannot eliminate the tiny check/mkdir TOCTOU window; fully atomic defense requires native mkdirat. */
+    private fun buildMkdirCommand(parent:RootPath,child:RootPath,identity:RootFileIdentity)="""
         parent=${RootCommandCodec.quote(parent.value)}
         child=${RootCommandCodec.quote(child.value)}
-        [ ! -L "${'$'}parent" ] && [ -d "${'$'}parent" ] && [ -w "${'$'}parent" ] && mkdir -- "${'$'}child"
+        current=${'$'}(stat -c '%d:%i' -- "${'$'}parent") && [ "${'$'}current" = '${identity.device}:${identity.inode}' ] && [ ! -L "${'$'}parent" ] && [ -d "${'$'}parent" ] && [ -w "${'$'}parent" ] && mkdir -- "${'$'}child"
     """.trimIndent()
+
+    private suspend fun readIdentity(path:RootPath):OperationResult<RootFileIdentity> = execute("stat -c '%d:%i' -- ${RootCommandCodec.quote(path.value)}","无法验证目录身份").flatMap{lines->RootFileIdentity.parse(lines).fold({OperationResult.Success(it)},{failure(ErrorCode.COMMAND_FAILED,"无法验证目录身份","Malformed file identity")})}
 
     private fun parseCanonicalOutput(lines: List<String>): OperationResult<RootPath> = try {
         require(lines.size == 1)
@@ -217,6 +223,7 @@ private fun malformedCanonicalOutput() = failure(
     "无法解析真实路径",
     "Malformed canonical path output",
 )
+private fun uncertain(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"文件夹可能已创建，请刷新确认",technical)
 
 private fun failure(code: ErrorCode, userMessage: String, technicalMessage: String) =
     OperationResult.Failure(code, userMessage, technicalMessage)
