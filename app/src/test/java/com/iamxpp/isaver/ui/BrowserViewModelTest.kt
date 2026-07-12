@@ -170,6 +170,21 @@ class BrowserViewModelTest {
         assertEquals(ErrorCode.NOT_WRITABLE, vm.state.value.createDirectoryError?.code)
     }
 
+    @Test fun `writable directory symlink does not allow folder creation`() = runTest {
+        val fs = FakeFileSystem(
+            statBlock = { path ->
+                OperationResult.Success(
+                    entry("linked", EntryType.DIRECTORY, path.value, writable = true, symbolicLink = true),
+                )
+            },
+            listBlock = { OperationResult.Success(emptyList()) },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.canCreateDirectory)
+    }
+
     @Test fun `invalid folder name is rejected before the root filesystem call`() = runTest {
         var createCalls = 0
         val fs = FakeFileSystem(
@@ -274,5 +289,6 @@ class BrowserViewModelTest {
         type: EntryType,
         path: String = "/x/$name",
         writable: Boolean = false,
-    ) = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, 1, 2, true, writable, false)
+        symbolicLink: Boolean = false,
+    ) = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, 1, 2, true, writable, symbolicLink)
 }

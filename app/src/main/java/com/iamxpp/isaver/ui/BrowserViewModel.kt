@@ -136,7 +136,9 @@ class BrowserViewModel(
                     val writable = try {
                         when (val stat = rootFileSystem.stat(path)) {
                             is OperationResult.Failure -> false
-                            is OperationResult.Success -> stat.value.type == EntryType.DIRECTORY && stat.value.writable
+                            is OperationResult.Success -> stat.value.type == EntryType.DIRECTORY &&
+                                stat.value.writable &&
+                                !stat.value.symbolicLink
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
