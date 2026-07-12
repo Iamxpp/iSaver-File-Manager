@@ -94,6 +94,43 @@ class BrowserViewModelTest {
         assertEquals(listOf("small.txt", "large.txt"), vm.state.value.allEntries.map { it.name })
     }
 
+    @Test fun `display mode keeps paging while sort changes reset and reorder without relisting`() = runTest {
+        var listCalls = 0
+        val preferences = FakeBrowserPreferencesStore(BrowserPreferences())
+        val all = (1..450).map { index -> entry("file$index", EntryType.FILE, size = index.toLong()) }
+        val vm = BrowserViewModel(
+            FakeFileSystem {
+                listCalls += 1
+                OperationResult.Success(all)
+            },
+            StandardTestDispatcher(testScheduler),
+            preferences,
+        )
+        advanceUntilIdle()
+        vm.loadMore()
+        assertEquals(400, vm.state.value.entries.size)
+
+        preferences.emit(BrowserPreferences(displayMode = DisplayMode.GRID))
+        advanceUntilIdle()
+
+        assertEquals(DisplayMode.GRID, vm.state.value.displayMode)
+        assertEquals(400, vm.state.value.entries.size)
+        assertEquals(1, listCalls)
+
+        preferences.emit(
+            BrowserPreferences(
+                displayMode = DisplayMode.GRID,
+                sortSpec = SortSpec(SortField.SIZE, SortDirection.DESCENDING),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(200, vm.state.value.entries.size)
+        assertEquals("file450", vm.state.value.entries.first().name)
+        assertTrue(vm.state.value.hasMore)
+        assertEquals(1, listCalls)
+    }
+
     @Test fun `display and sort events delegate to preferences store`() = runTest {
         val preferences = FakeBrowserPreferencesStore(BrowserPreferences())
         val vm = BrowserViewModel(

@@ -43,12 +43,13 @@ class BrowserViewModel(
     init {
         viewModelScope.launch {
             preferencesStore.preferences.collect { preferences ->
-                resetPresentationWindow()
+                val sortChanged = preferences.sortSpec != mutableState.value.sortSpec
+                if (sortChanged) resetPresentationWindow()
                 mutableState.value = mutableState.value.copy(
                     displayMode = preferences.displayMode,
                     sortSpec = preferences.sortSpec,
                 )
-                refreshPresentation()
+                if (sortChanged) refreshPresentation()
             }
         }
         load(initialPath)
