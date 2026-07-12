@@ -39,6 +39,46 @@ class LocationHomeViewModelTest {
         assertEquals("custom.one",store.removed!!.value);assertEquals(calls,fs.statCalls)
     }
 
+    @Test fun `successful add increments save success version`()=runTest{
+        val store=FakeStore();val fs=FakeFs().apply{stats["/saved"]=entry("/saved",EntryType.DIRECTORY,true,true)}
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle()
+        val initialVersion=vm.state.value.saveSuccessVersion
+
+        vm.addCustomLocation("saved","/saved");advanceUntilIdle()
+
+        assertEquals(initialVersion+1,vm.state.value.saveSuccessVersion)
+    }
+
+    @Test fun `clear add error removes stale dialog error without changing save version`()=runTest{
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},FakeStore(),FakeFs(),StandardTestDispatcher(testScheduler));advanceUntilIdle()
+        vm.addCustomLocation("x","relative");advanceUntilIdle()
+        val version=vm.state.value.saveSuccessVersion
+
+        vm.clearAddError()
+
+        assertNull(vm.state.value.addError)
+        assertEquals(version,vm.state.value.saveSuccessVersion)
+    }
+
+    @Test fun `successful edit increments save success version`()=runTest{
+        val store=FakeStore();val fs=FakeFs().apply{stats["/edited"]=entry("/edited",EntryType.DIRECTORY,true,true)}
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle()
+
+        vm.editCustomLocation(LocationId.of("custom.edit"),"edited","/edited");advanceUntilIdle()
+
+        assertEquals(1,vm.state.value.saveSuccessVersion)
+    }
+
+    @Test fun `failed save and remove do not increment save success version`()=runTest{
+        val store=FakeStore().apply{addResult=CustomLocationResult.DuplicatePath};val fs=FakeFs().apply{stats["/duplicate"]=entry("/duplicate",EntryType.DIRECTORY,true,true)}
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle()
+
+        vm.addCustomLocation("duplicate","/duplicate");advanceUntilIdle()
+        vm.removeCustomLocation(LocationId.of("custom.remove"));advanceUntilIdle()
+
+        assertEquals(0,vm.state.value.saveSuccessVersion)
+    }
+
     @Test fun `add maps invalid path unwritable and duplicate without leaking path`()=runTest{
         val store=FakeStore();val fs=FakeFs();val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle()
         vm.addCustomLocation("x"," relative");advanceUntilIdle();assertEquals("路径格式无效",vm.state.value.addError)

@@ -6,16 +6,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +39,6 @@ import com.iamxpp.isaver.locations.StorageLocation
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FileGridCell
 import com.iamxpp.isaver.ui.files.FileListRow
-import com.iamxpp.isaver.ui.files.FilesGrid
 import com.iamxpp.isaver.ui.files.FilesLargeTitleHeader
 import com.iamxpp.isaver.ui.files.FilesSearchField
 import com.iamxpp.isaver.ui.theme.ISaverBackground
@@ -48,6 +52,7 @@ fun LocationHomeScreen(
     onEdit: (LocationId, String, String) -> Unit,
     onRemove: (LocationId) -> Unit,
     onRetry: () -> Unit,
+    onClearAddError: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
@@ -55,86 +60,54 @@ fun LocationHomeScreen(
     var adding by remember { mutableStateOf(false) }
     var removal by remember { mutableStateOf<StorageLocation.Direct?>(null) }
 
+    LaunchedEffect(state.saveSuccessVersion) {
+        adding = false
+        editor = null
+    }
+
     val visibleApps = state.appGroups.filterForQuery(query)
     val visibleCommon = state.commonLocations.filter { it.displayName.contains(query, ignoreCase = true) }
     val visibleCustom = state.customLocations.filter { it.location.displayName.contains(query, ignoreCase = true) }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(ISaverBackground),
-    ) {
-        FilesLargeTitleHeader(title = "视图", onOverflow = {})
-        FilesSearchField(
-            query = query,
-            onQueryChange = { query = it },
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Button(onClick = { adding = true }) { Text("添加位置") }
-            if (state.error != null) {
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = onRetry) { Text("重试") }
-            }
-        }
-        if (state.error != null) Text(state.error, modifier = Modifier.padding(horizontal = 16.dp))
-
-        if (displayMode == DisplayMode.LIST) {
+    if (displayMode == DisplayMode.LIST) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(ISaverBackground),
+        ) {
+            LocationHomeHeader(
+                query = query,
+                onQueryChange = { query = it },
+                error = state.error,
+                onAdd = { onClearAddError(); adding = true },
+                onRetry = onRetry,
+            )
             LocationList(
                 state = state,
                 apps = visibleApps,
                 common = visibleCommon,
                 custom = visibleCustom,
                 onOpenLocation = onOpenLocation,
-                onEdit = { editor = it },
+                onEdit = { onClearAddError(); editor = it },
                 onRemove = { removal = it },
                 modifier = Modifier.weight(1f),
             )
-        } else {
-            LazyColumn(Modifier.weight(1f)) {
-                item { SectionTitle("应用位置", Modifier.testTag("section-app")) }
-                visibleApps.forEach { group ->
-                    item(key = group.templateId.value) { Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp)) }
-                    if (group.empty) {
-                        item(key = "${group.templateId.value}.empty") {
-                            Text("未找到可用${group.displayName}目录", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                        }
-                    } else {
-                        item(key = "${group.templateId.value}.grid") {
-                            LocationGrid(
-                                entries = group.children.map { PresentedLocation(it, it.path.value) },
-                                testTag = "grid-app",
-                                onOpenLocation = onOpenLocation,
-                                onEdit = { editor = it },
-                                onRemove = { removal = it },
-                            )
-                        }
-                    }
-                }
-                item { SectionTitle("通用位置", Modifier.testTag("section-common")) }
-                if (visibleCommon.isEmpty()) item { Text("暂无通用位置", modifier = Modifier.padding(16.dp)) }
-                else item {
-                    LocationGrid(
-                        entries = visibleCommon.map { PresentedLocation(it, it.path.value) },
-                        testTag = "grid-common",
-                        onOpenLocation = onOpenLocation,
-                        onEdit = { editor = it },
-                        onRemove = { removal = it },
-                    )
-                }
-                item { SectionTitle("自定义位置", Modifier.testTag("section-custom")) }
-                if (visibleCustom.isEmpty()) item { Text("暂无自定义位置", modifier = Modifier.padding(16.dp)) }
-                else item {
-                    LocationGrid(
-                        entries = visibleCustom.map { PresentedLocation(it.location, it.availability.label, it.availability) },
-                        testTag = "grid-custom",
-                        onOpenLocation = onOpenLocation,
-                        onEdit = { editor = it },
-                        onRemove = { removal = it },
-                    )
-                }
-            }
         }
+    } else {
+        LocationHomeGrid(
+            state = state,
+            apps = visibleApps,
+            common = visibleCommon,
+            custom = visibleCustom,
+            query = query,
+            onQueryChange = { query = it },
+            onAdd = { onClearAddError(); adding = true },
+            onRetry = onRetry,
+            onOpenLocation = onOpenLocation,
+            onEdit = { onClearAddError(); editor = it },
+            onRemove = { removal = it },
+            modifier = modifier.fillMaxSize().background(ISaverBackground),
+        )
     }
 
     if (adding || editor != null) {
@@ -147,7 +120,7 @@ fun LocationHomeScreen(
             onConfirm = { name, rawPath ->
                 if (current == null) onAdd(name, rawPath) else onEdit(current.id, name, rawPath)
             },
-            onDismiss = { adding = false; editor = null },
+            onDismiss = { onClearAddError(); adding = false; editor = null },
         )
     }
 
@@ -169,6 +142,32 @@ fun LocationHomeScreen(
                 ) { Text("取消") }
             },
         )
+    }
+}
+
+@Composable
+private fun LocationHomeHeader(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    error: String?,
+    onAdd: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Column {
+        FilesLargeTitleHeader(title = "视图", onOverflow = {})
+        FilesSearchField(
+            query = query,
+            onQueryChange = onQueryChange,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            Button(onClick = onAdd) { Text("添加位置") }
+            if (error != null) {
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = onRetry) { Text("重试") }
+            }
+        }
+        if (error != null) Text(error, modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 
@@ -229,22 +228,73 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun LocationGrid(
+private fun LocationHomeGrid(
+    state: LocationHomeUiState,
+    apps: List<ResolvedAppLocation>,
+    common: List<StorageLocation.Direct>,
+    custom: List<CustomLocationState>,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onAdd: () -> Unit,
+    onRetry: () -> Unit,
+    onOpenLocation: (RootPath, String) -> Unit,
+    onEdit: (StorageLocation.Direct) -> Unit,
+    onRemove: (StorageLocation.Direct) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = modifier.testTag("location-home-grid"),
+    ) {
+        fullSpanItem("home-header") {
+            LocationHomeHeader(query, onQueryChange, state.error, onAdd, onRetry)
+        }
+        fullSpanItem("section-app") { SectionTitle("应用位置", Modifier.testTag("section-app")) }
+        apps.forEach { group ->
+            fullSpanItem(group.templateId.value) { Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp)) }
+            if (group.empty) {
+                fullSpanItem("${group.templateId.value}.empty") {
+                    Text("未找到可用${group.displayName}目录", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                }
+            } else {
+                locationItems(
+                    entries = group.children.map { PresentedLocation(it, it.path.value) },
+                    testTag = "grid-app",
+                    onOpenLocation = onOpenLocation,
+                    onEdit = onEdit,
+                    onRemove = onRemove,
+                )
+            }
+        }
+        fullSpanItem("section-common") { SectionTitle("通用位置", Modifier.testTag("section-common")) }
+        if (common.isEmpty()) {
+            fullSpanItem("common-empty") { Text("暂无通用位置", modifier = Modifier.padding(16.dp)) }
+        } else {
+            locationItems(common.map { PresentedLocation(it, it.path.value) }, "grid-common", onOpenLocation, onEdit, onRemove)
+        }
+        fullSpanItem("section-custom") { SectionTitle("自定义位置", Modifier.testTag("section-custom")) }
+        if (custom.isEmpty()) {
+            fullSpanItem("custom-empty") { Text("暂无自定义位置", modifier = Modifier.padding(16.dp)) }
+        } else {
+            locationItems(custom.map { PresentedLocation(it.location, it.availability.label, it.availability) }, "grid-custom", onOpenLocation, onEdit, onRemove)
+        }
+        if (state.loading) fullSpanItem("locations-loading") { Text("正在加载位置…", modifier = Modifier.padding(16.dp)) }
+    }
+}
+
+private fun LazyGridScope.fullSpanItem(key: Any, content: @Composable () -> Unit) {
+    item(key = key, span = { GridItemSpan(maxLineSpan) }) { content() }
+}
+
+private fun LazyGridScope.locationItems(
     entries: List<PresentedLocation>,
     testTag: String,
     onOpenLocation: (RootPath, String) -> Unit,
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
 ) {
-    val rowCount = (entries.size + 2) / 3
-    FilesGrid(
-        items = entries,
-        key = { it.location.id.value },
-        modifier = Modifier
-            .height((rowCount * 210).dp)
-            .testTag(testTag),
-    ) { item ->
-        Column {
+    gridItems(entries, key = { it.location.id.value }) { item ->
+        Column(Modifier.testTag(testTag)) {
             FileGridCell(
                 entry = item.location.asDirectoryEntry(item.availability),
                 displayName = item.location.displayName,

@@ -4,14 +4,18 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -157,6 +161,30 @@ class LocationHomeScreenTest {
     }
 
     @Test
+    fun largeGridUsesOneLazyCollectionAndScrollsToLastCustomLocation() {
+        val custom = (1..60).map { index ->
+            val location = direct("custom.$index", "自定义$index", "/custom/$index", StorageLocation.Source.CUSTOM)
+            CustomLocationState(location, LocationAvailability.Available(true, true))
+        }
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(loading = false, customLocations = custom),
+                displayMode = DisplayMode.GRID,
+                onOpenLocation = { _, _ -> }, onAdd = { _, _ -> }, onEdit = { _, _, _ -> }, onRemove = {}, onRetry = {},
+            )
+        }
+
+        val collections = compose.onAllNodes(
+            matcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.CollectionInfo),
+            useUnmergedTree = true,
+        ).fetchSemanticsNodes()
+        assertEquals(1, collections.size)
+        compose.onNodeWithTag("location-home-grid")
+            .performScrollToNode(hasContentDescription("网格项：自定义60"))
+        compose.onNodeWithContentDescription("网格项：自定义60").assertIsDisplayed()
+    }
+
+    @Test
     fun gridKeepsAppCommonAndCustomItemsInsideTheirOwnSections() {
         val candidate = direct("wechat.media", "微信媒体", "/wechat", StorageLocation.Source.APP_TEMPLATE)
         val common = direct("common.downloads", "下载", "/download", StorageLocation.Source.BUILT_IN)
@@ -234,6 +262,30 @@ class LocationHomeScreenTest {
     }
 
     @Test
+    fun successfulSaveClosesDialogAndReopenStartsClean() {
+        var state by mutableStateOf(LocationHomeUiState(loading = false))
+        compose.setContent {
+            LocationHomeScreen(
+                state = state,
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { _, _ -> },
+                onAdd = { _, _ -> state = state.copy(saveSuccessVersion = state.saveSuccessVersion + 1) },
+                onEdit = { _, _, _ -> }, onRemove = {}, onRetry = {},
+            )
+        }
+
+        compose.onNodeWithText("添加位置").performClick()
+        compose.onNodeWithContentDescription("备注名称").performTextInput("草稿")
+        compose.onNodeWithContentDescription("绝对路径").performTextInput("/data/local/tmp/draft")
+        compose.onNodeWithText("确定").performClick()
+
+        compose.onNodeWithContentDescription("备注名称").assertDoesNotExist()
+        compose.onNodeWithText("添加位置").performClick()
+        compose.onNodeWithText("草稿").assertDoesNotExist()
+        compose.onNodeWithText("/data/local/tmp/draft").assertDoesNotExist()
+    }
+
+    @Test
     fun dialogShowsViewModelErrorAndDisablesSubmissionDuringOperation() {
         compose.setContent {
             LocationHomeScreen(
@@ -248,6 +300,26 @@ class LocationHomeScreenTest {
         compose.onNodeWithContentDescription("正在保存位置").assertIsDisplayed()
         compose.onNodeWithText("确定").assertIsNotEnabled()
         compose.onNodeWithText("取消").assertIsNotEnabled()
+    }
+
+    @Test
+    fun openingAndDismissingDialogClearStaleError() {
+        var state by mutableStateOf(LocationHomeUiState(loading = false, addError = "旧错误"))
+        var clearCalls = 0
+        compose.setContent {
+            LocationHomeScreen(
+                state = state,
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { _, _ -> }, onAdd = { _, _ -> }, onEdit = { _, _, _ -> }, onRemove = {}, onRetry = {},
+                onClearAddError = { clearCalls += 1; state = state.copy(addError = null) },
+            )
+        }
+
+        compose.onNodeWithText("添加位置").performClick()
+        compose.onNodeWithText("旧错误").assertDoesNotExist()
+        compose.onNodeWithText("取消").performClick()
+
+        compose.runOnIdle { assertEquals(2, clearCalls) }
     }
 
     @Test
