@@ -37,10 +37,13 @@
 **Files:**
 - Modify: `app/src/main/java/com/iamxpp/isaver/data/root/RootFileSystem.kt`
 - Modify: `app/src/main/java/com/iamxpp/isaver/data/root/LibsuRootFileSystem.kt`
+- Create: `app/src/main/cpp/isaver_fs_helper.c`
+- Create: `app/src/main/java/com/iamxpp/isaver/data/root/RootTransferHelper.kt`
+- Modify: `app/build.gradle.kts`
 - Test: `app/src/test/java/com/iamxpp/isaver/data/root/LibsuRootFileSystemTest.kt`
 
-- [ ] RED：目标目录原始路径非 symlink/identity/canonical复核；创建 `.isaver-uuid.tmp`；从应用缓存复制；stat大小；`mv --` 原子完成；失败/取消清临时目标；不覆盖既有最终文件；异常副作用返回 OUTCOME_UNCERTAIN。
-- [ ] GREEN：只暴露 typed `copyFromAppCache`/`moveTemporary`/`removeTemporary`，无通用 shell。
+- [ ] RED：目标目录原始路径非 symlink/identity/canonical复核；创建 `.isaver-uuid.tmp`；源文件 inode 绑定；stat大小；原子无覆盖发布；失败/取消清临时目标；异常副作用返回 OUTCOME_UNCERTAIN。
+- [ ] GREEN：NDK 构建固定子命令 helper，使用目录 FD、`O_NOFOLLOW/O_EXCL`、`renameat2(RENAME_NOREPLACE)`、`unlinkat`；Kotlin 只暴露 typed `copyFromAppCache`/`moveTemporary`/`removeTemporary`，无通用 shell。
 - [ ] 小米9专用测试目录验证，提交 `feat: add atomic root transfer operations`。
 
 ### Task 4: 重名策略与 Transfer Repository

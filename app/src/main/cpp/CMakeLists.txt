@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(isaver_fs_helper C)
+add_executable(isaver_fs_helper isaver_fs_helper.c)
+set_target_properties(isaver_fs_helper PROPERTIES OUTPUT_NAME "libisaver_fs_helper.so")
+target_compile_options(isaver_fs_helper PRIVATE -Wall -Wextra -Werror -fPIE)
+target_link_options(isaver_fs_helper PRIVATE -fPIE -pie)

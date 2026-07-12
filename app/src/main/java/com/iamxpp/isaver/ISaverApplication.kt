@@ -28,7 +28,7 @@ import java.util.UUID
 class ISaverApplication : Application() {
     private val applicationScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     internal val rootSession: RootSession by lazy { LibsuRootSession() }
-    internal val rootFileSystem: RootFileSystem by lazy { LibsuRootFileSystem() }
+    internal val rootFileSystem: RootFileSystem by lazy { LibsuRootFileSystem("${applicationInfo.nativeLibraryDir}/libisaver_fs_helper.so") }
     internal val database: ISaverDatabase by lazy {
         Room.databaseBuilder(this, ISaverDatabase::class.java, DATABASE_NAME).build()
     }

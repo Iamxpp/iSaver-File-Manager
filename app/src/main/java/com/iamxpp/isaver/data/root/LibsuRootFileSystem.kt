@@ -32,11 +32,15 @@ class LibsuRootFileSystem internal constructor(
     internal val shellCoordinator: RootShellCoordinator,
     private val ioDispatcher: CoroutineDispatcher,
     private val timeoutMillis: Long,
+    helperExecutable:String="/data/local/tmp/isaver_fs_helper",
 ) : RootFileSystem {
+    private val transferHelper=RootTransferHelper(helperExecutable)
     constructor(
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     ) : this(ApplicationRootShellCoordinator, ioDispatcher, timeoutMillis)
+
+    constructor(helperExecutable:String,timeoutMillis:Long=DEFAULT_TIMEOUT_MILLIS,ioDispatcher:CoroutineDispatcher=Dispatchers.IO):this(ApplicationRootShellCoordinator,ioDispatcher,timeoutMillis,helperExecutable)
 
     internal constructor(
         commandRunner: RootCommandRunner,
@@ -92,7 +96,7 @@ class LibsuRootFileSystem internal constructor(
         val (canonical,identity)=prepared.value
         val temporary=FolderName.join(canonical,temporaryName)
         if(stat(temporary) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"临时文件已存在","Temporary exists")
-        val result=try{execute(buildCopyCommand(source,targetDirectory,canonical,temporary,identity,expectedSizeBytes),"无法缓存到目标目录")}catch(cancelled:CancellationException){
+        val result=try{execute(transferHelper.copy(source,canonical.value,temporaryName.value,identity,expectedSizeBytes),"无法缓存到目标目录")}catch(cancelled:CancellationException){
             withContext(NonCancellable){cleanupIncompleteTemporary(canonical,temporaryName,expectedSizeBytes)}
             throw cancelled
         }
@@ -121,18 +125,8 @@ class LibsuRootFileSystem internal constructor(
         if(stat(final) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件已存在","Final exists")
         val tempStat=stat(temporary);if(tempStat !is OperationResult.Success)return tempStat as OperationResult.Failure
         if(tempStat.value.symbolicLink||tempStat.value.type!=com.iamxpp.isaver.domain.EntryType.FILE)return failure(ErrorCode.COMMAND_FAILED,"临时文件无效","Temporary not regular")
-        val moved=try{execute("""
-            temporary=${RootCommandCodec.quote(temporary.value)}
-            final=${RootCommandCodec.quote(final.value)}
-            original=${RootCommandCodec.quote(directory.value)}
-            [ ! -L "${'$'}original" ] && current=${'$'}(stat -c '%d:%i' -- "${'$'}original") && mapped=${'$'}(readlink -f -- "${'$'}original" | base64 -w 0) && [ "${'$'}current" = '${identity.device}:${identity.inode}' ] && [ "${'$'}mapped" = ${RootCommandCodec.quote(canonicalLineBase64(canonical))} ] || exit 47
-            [ -f "${'$'}temporary" ] && [ ! -L "${'$'}temporary" ] || exit 47
-            set -C
-            : > "${'$'}final" || exit 49
-            reservation=${'$'}(stat -c '%d:%i' -- "${'$'}final") || exit 47
-            [ "${'$'}(stat -c %s -- "${'$'}final")" = 0 ] && [ "${'$'}(stat -c '%d:%i' -- "${'$'}final")" = "${'$'}reservation" ] || { [ "${'$'}(stat -c '%d:%i' -- "${'$'}final" 2>/dev/null)" = "${'$'}reservation" ] && rm -f -- "${'$'}final"; exit 47; }
-            mv -- "${'$'}temporary" "${'$'}final"
-        """.trimIndent(),"无法完成保存")}catch(cancelled:CancellationException){
+        val tempIdentity=readIdentity(temporary);if(tempIdentity !is OperationResult.Success)return tempIdentity as OperationResult.Failure
+        val moved=try{execute(transferHelper.publish(canonical.value,temporaryName.value,finalName.value,identity,tempIdentity.value,tempStat.value.sizeBytes?:return failure(ErrorCode.COMMAND_FAILED,"临时文件无效","Missing size")),"无法完成保存")}catch(cancelled:CancellationException){
             withContext(NonCancellable){postMoveOutcome(final,temporary)}
             throw cancelled
         }
@@ -152,7 +146,8 @@ class LibsuRootFileSystem internal constructor(
         if(!isTemporaryName(temporaryName.value))return failure(ErrorCode.COMMAND_FAILED,"临时文件名无效","Invalid temporary name")
         val prepared=prepareWritableDirectory(directory);if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
         val (canonical,identity)=prepared.value;val temporary=FolderName.join(canonical,temporaryName)
-        return execute("original=${RootCommandCodec.quote(directory.value)}\ntemporary=${RootCommandCodec.quote(temporary.value)}\n[ ! -L \"\$original\" ] && current=\$(stat -c '%d:%i' -- \"\$original\") && mapped=\$(readlink -f -- \"\$original\" | base64 -w 0) && [ \"\$current\" = '${identity.device}:${identity.inode}' ] && [ \"\$mapped\" = ${RootCommandCodec.quote(canonicalLineBase64(canonical))} ] && [ ! -L \"\$temporary\" ] && rm -f -- \"\$temporary\"","无法清理临时文件").flatMap{OperationResult.Success(Unit)}
+        val tempIdentity=readIdentity(temporary);if(tempIdentity is OperationResult.Failure&&tempIdentity.code==ErrorCode.NOT_FOUND)return OperationResult.Success(Unit);if(tempIdentity !is OperationResult.Success)return tempIdentity as OperationResult.Failure
+        return execute(transferHelper.remove(canonical.value,temporaryName.value,identity,tempIdentity.value),"无法清理临时文件").flatMap{OperationResult.Success(Unit)}
     }
 
     private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<Pair<RootPath,RootFileIdentity>>{
@@ -162,14 +157,6 @@ class LibsuRootFileSystem internal constructor(
         val identity=readIdentity(canonical.value);if(identity !is OperationResult.Success)return identity as OperationResult.Failure
         return OperationResult.Success(canonical.value to identity.value)
     }
-
-    private fun buildCopyCommand(source:AppCachePath,original:RootPath,parent:RootPath,temporary:RootPath,identity:RootFileIdentity,expected:Long)="""
-        source=${RootCommandCodec.quote(source.value)}
-        original=${RootCommandCodec.quote(original.value)}
-        parent=${RootCommandCodec.quote(parent.value)}
-        temporary=${RootCommandCodec.quote(temporary.value)}
-        [ -f "${'$'}source" ] && [ ! -L "${'$'}source" ] && [ ! -L "${'$'}original" ] && current=${'$'}(stat -c '%d:%i' -- "${'$'}original") && mapped=${'$'}(readlink -f -- "${'$'}original" | base64 -w 0) && [ "${'$'}current" = '${identity.device}:${identity.inode}' ] && [ "${'$'}mapped" = ${RootCommandCodec.quote(canonicalLineBase64(parent))} ] && [ ! -e "${'$'}temporary" ] && [ ! -L "${'$'}temporary" ] && cp -- "${'$'}source" "${'$'}temporary" && [ "${'$'}(stat -c %s -- "${'$'}temporary")" = '$expected' ]
-    """.trimIndent()
 
     private fun isTemporaryName(name:String)=Regex("\\.isaver-[0-9a-fA-F-]{36}\\.tmp").matches(name)
 

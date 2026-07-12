@@ -224,16 +224,9 @@ class LibsuRootFileSystemTest {
         )
 
         assertTrue(result is OperationResult.Success<*>)
-        val command=runner.commands.single{it.contains("cp --")}
-        assertTrue(command.contains("source=${RootCommandCodec.quote(source.value)}"))
-        assertTrue(command.contains("original='/p'"))
-        assertTrue(command.contains("temporary='/p/.isaver-123e4567-e89b-12d3-a456-426614174000.tmp'"))
-        assertTrue(command.contains("[ ! -L \"\$original\" ]"))
-        assertTrue(command.contains("[ \"\$current\" = '1:2' ]"))
-        assertTrue(command.contains("[ \"\$mapped\" = '${b64("/p\n")}' ]"))
-        assertTrue(command.contains("[ ! -e \"\$temporary\" ]"))
-        assertTrue(command.contains("[ ! -L \"\$temporary\" ]"))
-        assertTrue(command.contains("cp -- \"\$source\" \"\$temporary\""))
+        val command=runner.commands.single{it.contains("copy-to-temp")}
+        assertTrue(command.contains(RootCommandCodec.quote(source.value)))
+        assertTrue(command.contains("'copy-to-temp' '/p' '.isaver-123e4567-e89b-12d3-a456-426614174000.tmp'"))
         assertEquals(4L,(result as OperationResult.Success<*>).value.let{it as com.iamxpp.isaver.domain.DirectoryEntry}.sizeBytes)
     }
 
@@ -245,21 +238,14 @@ class LibsuRootFileSystemTest {
         val moved=fs.moveTemporary(path("/p"),temporary,FolderName.parse("final.txt").getOrThrow())
 
         assertTrue(moved is OperationResult.Success<*>)
-        val command=runner.commands.single{it.contains("mv --")}
-        assertTrue(command.contains("[ -f \"\$temporary\" ]"))
-        assertTrue(command.contains("[ ! -L \"\$temporary\" ]"))
-        assertTrue(command.contains("mv -- \"\$temporary\" \"\$final\""))
-        assertTrue(command.contains("set -C"))
-        assertTrue(command.contains(": > \"\$final\""))
-        assertTrue(command.contains("reservation=\$(stat -c '%d:%i' -- \"\$final\")"))
-        assertTrue(command.contains("[ \"\$(stat -c %s -- \"\$final\")\" = 0 ]"))
-        assertTrue(command.contains("[ \"\$(stat -c '%d:%i' -- \"\$final\")\" = \"\$reservation\" ]"))
+        val command=runner.commands.single{it.contains("publish-noreplace")}
+        assertTrue(command.contains("'publish-noreplace' '/p' '.isaver-123e4567-e89b-12d3-a456-426614174000.tmp' 'final.txt'"))
 
         val collision=TransferRunner(temporaryExists=true,finalExists=true)
         val collisionResult=LibsuRootFileSystem(collision,StandardTestDispatcher(testScheduler),5_000)
             .moveTemporary(path("/p"),temporary,FolderName.parse("final.txt").getOrThrow())
         assertEquals(ErrorCode.ALREADY_EXISTS,(collisionResult as OperationResult.Failure).code)
-        assertFalse(collision.commands.any{it.contains("mv --")})
+        assertFalse(collision.commands.any{it.contains("publish-noreplace")})
     }
 
     @Test fun `remove temporary rejects ordinary names and removes only isaver uuid temporary`()=runTest{
@@ -268,15 +254,14 @@ class LibsuRootFileSystemTest {
 
         val rejected=fs.removeTemporary(path("/p"),FolderName.parse("final.txt").getOrThrow())
         assertEquals(ErrorCode.COMMAND_FAILED,(rejected as OperationResult.Failure).code)
-        assertFalse(fsRunner.commands.any{it.contains("rm -f --")})
+        assertFalse(fsRunner.commands.any{it.contains("remove-temp")})
 
         val removed=fs.removeTemporary(
             path("/p"),
             FolderName.parse(".isaver-123e4567-e89b-12d3-a456-426614174000.tmp").getOrThrow(),
         )
         assertTrue(removed is OperationResult.Success<*>)
-        assertTrue(fsRunner.commands.single{it.contains("rm -f --")}
-            .contains("rm -f -- \"\$temporary\""))
+        assertTrue(fsRunner.commands.single{it.contains("remove-temp")}.contains("'remove-temp' '/p'"))
     }
 
     private class FakeRunner(private val result: RootCommandResult) : RootCommandRunner {
@@ -299,10 +284,10 @@ class LibsuRootFileSystemTest {
                 command.contains("target='/p/final.txt'")->if(finalExists)RootCommandResult(0,listOf(record("final.txt","/p/final.txt","file","4","2","1","1","0")),emptyList())else RootCommandResult(44,emptyList(),emptyList())
                 command.contains("target='/p'")&&command.contains("readlink -f")->RootCommandResult(0,listOf(b64("/p\n")),emptyList())
                 command.contains("target='/p'")&&command.contains("emit_isaver_record \"\$target\"")->RootCommandResult(0,listOf(record("p","/p","directory","-","2","1","1","0")),emptyList())
-                command.contains("stat -c '%d:%i'")&&!command.contains("cp --")&&!command.contains("mv --")&&!command.contains("rm -f --")->RootCommandResult(0,listOf("1:2"),emptyList())
-                command.contains("cp --")->{temporaryExists=true;RootCommandResult(0,emptyList(),emptyList())}
-                command.contains("mv --")->{temporaryExists=false;finalExists=true;RootCommandResult(0,emptyList(),emptyList())}
-                command.contains("rm -f --")->{temporaryExists=false;RootCommandResult(0,emptyList(),emptyList())}
+                command.contains("stat -c '%d:%i'")->RootCommandResult(0,listOf("1:2"),emptyList())
+                command.contains("copy-to-temp")->{temporaryExists=true;RootCommandResult(0,listOf("1:3:4"),emptyList())}
+                command.contains("publish-noreplace")->{temporaryExists=false;finalExists=true;RootCommandResult(0,listOf("1:3:4"),emptyList())}
+                command.contains("remove-temp")->{temporaryExists=false;RootCommandResult(0,emptyList(),emptyList())}
                 else->error("Unexpected command: $command")
             }
         }
