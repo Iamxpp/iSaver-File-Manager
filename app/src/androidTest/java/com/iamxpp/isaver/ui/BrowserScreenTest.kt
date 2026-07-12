@@ -15,17 +15,17 @@ import org.junit.Test
 class BrowserScreenTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun `loading state is visible`() {
+    @Test fun loadingStateIsVisible() {
         compose.setContent { BrowserScreen(state(loading = true), {}, {}, {}, {}) }
         compose.onNodeWithText("正在读取目录").assertIsDisplayed()
     }
 
-    @Test fun `empty state is visible`() {
+    @Test fun emptyStateIsVisible() {
         compose.setContent { BrowserScreen(state(loading = false), {}, {}, {}, {}) }
         compose.onNodeWithText("此目录为空").assertIsDisplayed()
     }
 
-    @Test fun `error state retries`() {
+    @Test fun errorStateRetries() {
         var retried = false
         compose.setContent { BrowserScreen(state(loading = false, errorMessage = "目录不可读"), {}, {}, { retried = true }, {}) }
         compose.onNodeWithText("目录不可读").assertIsDisplayed()
@@ -33,7 +33,7 @@ class BrowserScreenTest {
         assertTrue(retried)
     }
 
-    @Test fun `directory click load more and back are wired`() {
+    @Test fun directoryClickLoadMoreAndBackAreWired() {
         val directory = entry("目录\n名称", EntryType.DIRECTORY)
         var entered = false; var more = false; var backed = false
         compose.setContent {
@@ -56,7 +56,16 @@ class BrowserScreenTest {
         entries: List<DirectoryEntry> = emptyList(), allEntries: List<DirectoryEntry> = entries,
         totalCount: Int = entries.size, loading: Boolean = false, errorMessage: String? = null,
         canGoBack: Boolean = false, hasMore: Boolean = false,
-    ) = BrowserUiState(RootPath.parse("/storage/emulated/0").getOrThrow(), allEntries, entries, totalCount, loading, errorMessage, canGoBack, hasMore)
+    ) = BrowserUiState(
+        currentPath = RootPath.parse("/storage/emulated/0").getOrThrow(),
+        allEntries = allEntries,
+        entries = entries,
+        totalCount = totalCount,
+        loading = loading,
+        errorMessage = errorMessage,
+        canGoBack = canGoBack,
+        hasMore = hasMore,
+    )
 
     private fun entry(name: String, type: EntryType) = DirectoryEntry(RootPath.parse("/x/$name").getOrThrow(), name, type, 12, 2, true, false, false)
 }
