@@ -9,6 +9,8 @@ libsu = "6.0.0"
 junit = "4.13.2"
 ksp = "2.0.21-1.0.28"
 room = "2.6.1"
+robolectric = "4.12.2"
+androidxTestCore = "1.5.0"
 androidxTestExtJunit = "1.2.1"
 
 [libraries]
@@ -31,6 +33,9 @@ compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
+androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestCore" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

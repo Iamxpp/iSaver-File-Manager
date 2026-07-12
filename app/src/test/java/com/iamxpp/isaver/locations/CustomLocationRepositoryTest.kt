@@ -40,16 +40,23 @@ class CustomLocationRepositoryTest {
         CustomLocationRepository(dao,{LocationId.of("x")},{5}).reorder(listOf(LocationId.of("c"),LocationId.of("a"),LocationId.of("b")))
         assertEquals(listOf("c","a","b"),dao.rows.sortedBy{it.sortOrder}.map{it.id})
     }
-    private class FakeDao:CustomLocationDao{
+    @Test fun `invalid stored row terminates flow with path free corruption error`() = runTest {
+        val dao=FakeDao();dao.rows+=CustomLocationEntity("valid.id","bad","relative/secret",0,1,1);dao.emit()
+        val error=try{CustomLocationRepository(dao,{LocationId.of("x")},{0}).observeAll().first();null}catch(e:DataCorruptionException){e}
+        assertNotNull(error);assertFalse(error!!.message.orEmpty().contains("relative/secret"))
+    }
+    private class FakeDao:CustomLocationDao(){
         val rows= mutableListOf<CustomLocationEntity>(); val flow=MutableStateFlow<List<CustomLocationEntity>>(emptyList()); val deleted= mutableListOf<String>()
         fun emit(){flow.value=rows.sortedWith(compareBy<CustomLocationEntity>{it.sortOrder}.thenBy{it.createdAt}.thenBy{it.id})}
         override fun observeAll():Flow<List<CustomLocationEntity>> = flow
         override suspend fun insert(entity:CustomLocationEntity){rows+=entity;emit()}
-        override suspend fun update(entity:CustomLocationEntity){rows.replaceAll{if(it.id==entity.id)entity else it};emit()}
-        override suspend fun deleteById(id:String){deleted+=id;rows.removeAll{it.id==id};emit()}
+        override suspend fun update(entity:CustomLocationEntity):Int{val found=rows.any{it.id==entity.id};rows.replaceAll{if(it.id==entity.id)entity else it};emit();return if(found)1 else 0}
+        override suspend fun updateSortOrder(id:String,order:Int):Int{val e=findById(id)?:return 0;return update(e.copy(sortOrder=order))}
+        override suspend fun deleteById(id:String):Int{deleted+=id;val n=rows.size;rows.removeAll{it.id==id};emit();return if(rows.size<n)1 else 0}
         override suspend fun findByPath(path:String)=rows.firstOrNull{it.absolutePath==path}
         override suspend fun findById(id:String)=rows.firstOrNull{it.id==id}
         override suspend fun nextSortOrder()=(rows.maxOfOrNull{it.sortOrder}?:-1)+1
+        override suspend fun allIds()=rows.map{it.id}
     }
     private fun root(v:String)=RootPath.parse(v).getOrThrow()
 }

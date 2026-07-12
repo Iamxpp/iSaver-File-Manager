@@ -7,7 +7,8 @@ import com.iamxpp.isaver.domain.RootPath
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-sealed interface CustomLocationResult { data object Success:CustomLocationResult; data object InvalidName:CustomLocationResult; data object DuplicatePath:CustomLocationResult; data object NotFound:CustomLocationResult }
+sealed interface CustomLocationResult { data object Success:CustomLocationResult; data object InvalidName:CustomLocationResult; data object DuplicatePath:CustomLocationResult; data object IdConflict:CustomLocationResult; data object InvalidOrder:CustomLocationResult; data object NotFound:CustomLocationResult }
+class DataCorruptionException : IllegalStateException("Invalid custom location data")
 
 class CustomLocationRepository(
     private val dao: CustomLocationDao,
@@ -20,18 +21,18 @@ class CustomLocationRepository(
         val name=displayName.trim(); if(name.isEmpty()) return CustomLocationResult.InvalidName
         if(dao.findByPath(path.value)!=null) return CustomLocationResult.DuplicatePath
         val now=clock()
-        return try { dao.insert(CustomLocationEntity(idFactory().value,name,path.value,dao.nextSortOrder(),now,now)); CustomLocationResult.Success }
-        catch(_:SQLiteConstraintException){ CustomLocationResult.DuplicatePath }
+        return try { dao.insertAtEnd(CustomLocationEntity(idFactory().value,name,path.value,0,now,now)); CustomLocationResult.Success }
+        catch(_:SQLiteConstraintException){ if(dao.findByPath(path.value)!=null)CustomLocationResult.DuplicatePath else CustomLocationResult.IdConflict }
     }
 
     suspend fun update(id:LocationId,displayName:String,path:RootPath):CustomLocationResult {
         val name=displayName.trim(); if(name.isEmpty()) return CustomLocationResult.InvalidName
         val current=dao.findById(id.value)?:return CustomLocationResult.NotFound
         val duplicate=dao.findByPath(path.value); if(duplicate!=null&&duplicate.id!=id.value)return CustomLocationResult.DuplicatePath
-        return try { dao.update(current.copy(displayName=name,absolutePath=path.value,updatedAt=clock())); CustomLocationResult.Success }
-        catch(_:SQLiteConstraintException){CustomLocationResult.DuplicatePath}
+        return try { if(dao.update(current.copy(displayName=name,absolutePath=path.value,updatedAt=clock()))==1)CustomLocationResult.Success else CustomLocationResult.NotFound }
+        catch(_:SQLiteConstraintException){if(dao.findByPath(path.value)?.id!=id.value)CustomLocationResult.DuplicatePath else CustomLocationResult.IdConflict}
     }
-    suspend fun remove(id:LocationId)=dao.deleteById(id.value)
-    suspend fun reorder(ids:List<LocationId>){ ids.forEachIndexed{i,id->dao.findById(id.value)?.let{dao.update(it.copy(sortOrder=i,updatedAt=clock()))}} }
-    private fun toLocation(row:CustomLocationEntity)=StorageLocation.Direct(LocationId.of(row.id),row.displayName,RootPath.parse(row.absolutePath).getOrThrow(),StorageLocation.Source.CUSTOM)
+    suspend fun remove(id:LocationId)=if(dao.deleteById(id.value)==1)CustomLocationResult.Success else CustomLocationResult.NotFound
+    suspend fun reorder(ids:List<LocationId>):CustomLocationResult=try{dao.reorderAtomically(ids.map{it.value});CustomLocationResult.Success}catch(_:IllegalArgumentException){CustomLocationResult.InvalidOrder}
+    private fun toLocation(row:CustomLocationEntity)=try{StorageLocation.Direct(LocationId.of(row.id),row.displayName,RootPath.parse(row.absolutePath).getOrThrow(),StorageLocation.Source.CUSTOM)}catch(_:Exception){throw DataCorruptionException()}
 }
