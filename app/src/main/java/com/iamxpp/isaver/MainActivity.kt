@@ -8,6 +8,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.iamxpp.isaver.data.root.RootSession
+import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.data.root.RootFileSystem
+import kotlinx.coroutines.CoroutineDispatcher
 import com.iamxpp.isaver.ui.RootGateScreen
 import com.iamxpp.isaver.ui.RootGateViewModel
 import com.iamxpp.isaver.ui.RootGateUiState
@@ -32,7 +35,11 @@ class MainActivity : ComponentActivity() {
             ISaverTheme {
                 if (uiState == RootGateUiState.Granted) {
                     val browserViewModel = androidx.compose.runtime.remember {
-                        ViewModelProvider(this, BrowserViewModelFactory((application as ISaverApplication).rootFileSystem))[BrowserViewModel::class.java]
+                        val app = application as ISaverApplication
+                        ViewModelProvider(
+                            this,
+                            BrowserViewModelFactory(app.rootFileSystem, app.browserPreferencesStore),
+                        )[BrowserViewModel::class.java]
                     }
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
                     BrowserScreen(browserState, { browserViewModel.enterDirectory(it) }, { browserViewModel.back() }, browserViewModel::retry, browserViewModel::loadMore)
@@ -42,11 +49,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private class BrowserViewModelFactory(private val fileSystem: com.iamxpp.isaver.data.root.RootFileSystem) : ViewModelProvider.Factory {
+internal class BrowserViewModelFactory(
+    private val fileSystem: RootFileSystem,
+    private val preferencesStore: BrowserPreferencesStore,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
         @Suppress("UNCHECKED_CAST")
-        return BrowserViewModel(fileSystem, Dispatchers.IO) as T
+        return BrowserViewModel(fileSystem, ioDispatcher, preferencesStore) as T
     }
 }
 

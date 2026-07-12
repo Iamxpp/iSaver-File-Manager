@@ -25,6 +25,7 @@ data class BrowserUiState(
     val displayMode: DisplayMode = DisplayMode.LIST,
     val sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     val searchQuery: String = "",
+    val presentationError: String? = null,
 ) {
     val empty: Boolean get() = !loading && errorMessage == null && totalCount == 0
 }

@@ -114,6 +114,40 @@ class BrowserViewModelTest {
         )
     }
 
+    @Test fun `display preference write failure becomes a non sensitive state error`() = runTest {
+        val preferences = FakeBrowserPreferencesStore(BrowserPreferences()).apply {
+            displayModeFailure = IllegalStateException("secret datastore detail")
+        }
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            preferences,
+        )
+        advanceUntilIdle()
+
+        vm.setDisplayMode(DisplayMode.GRID)
+        advanceUntilIdle()
+
+        assertEquals("无法保存显示设置", vm.state.value.presentationError)
+    }
+
+    @Test fun `sort preference write failure becomes a non sensitive state error`() = runTest {
+        val preferences = FakeBrowserPreferencesStore(BrowserPreferences()).apply {
+            sortFailure = IllegalStateException("secret datastore detail")
+        }
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            preferences,
+        )
+        advanceUntilIdle()
+
+        vm.setSort(SortSpec(SortField.TYPE, SortDirection.DESCENDING))
+        advanceUntilIdle()
+
+        assertEquals("无法保存显示设置", vm.state.value.presentationError)
+    }
+
     @Test fun `search is case insensitive and paginates filtered sorted results without relisting`() = runTest {
         var listCalls = 0
         val all = (1..250).map { entry("Match$it", EntryType.FILE) } +
@@ -124,6 +158,7 @@ class BrowserViewModelTest {
                 OperationResult.Success(all.reversed())
             },
             StandardTestDispatcher(testScheduler),
+            FakeBrowserPreferencesStore(BrowserPreferences()),
         )
         advanceUntilIdle()
 
@@ -141,6 +176,27 @@ class BrowserViewModelTest {
 
         assertEquals(250, vm.state.value.entries.size)
         assertFalse(vm.state.value.hasMore)
+    }
+
+    @Test fun `search reset prevents stale load more from expanding the new result`() = runTest {
+        val all = (1..250).map { entry("match$it", EntryType.FILE) } +
+            (1..250).map { entry("other$it", EntryType.FILE) }
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(all) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+        advanceUntilIdle()
+        vm.loadMore()
+        assertEquals(400, vm.state.value.entries.size)
+
+        vm.setSearchQuery("match")
+        vm.loadMore()
+        advanceUntilIdle()
+
+        assertEquals(200, vm.state.value.entries.size)
+        assertEquals(250, vm.state.value.totalCount)
+        assertTrue(vm.state.value.hasMore)
     }
 
     @Test fun `directory result uses the latest preference selected while loading`() = runTest {
@@ -174,7 +230,7 @@ class BrowserViewModelTest {
 
     @Test fun `opening browse root clears navigation and returns home from slash`() = runTest {
         val fs = FakeFileSystem { OperationResult.Success(emptyList()) }
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
         vm.enterDirectory(entry("child", EntryType.DIRECTORY, "/storage/emulated/0/child"))
         advanceUntilIdle()
@@ -191,7 +247,7 @@ class BrowserViewModelTest {
     @Test fun `init asynchronously loads storage root and exposes loading then success`() = runTest {
         val gate = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fs = FakeFileSystem { gate.await() }
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         assertTrue(vm.state.value.loading)
         assertEquals("/storage/emulated/0", vm.state.value.currentPath.value)
         testScheduler.runCurrent()
@@ -207,7 +263,7 @@ class BrowserViewModelTest {
             add(OperationResult.Success(emptyList()))
             add(OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "hidden"))
         }
-        val vm = BrowserViewModel(FakeFileSystem { results.removeFirst() }, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(FakeFileSystem { results.removeFirst() }, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
         assertTrue(vm.state.value.empty)
         vm.retry(); advanceUntilIdle()
@@ -217,13 +273,13 @@ class BrowserViewModelTest {
 
     @Test fun `sorts directories first with case insensitive natural numeric order`() = runTest {
         val input = listOf(entry("file10", EntryType.FILE), entry("Dir10", EntryType.DIRECTORY), entry("file2", EntryType.FILE), entry("dir2", EntryType.DIRECTORY), entry("Alpha", EntryType.FILE), entry("alpha", EntryType.FILE))
-        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(input) }, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(input) }, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
         assertEquals(listOf("dir2", "Dir10", "Alpha", "alpha", "file2", "file10"), vm.state.value.entries.map { it.name })
     }
 
     @Test fun `enter accepts only directories and back uses navigation stack`() = runTest {
-        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
         assertFalse(vm.enterDirectory(entry("file", EntryType.FILE)))
         assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
@@ -238,7 +294,7 @@ class BrowserViewModelTest {
 
     @Test fun `openRoot clears old navigation and loads requested location`() = runTest {
         val fs = FakeFileSystem { OperationResult.Success(emptyList()) }
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
         vm.enterDirectory(entry("child", EntryType.DIRECTORY, "/storage/emulated/0/child"))
         advanceUntilIdle()
@@ -254,7 +310,7 @@ class BrowserViewModelTest {
     }
 
     @Test fun `back at an opened location root requests the locations home`() = runTest {
-        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
         vm.openRoot(RootPath.parse("/data/local/tmp").getOrThrow(), "测试位置")
         advanceUntilIdle()
@@ -276,7 +332,7 @@ class BrowserViewModelTest {
                 OperationResult.Success(created)
             },
         )
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
 
         vm.createDirectory("中文 folder")
@@ -293,7 +349,7 @@ class BrowserViewModelTest {
             createBlock = { _, _ -> OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "文件夹已存在", "exists") },
             listBlock = { listCount += 1; OperationResult.Success(emptyList()) },
         )
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
 
         vm.createDirectory("existing")
@@ -312,7 +368,7 @@ class BrowserViewModelTest {
             createBlock = { _, _ -> createCalls += 1; error("must not create") },
             listBlock = { OperationResult.Success(emptyList()) },
         )
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
 
         assertFalse(vm.state.value.canCreateDirectory)
@@ -332,7 +388,7 @@ class BrowserViewModelTest {
             },
             listBlock = { OperationResult.Success(emptyList()) },
         )
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
 
         assertFalse(vm.state.value.canCreateDirectory)
@@ -344,7 +400,7 @@ class BrowserViewModelTest {
             createBlock = { _, _ -> createCalls += 1; error("must not create") },
             listBlock = { OperationResult.Success(emptyList()) },
         )
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
 
         vm.createDirectory("..")
@@ -359,7 +415,7 @@ class BrowserViewModelTest {
             createBlock = { _, _ -> error("boom") },
             listBlock = { OperationResult.Success(emptyList()) },
         )
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
 
         vm.createDirectory("folder")
@@ -374,7 +430,7 @@ class BrowserViewModelTest {
         val old = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fresh = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fs = FakeFileSystem { path -> if (path.value.endsWith("old")) withContext(NonCancellable) { old.await() } else if (path.value.endsWith("new")) fresh.await() else OperationResult.Success(emptyList()) }
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler)); advanceUntilIdle()
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences()); advanceUntilIdle()
         vm.enterDirectory(entry("old", EntryType.DIRECTORY, "/storage/emulated/0/old")); testScheduler.runCurrent()
         vm.enterDirectory(entry("new", EntryType.DIRECTORY, "/storage/emulated/0/new")); testScheduler.runCurrent()
         fresh.complete(OperationResult.Success(listOf(entry("fresh", EntryType.FILE)))); advanceUntilIdle()
@@ -384,7 +440,7 @@ class BrowserViewModelTest {
     }
 
     @Test fun `cancellation does not become an error`() = runTest {
-        val vm = BrowserViewModel(FakeFileSystem { throw CancellationException("cancel") }, StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(FakeFileSystem { throw CancellationException("cancel") }, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
         assertNull(vm.state.value.errorMessage)
         assertFalse(vm.state.value.loading)
@@ -397,6 +453,7 @@ class BrowserViewModelTest {
         val vm = BrowserViewModel(
             FakeFileSystem { OperationResult.Success(listOf(entry("b", EntryType.FILE), entry("a", EntryType.FILE))) },
             dispatcher,
+            defaultPreferences(),
             sorter = { entries, spec ->
                 sortedWithMarker = marker.get() == true
                 com.iamxpp.isaver.ui.files.FileEntrySorter.sort(entries, spec)
@@ -409,7 +466,7 @@ class BrowserViewModelTest {
 
     @Test fun `large results remain complete and reveal 200 entries per page`() = runTest {
         val all = (1..450).map { entry("file$it", EntryType.FILE) }
-        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(all) }, StandardTestDispatcher(testScheduler)); advanceUntilIdle()
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(all) }, StandardTestDispatcher(testScheduler), defaultPreferences()); advanceUntilIdle()
         assertEquals(450, vm.state.value.totalCount); assertEquals(200, vm.state.value.entries.size); assertTrue(vm.state.value.hasMore)
         vm.loadMore(); assertEquals(400, vm.state.value.entries.size)
         vm.loadMore(); assertEquals(450, vm.state.value.entries.size); assertFalse(vm.state.value.hasMore)
@@ -434,10 +491,20 @@ class BrowserViewModelTest {
         override val preferences = MutableStateFlow(initial)
         val displayModeWrites = mutableListOf<DisplayMode>()
         val sortWrites = mutableListOf<SortSpec>()
-        override suspend fun setDisplayMode(displayMode: DisplayMode) { displayModeWrites += displayMode }
-        override suspend fun setSort(sortSpec: SortSpec) { sortWrites += sortSpec }
+        var displayModeFailure: Throwable? = null
+        var sortFailure: Throwable? = null
+        override suspend fun setDisplayMode(displayMode: DisplayMode) {
+            displayModeFailure?.let { throw it }
+            displayModeWrites += displayMode
+        }
+        override suspend fun setSort(sortSpec: SortSpec) {
+            sortFailure?.let { throw it }
+            sortWrites += sortSpec
+        }
         fun emit(value: BrowserPreferences) { preferences.value = value }
     }
+
+    private fun defaultPreferences() = FakeBrowserPreferencesStore(BrowserPreferences())
 
     private class MarkerDispatcher(
         private val delegate: CoroutineDispatcher,

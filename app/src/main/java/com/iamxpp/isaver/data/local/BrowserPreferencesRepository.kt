@@ -10,7 +10,6 @@ import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
@@ -24,12 +23,6 @@ interface BrowserPreferencesStore {
     val preferences: Flow<BrowserPreferences>
     suspend fun setDisplayMode(displayMode: DisplayMode)
     suspend fun setSort(sortSpec: SortSpec)
-
-    data object Default : BrowserPreferencesStore {
-        override val preferences: Flow<BrowserPreferences> = flowOf(BrowserPreferences())
-        override suspend fun setDisplayMode(displayMode: DisplayMode) = Unit
-        override suspend fun setSort(sortSpec: SortSpec) = Unit
-    }
 }
 
 class BrowserPreferencesRepository(

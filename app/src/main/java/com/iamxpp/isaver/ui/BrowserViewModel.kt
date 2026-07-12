@@ -25,7 +25,7 @@ import kotlinx.coroutines.withContext
 class BrowserViewModel(
     private val rootFileSystem: RootFileSystem,
     private val ioDispatcher: CoroutineDispatcher,
-    private val preferencesStore: BrowserPreferencesStore = BrowserPreferencesStore.Default,
+    private val preferencesStore: BrowserPreferencesStore,
     private val sorter: (List<DirectoryEntry>, SortSpec) -> List<DirectoryEntry> = FileEntrySorter::sort,
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
@@ -43,6 +43,7 @@ class BrowserViewModel(
     init {
         viewModelScope.launch {
             preferencesStore.preferences.collect { preferences ->
+                resetPresentationWindow()
                 mutableState.value = mutableState.value.copy(
                     displayMode = preferences.displayMode,
                     sortSpec = preferences.sortSpec,
@@ -75,15 +76,15 @@ class BrowserViewModel(
     fun retry() = load(mutableState.value.currentPath)
 
     fun setDisplayMode(displayMode: DisplayMode) {
-        viewModelScope.launch { preferencesStore.setDisplayMode(displayMode) }
+        savePresentationPreference { preferencesStore.setDisplayMode(displayMode) }
     }
 
     fun setSort(sortSpec: SortSpec) {
-        viewModelScope.launch { preferencesStore.setSort(sortSpec) }
+        savePresentationPreference { preferencesStore.setSort(sortSpec) }
     }
 
     fun setSearchQuery(searchQuery: String) {
-        visibleCount = PAGE_SIZE
+        resetPresentationWindow()
         mutableState.value = mutableState.value.copy(searchQuery = searchQuery)
         refreshPresentation()
     }
@@ -150,7 +151,7 @@ class BrowserViewModel(
     private fun load(path: RootPath, locationTarget: RootPath? = null) {
         val request = ++generation
         loadJob?.cancel()
-        visibleCount = PAGE_SIZE
+        resetPresentationWindow()
         mutableState.value = BrowserUiState(
             currentPath = path,
             rootTitle = mutableState.value.rootTitle,
@@ -188,6 +189,7 @@ class BrowserViewModel(
                     }
                     is OperationResult.Success -> if (request == generation) {
                         val allEntries = result.value
+                        resetPresentationWindow()
                         mutableState.value = mutableState.value.copy(
                             allEntries = allEntries,
                             loading = false,
@@ -205,6 +207,29 @@ class BrowserViewModel(
                 if (request == generation) {
                     mutableState.value = mutableState.value.copy(loading = false, errorMessage = "无法读取目录")
                 }
+            }
+        }
+    }
+
+    private fun resetPresentationWindow() {
+        visibleCount = PAGE_SIZE
+        presentedEntries = emptyList()
+        mutableState.value = mutableState.value.copy(
+            entries = emptyList(),
+            totalCount = 0,
+            hasMore = false,
+        )
+    }
+
+    private fun savePresentationPreference(write: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                write()
+                mutableState.value = mutableState.value.copy(presentationError = null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                mutableState.value = mutableState.value.copy(presentationError = "无法保存显示设置")
             }
         }
     }
