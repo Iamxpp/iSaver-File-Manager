@@ -59,6 +59,8 @@ class LibsuRootFileSystem internal constructor(
         execute(buildCanonicalizeCommand(path), "无法解析真实路径").flatMap(::parseCanonicalOutput)
 
     override suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>{
+        val originalParent=stat(parent);if(originalParent !is OperationResult.Success)return originalParent as OperationResult.Failure
+        if(originalParent.value.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"无法在符号链接目录中创建文件夹","Original parent was symlink")
         val canonical=canonicalize(parent);if(canonical !is OperationResult.Success)return canonical as OperationResult.Failure
         val parentStat=stat(canonical.value);if(parentStat !is OperationResult.Success)return parentStat as OperationResult.Failure
         val p=parentStat.value
@@ -69,7 +71,7 @@ class LibsuRootFileSystem internal constructor(
         val preIdentity=readIdentity(canonical.value);if(preIdentity !is OperationResult.Success)return preIdentity as OperationResult.Failure
         val child=FolderName.join(canonical.value,name)
         when(val e=stat(child)){is OperationResult.Success->return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child exists");is OperationResult.Failure->if(e.code!=ErrorCode.NOT_FOUND)return e}
-        val made=execute(buildMkdirCommand(canonical.value,child,preIdentity.value),"无法创建文件夹")
+        val made=execute(buildMkdirCommand(parent,canonical.value,child,preIdentity.value),"无法创建文件夹")
         if(made is OperationResult.Failure){if(stat(child) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件夹已存在","Child appeared");return made}
         val postIdentity=readIdentity(canonical.value)
         if(postIdentity !is OperationResult.Success||postIdentity.value!=preIdentity.value)return uncertain("Parent identity changed")
@@ -140,11 +142,15 @@ class LibsuRootFileSystem internal constructor(
         readlink -f -- "${'$'}target" | base64 -w 0 || exit 47
     """.trimIndent()
     /** Shell checks reduce but cannot eliminate the tiny check/mkdir TOCTOU window; fully atomic defense requires native mkdirat. */
-    private fun buildMkdirCommand(parent:RootPath,child:RootPath,identity:RootFileIdentity)="""
+    private fun buildMkdirCommand(original:RootPath,parent:RootPath,child:RootPath,identity:RootFileIdentity)="""
+        set -o pipefail
+        original=${RootCommandCodec.quote(original.value)}
         parent=${RootCommandCodec.quote(parent.value)}
         child=${RootCommandCodec.quote(child.value)}
-        current=${'$'}(stat -c '%d:%i' -- "${'$'}parent") && [ "${'$'}current" = '${identity.device}:${identity.inode}' ] && [ ! -L "${'$'}parent" ] && [ -d "${'$'}parent" ] && [ -w "${'$'}parent" ] && mkdir -- "${'$'}child"
+        [ ! -L "${'$'}original" ] && current=${'$'}(stat -c '%d:%i' -- "${'$'}original") && mapped=${'$'}(readlink -f -- "${'$'}original" | base64 -w 0) && [ ! -L "${'$'}original" ] && [ "${'$'}current" = '${identity.device}:${identity.inode}' ] && [ "${'$'}mapped" = ${RootCommandCodec.quote(canonicalLineBase64(parent))} ] && [ -d "${'$'}original" ] && [ -w "${'$'}original" ] && mkdir -- "${'$'}child"
     """.trimIndent()
+
+    private fun canonicalLineBase64(path:RootPath)=Base64.getEncoder().encodeToString("${path.value}\n".toByteArray(StandardCharsets.UTF_8))
 
     private suspend fun readIdentity(path:RootPath):OperationResult<RootFileIdentity> = execute("stat -c '%d:%i' -- ${RootCommandCodec.quote(path.value)}","无法验证目录身份").flatMap{lines->RootFileIdentity.parse(lines).fold({OperationResult.Success(it)},{failure(ErrorCode.COMMAND_FAILED,"无法验证目录身份","Malformed file identity")})}
 
