@@ -8,6 +8,7 @@
 captures/
 .externalNativeBuild/
 .cxx/
+.superpowers/
 .DS_Store
 *.apk
 *.aab
