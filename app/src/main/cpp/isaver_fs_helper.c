@@ -1,7 +1,9 @@
 #define _GNU_SOURCE
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/fs.h>
 #include <signal.h>
 #include <stdint.h>
@@ -16,6 +18,7 @@
 enum {
     X_NOT_FOUND = 44,
     X_NOT_DIRECTORY = 45,
+    X_NOT_READABLE = 46,
     X_SOURCE_UNREADABLE = 56,
     X_NOT_WRITABLE = 48,
     X_ALREADY_EXISTS = 49,
@@ -25,10 +28,506 @@ enum {
     X_STAGE_INVALID = 53,
     X_SOURCE_CHANGED = 54,
     X_OUTCOME_UNCERTAIN = 55,
+    X_OUTPUT_LIMIT = 57,
     X_USAGE = 64,
 };
 
 static const char PAYLOAD_NAME[] = "payload";
+
+enum {
+    LIST_MAX_ITEMS = 100000,
+};
+
+static const size_t LIST_MAX_FIELD_BYTES = 1048576U;
+static const size_t LIST_MAX_PROTOCOL_BYTES = 67108864U;
+
+struct output_buffer {
+    char *data;
+    size_t length;
+    size_t capacity;
+};
+
+static int list_errno(int error) {
+    if (error == ENOENT) return X_NOT_FOUND;
+    if (error == ENOTDIR || error == ELOOP) return X_NOT_DIRECTORY;
+    if (error == EACCES || error == EPERM) return X_NOT_READABLE;
+    return X_IO;
+}
+
+static int nofollow_open_path(const char *path, const char **open_path, char **owned_path) {
+    size_t original_length = strlen(path);
+    size_t trimmed_length = original_length;
+    while (trimmed_length > 1U && path[trimmed_length - 1U] == '/') {
+        trimmed_length -= 1U;
+    }
+    if (trimmed_length == original_length) {
+        *open_path = path;
+        *owned_path = NULL;
+        return 0;
+    }
+    if (trimmed_length == SIZE_MAX) return X_OUTPUT_LIMIT;
+    char *trimmed = malloc(trimmed_length + 1U);
+    if (trimmed == NULL) return X_IO;
+    memcpy(trimmed, path, trimmed_length);
+    trimmed[trimmed_length] = '\0';
+    *open_path = trimmed;
+    *owned_path = trimmed;
+    return 0;
+}
+
+static int base64_length(size_t input_length, size_t *encoded_length) {
+    if (input_length > SIZE_MAX - 2U) return X_OUTPUT_LIMIT;
+    size_t groups = (input_length + 2U) / 3U;
+    if (groups > SIZE_MAX / 4U) return X_OUTPUT_LIMIT;
+    size_t length = groups * 4U;
+    if (length > LIST_MAX_FIELD_BYTES) return X_OUTPUT_LIMIT;
+    *encoded_length = length;
+    return 0;
+}
+
+static int buffer_reserve(struct output_buffer *buffer, size_t additional) {
+    if (additional > LIST_MAX_PROTOCOL_BYTES - buffer->length) return X_OUTPUT_LIMIT;
+    size_t required = buffer->length + additional;
+    if (required <= buffer->capacity) return 0;
+
+    size_t capacity = buffer->capacity == 0U ? 4096U : buffer->capacity;
+    while (capacity < required) {
+        if (capacity > LIST_MAX_PROTOCOL_BYTES / 2U) {
+            capacity = LIST_MAX_PROTOCOL_BYTES;
+            break;
+        }
+        capacity *= 2U;
+    }
+    if (capacity < required) return X_OUTPUT_LIMIT;
+    char *resized = realloc(buffer->data, capacity);
+    if (resized == NULL) return X_IO;
+    buffer->data = resized;
+    buffer->capacity = capacity;
+    return 0;
+}
+
+static int buffer_append_bytes(
+    struct output_buffer *buffer,
+    const char *bytes,
+    size_t byte_count
+) {
+    int result = buffer_reserve(buffer, byte_count);
+    if (result != 0) return result;
+    memcpy(buffer->data + buffer->length, bytes, byte_count);
+    buffer->length += byte_count;
+    return 0;
+}
+
+static int buffer_append_text(struct output_buffer *buffer, const char *text) {
+    return buffer_append_bytes(buffer, text, strlen(text));
+}
+
+static int buffer_append_character(struct output_buffer *buffer, char character) {
+    return buffer_append_bytes(buffer, &character, 1U);
+}
+
+static int buffer_append_base64(
+    struct output_buffer *buffer,
+    const unsigned char *input,
+    size_t input_length
+) {
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t encoded_length;
+    int result = base64_length(input_length, &encoded_length);
+    if (result != 0) return result;
+    result = buffer_reserve(buffer, encoded_length);
+    if (result != 0) return result;
+
+    char *output = buffer->data + buffer->length;
+    size_t input_index = 0U;
+    size_t output_index = 0U;
+    while (input_index + 3U <= input_length) {
+        uint32_t value = ((uint32_t) input[input_index] << 16U) |
+            ((uint32_t) input[input_index + 1U] << 8U) |
+            (uint32_t) input[input_index + 2U];
+        output[output_index++] = alphabet[(value >> 18U) & 0x3fU];
+        output[output_index++] = alphabet[(value >> 12U) & 0x3fU];
+        output[output_index++] = alphabet[(value >> 6U) & 0x3fU];
+        output[output_index++] = alphabet[value & 0x3fU];
+        input_index += 3U;
+    }
+    size_t remaining = input_length - input_index;
+    if (remaining == 1U) {
+        uint32_t value = (uint32_t) input[input_index] << 16U;
+        output[output_index++] = alphabet[(value >> 18U) & 0x3fU];
+        output[output_index++] = alphabet[(value >> 12U) & 0x3fU];
+        output[output_index++] = '=';
+        output[output_index++] = '=';
+    } else if (remaining == 2U) {
+        uint32_t value = ((uint32_t) input[input_index] << 16U) |
+            ((uint32_t) input[input_index + 1U] << 8U);
+        output[output_index++] = alphabet[(value >> 18U) & 0x3fU];
+        output[output_index++] = alphabet[(value >> 12U) & 0x3fU];
+        output[output_index++] = alphabet[(value >> 6U) & 0x3fU];
+        output[output_index++] = '=';
+    }
+    if (output_index != encoded_length) return X_IO;
+    buffer->length += encoded_length;
+    return 0;
+}
+
+static int retry_fstat(int descriptor, struct stat *status) {
+    int result;
+    do {
+        result = fstat(descriptor, status);
+    } while (result != 0 && errno == EINTR);
+    return result;
+}
+
+static int retry_fstatat(
+    int directory_fd,
+    const char *name,
+    struct stat *status,
+    int flags
+) {
+    int result;
+    do {
+        result = fstatat(directory_fd, name, status, flags);
+    } while (result != 0 && errno == EINTR);
+    return result;
+}
+
+static int retry_faccessat(int directory_fd, const char *name, int mode, int flags) {
+    int result;
+    do {
+        result = faccessat(directory_fd, name, mode, flags);
+    } while (result != 0 && errno == EINTR);
+    return result;
+}
+
+static int access_flags_unsupported(int error) {
+    return error == EINVAL || error == ENOSYS || error == EOPNOTSUPP;
+}
+
+static int mode_allows(const struct stat *status, int requested) {
+    if ((requested & ~(R_OK | W_OK)) != 0) return 0;
+    if (geteuid() == 0) return 1;
+
+    mode_t permissions;
+    if (geteuid() == status->st_uid) {
+        permissions = (status->st_mode >> 6U) & 07U;
+    } else if (getegid() == status->st_gid) {
+        permissions = (status->st_mode >> 3U) & 07U;
+    } else {
+        permissions = status->st_mode & 07U;
+    }
+    if ((requested & R_OK) != 0 && (permissions & 04U) == 0) return 0;
+    if ((requested & W_OK) != 0 && (permissions & 02U) == 0) return 0;
+    return 1;
+}
+
+static int parent_capability(
+    int directory_fd,
+    const struct stat *status,
+    int requested
+) {
+    if (requested == R_OK) return 1;
+    if (retry_faccessat(directory_fd, ".", requested, AT_EACCESS) == 0) return 1;
+    if (!access_flags_unsupported(errno)) return 0;
+
+    /* The held dirfd makes "." safe from path replacement. Android 10/11 reject AT_EACCESS,
+       so equal real/effective IDs can retry flags=0 and retain read-only mount enforcement. */
+    if (getuid() == geteuid()) {
+        if (retry_faccessat(directory_fd, ".", requested, 0) == 0) return 1;
+        if (!access_flags_unsupported(errno)) return 0;
+    }
+    return mode_allows(status, requested);
+}
+
+static int entry_capability(
+    int directory_fd,
+    const char *name,
+    const struct stat *status,
+    int requested,
+    int parent_writable
+) {
+    if (retry_faccessat(
+        directory_fd,
+        name,
+        requested,
+        AT_EACCESS | AT_SYMLINK_NOFOLLOW
+    ) == 0) {
+        return 1;
+    }
+    if (!access_flags_unsupported(errno)) return 0;
+
+    /* Android 11 can reject NOFOLLOW access flags before a syscall. The mode-only fallback is a
+       conservative UI hint over the already captured lstat; every later write revalidates live. */
+    if (requested == W_OK && !parent_writable) return 0;
+    return mode_allows(status, requested);
+}
+
+static int build_child_path(
+    const char *parent,
+    const char *name,
+    char **child,
+    size_t *child_length
+) {
+    size_t parent_length = strlen(parent);
+    size_t name_length = strlen(name);
+    size_t separator_length =
+        parent_length > 0U && parent[parent_length - 1U] == '/' ? 0U : 1U;
+    if (parent_length > SIZE_MAX - separator_length) return X_OUTPUT_LIMIT;
+    size_t prefix_length = parent_length + separator_length;
+    if (name_length > SIZE_MAX - prefix_length) return X_OUTPUT_LIMIT;
+    size_t length = prefix_length + name_length;
+    size_t encoded_length;
+    int result = base64_length(length, &encoded_length);
+    if (result != 0) return result;
+    (void) encoded_length;
+    if (length == SIZE_MAX) return X_OUTPUT_LIMIT;
+
+    char *path = malloc(length + 1U);
+    if (path == NULL) return X_IO;
+    memcpy(path, parent, parent_length);
+    if (separator_length != 0U) path[parent_length] = '/';
+    memcpy(path + prefix_length, name, name_length);
+    path[length] = '\0';
+    *child = path;
+    *child_length = length;
+    return 0;
+}
+
+static int append_listing_record(
+    struct output_buffer *buffer,
+    const char *name,
+    const char *path,
+    size_t path_length,
+    const struct stat *status,
+    int symlink_hint,
+    int readable,
+    int writable
+) {
+    const char *type = "other";
+    const char *size = "-";
+    const char *modified = "-";
+    int symbolic_link = symlink_hint;
+    char size_text[32];
+    char modified_text[32];
+
+    if (status != NULL) {
+        symbolic_link = S_ISLNK(status->st_mode) ? 1 : 0;
+        if (!symbolic_link && S_ISDIR(status->st_mode)) {
+            type = "directory";
+        } else if (!symbolic_link && S_ISREG(status->st_mode)) {
+            type = "file";
+            if (status->st_size >= 0) {
+                int size_length = snprintf(
+                    size_text,
+                    sizeof(size_text),
+                    "%lld",
+                    (long long) status->st_size
+                );
+                if (size_length < 0 || (size_t) size_length >= sizeof(size_text)) return X_IO;
+                size = size_text;
+            }
+        }
+        int modified_length = snprintf(
+            modified_text,
+            sizeof(modified_text),
+            "%lld",
+            (long long) status->st_mtim.tv_sec
+        );
+        if (modified_length < 0 ||
+            (size_t) modified_length >= sizeof(modified_text)) return X_IO;
+        modified = modified_text;
+    }
+
+    int result = buffer_append_base64(
+        buffer,
+        (const unsigned char *) name,
+        strlen(name)
+    );
+    if (result != 0) return result;
+    result = buffer_append_character(buffer, '\t');
+    if (result != 0) return result;
+    result = buffer_append_base64(
+        buffer,
+        (const unsigned char *) path,
+        path_length
+    );
+    if (result != 0) return result;
+    result = buffer_append_character(buffer, '\t');
+    if (result != 0) return result;
+    result = buffer_append_text(buffer, type);
+    if (result != 0) return result;
+    result = buffer_append_character(buffer, '\t');
+    if (result != 0) return result;
+    result = buffer_append_text(buffer, size);
+    if (result != 0) return result;
+    result = buffer_append_character(buffer, '\t');
+    if (result != 0) return result;
+    result = buffer_append_text(buffer, modified);
+    if (result != 0) return result;
+
+    char capability_fields[] = {
+        '\t', readable ? '1' : '0',
+        '\t', writable ? '1' : '0',
+        '\t', symbolic_link ? '1' : '0',
+        '\n',
+    };
+    return buffer_append_bytes(buffer, capability_fields, sizeof(capability_fields));
+}
+
+static int write_stdout(const char *bytes, size_t byte_count) {
+    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) return X_IO;
+    size_t offset = 0U;
+    while (offset < byte_count) {
+        ssize_t written;
+        do {
+            written = write(STDOUT_FILENO, bytes + offset, byte_count - offset);
+        } while (written < 0 && errno == EINTR);
+        if (written <= 0) return X_IO;
+        offset += (size_t) written;
+    }
+    return 0;
+}
+
+static int list_directory(int argc, char **argv) {
+    if (argc != 3) return X_USAGE;
+
+    const char *open_path;
+    char *owned_open_path;
+    int result = nofollow_open_path(argv[2], &open_path, &owned_open_path);
+    if (result != 0) return result;
+
+    int directory_fd;
+    do {
+        directory_fd = open(
+            open_path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        );
+    } while (directory_fd < 0 && errno == EINTR);
+    free(owned_open_path);
+    if (directory_fd < 0) return list_errno(errno);
+
+    struct stat parent_status;
+    if (retry_fstat(directory_fd, &parent_status) != 0 ||
+        !S_ISDIR(parent_status.st_mode) ||
+        (unsigned long long) parent_status.st_dev > (unsigned long long) LLONG_MAX ||
+        (unsigned long long) parent_status.st_ino > (unsigned long long) LLONG_MAX) {
+        close(directory_fd);
+        return X_IO;
+    }
+
+    struct output_buffer output = {0};
+    int parent_readable = parent_capability(directory_fd, &parent_status, R_OK);
+    int parent_writable = parent_capability(directory_fd, &parent_status, W_OK);
+    char header[160];
+    int header_length = snprintf(
+        header,
+        sizeof(header),
+        "ISAVER_LIST_V1\t%llu\t%llu\t%d\t%d\n",
+        (unsigned long long) parent_status.st_dev,
+        (unsigned long long) parent_status.st_ino,
+        parent_readable,
+        parent_writable
+    );
+    if (header_length < 0 || (size_t) header_length >= sizeof(header)) {
+        close(directory_fd);
+        return X_IO;
+    }
+    result = buffer_append_bytes(&output, header, (size_t) header_length);
+    if (result != 0) {
+        free(output.data);
+        close(directory_fd);
+        return result;
+    }
+
+    DIR *directory = fdopendir(directory_fd);
+    if (directory == NULL) {
+        free(output.data);
+        close(directory_fd);
+        return X_IO;
+    }
+    int stream_fd = dirfd(directory);
+    if (stream_fd < 0) {
+        free(output.data);
+        closedir(directory);
+        return X_IO;
+    }
+
+    size_t item_count = 0U;
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(directory);
+        if (entry == NULL) {
+            if (errno == EINTR) continue;
+            if (errno != 0) result = X_IO;
+            break;
+        }
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        if (item_count >= LIST_MAX_ITEMS) {
+            result = X_OUTPUT_LIMIT;
+            break;
+        }
+        item_count += 1U;
+
+        char *child_path = NULL;
+        size_t child_path_length = 0U;
+        result = build_child_path(
+            argv[2],
+            entry->d_name,
+            &child_path,
+            &child_path_length
+        );
+        if (result != 0) break;
+
+        struct stat child_status;
+        int status_available = retry_fstatat(
+            stream_fd,
+            entry->d_name,
+            &child_status,
+            AT_SYMLINK_NOFOLLOW
+        ) == 0;
+        int symbolic_link = status_available
+            ? (S_ISLNK(child_status.st_mode) ? 1 : 0)
+            : 0;
+        int readable = status_available && !symbolic_link
+            ? entry_capability(
+                stream_fd,
+                entry->d_name,
+                &child_status,
+                R_OK,
+                parent_writable
+            )
+            : 0;
+        int writable = status_available && !symbolic_link
+            ? entry_capability(
+                stream_fd,
+                entry->d_name,
+                &child_status,
+                W_OK,
+                parent_writable
+            )
+            : 0;
+        result = append_listing_record(
+            &output,
+            entry->d_name,
+            child_path,
+            child_path_length,
+            status_available ? &child_status : NULL,
+            symbolic_link,
+            readable,
+            writable
+        );
+        free(child_path);
+        if (result != 0) break;
+    }
+
+    if (closedir(directory) != 0 && result == 0) result = X_IO;
+    if (result == 0) result = write_stdout(output.data, output.length);
+    free(output.data);
+    return result;
+}
 
 static int parse_u64(const char *text, unsigned long long *value) {
     if (text == NULL || text[0] == '\0') return 0;
@@ -448,6 +947,7 @@ static int remove_stage(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     if (argc < 2) return X_USAGE;
+    if (strcmp(argv[1], "list-dir") == 0) return list_directory(argc, argv);
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish") == 0) return copy_publish(argc, argv);
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);
