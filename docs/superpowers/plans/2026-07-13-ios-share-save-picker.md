@@ -14,12 +14,14 @@
 
 **Files:**
 - Modify: app/src/main/java/com/iamxpp/isaver/share/ShareIntentParser.kt
+- Modify: app/src/main/java/com/iamxpp/isaver/share/IncomingShare.kt
 - Modify: app/src/test/java/com/iamxpp/isaver/share/ShareIntentParserTest.kt
 
-- [ ] Write RED API29/33/35 tests for VIEW intent.data, SEND EXTRA_STREAM, one-item ClipData, matching extra+clip, conflicting sources, MAIN, SEND_MULTIPLE, file/http, bad Parcelable, provider failure, and content readability without trusting flags.
+- [ ] Write RED API29/33/35 tests for VIEW intent.data, SEND EXTRA_STREAM, one-item and multi-item ClipData, matching extra+clip, conflicting sources, MAIN, SEND_MULTIPLE, file/http, bad Parcelable, and content readability without trusting flags.
+- [ ] Add RED metadata tests for null/blank DISPLAY_NAME, null/negative SIZE, MIME fallback, Security/runtime provider failures, caller cancellation, and the 2-second asynchronous Parser timeout driven by `CancellationSignal`.
 - [ ] Confirm existing VIEW rejection test fails for the new required behavior.
 - [ ] Implement a single URI extractor: VIEW uses data; SEND accepts exactly one content Uri; all other schemes/actions fail typed.
-- [ ] Keep metadata queries outside Main dispatcher and never resolve filesystem paths.
+- [ ] Implement the bounded asynchronous Parser entry in this task: keep metadata work outside Main, query with `CancellationSignal`, propagate caller `CancellationException`, return typed `PROVIDER_TIMEOUT` after 2 seconds, cancel/ignore late work without promising an uncooperative Provider process stops, and never resolve filesystem paths.
 - [ ] Run focused parser tests.
 - [ ] Commit: feat: accept content view intents
 
@@ -31,9 +33,9 @@
 - Create: app/src/androidTest/java/com/iamxpp/isaver/share/ShareIntentResolutionTest.kt
 - Modify: app/src/test/java/com/iamxpp/isaver/MainActivityTest.kt
 
-- [ ] Write RED PackageManager tests proving SEND and content VIEW resolve iSaver while file/http/SEND_MULTIPLE do not.
+- [ ] Write RED PackageManager tests proving SEND and content VIEW resolve iSaver while file/http VIEW and SEND_MULTIPLE do not; separately prove file/http SEND can resolve by MIME but Parser rejects it at runtime.
 - [ ] Write RED Activity tests for cold intent once, MAIN normal launch, onNewIntent, history relaunch suppression, and Root-gate pending request retention.
-- [ ] Add the narrow VIEW filter and singleTop launch mode.
+- [ ] Add the narrow content VIEW filter and singleTop launch mode; assert file/http do not resolve only for ACTION_VIEW because ACTION_SEND URI scheme lives in EXTRA_STREAM and is rejected at runtime by Parser.
 - [ ] Dispatch initial intent once after ViewModel creation and override onNewIntent with setIntent plus ViewModel handling.
 - [ ] Run focused tests and Xiaomi 9 resolution checks.
 - [ ] Commit: feat: route opened files into save mode
@@ -45,37 +47,55 @@
 - Create: app/src/test/java/com/iamxpp/isaver/transfer/OutputNameDraftTest.kt
 - Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferUiState.kt
 - Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferViewModel.kt
+- Modify: app/src/main/java/com/iamxpp/isaver/transfer/TargetNameResolver.kt
+- Modify: app/src/main/java/com/iamxpp/isaver/transfer/RootFileTransferRepository.kt
+- Modify: app/src/test/java/com/iamxpp/isaver/transfer/TargetNameResolverTest.kt
+- Modify: app/src/test/java/com/iamxpp/isaver/transfer/RootFileTransferRepositoryTest.kt
 
 - [ ] Write RED tests for report.pdf, archive.tar.gz, .env, name., Chinese/emoji, empty extension, multi-part extension, leading-dot extension rejection, slash/NUL, lone surrogate, dot/dot-dot, and 255 UTF-8 bytes.
 - [ ] Implement deterministic split and combine. Stem is required; extension is optional and excludes the separately rendered leading dot.
-- [ ] Add setStem and setExtension actions; all Choosing/Saving/Failure states retain drafts.
-- [ ] Pass the validated combined name to RootFileTransferRepository instead of the source display name.
+- [ ] Preserve the validated stem/extension boundary through Repository naming; prove explicit `archive` + `tar.gz` retries as `archive (1).tar.gz`, while the default split of `archive.tar.gz` is `archive.tar` + `gz`.
+- [ ] Add setStem and setExtension actions; Caching/Choosing/Validating/Saving/Cancelling/Reconciliation/Failure/Uncertain active states retain drafts.
+- [ ] Pass validated output-name parts to RootFileTransferRepository instead of a combined name that would require guessing the extension again.
 - [ ] Run focused output-name and TransferViewModel tests.
 - [ ] Commit: feat: edit shared output name and extension
 
 ### Task 4: Immediate Private Cache State Machine
 
 **Files:**
+- Modify: app/src/main/java/com/iamxpp/isaver/transfer/IncomingFileCache.kt
 - Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferUiState.kt
 - Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferViewModel.kt
+- Modify: app/src/test/java/com/iamxpp/isaver/transfer/IncomingFileCacheTest.kt
 - Modify: app/src/test/java/com/iamxpp/isaver/transfer/TransferViewModelTest.kt
 
-- [ ] Write RED tests proving acceptShare starts caching immediately, chooser remains navigable, byte progress updates, save waits for cache, cancel cleans pre-publish cache, provider loss requires reshare, and SavedState contains summary but no Uri/cache path.
-- [ ] Add generation tests for new intent before publish and new intent during an already-dispatched uncertain transfer.
-- [ ] Refactor ViewModel into Parsing/Caching/Choosing/Validating/Saving terminal states without persisting capabilities.
-- [ ] Preserve OUTCOME_UNCERTAIN and source cache; record recent only after Success.
+- [ ] Write RED tests proving acceptShare starts caching immediately even behind Root gate, chooser remains navigable after grant, byte progress updates, save waits for cache, cancel/Root-gate exit cleans pre-publish cache, provider loss requires reshare, and SavedState contains summary but no Uri/cache path.
+- [ ] Define each `RootFileSystem.transferFromAppCache` call as one non-cancellable in-flight publish window; add RED cancellation and new-intent tests immediately before, during, and between ALREADY_EXISTS attempts.
+- [ ] Prove ALREADY_EXISTS advances only when no cancel/new Intent is pending; all other Failure/Uncertain results never replay or change candidate automatically.
+- [ ] Prove at most one queued generation is parsed/cached immediately but cannot hide the active request; replacement cleans the old queued cache; Success and non-retryable Failure activate the queue; retryable Failure requires an explicit retry-old versus clean-and-continue choice; Success finishes only without a queue.
+- [ ] Prove Uncertain stays visible with cache while the process lives until “已核对并清理缓存后继续”; after process death only an uncertain RequiresReshare summary remains and the unowned file follows the 24-hour orphan TTL.
+- [ ] Add orphan-cache RED tests: no cache path is restored after process death and unowned incoming files older than 24 hours are removed on startup.
+- [ ] Add RED safety tests for cached writable being only a hint; fresh target symlink/non-writable/canonical-identity changes, Root loss, and cache regular-file/device/inode/size mismatch must block publish without unsafe cleanup or replay.
+- [ ] Add RED retry-policy tests: picker-active retryable definite failures retain cache but require explicit retry and fresh validation; exit/non-retryable failure cleans cache; Success cleans with warning semantics; Uncertain retains cache in-process until acknowledgement and becomes a 24-hour orphan after process death.
+- [ ] Refactor ViewModel into Parsing/Caching/Choosing/Validating/Saving/Reconciliation terminal states without persisting capabilities; consume the Parser timeout result without adding a second conflicting timeout layer.
+- [ ] Preserve OUTCOME_UNCERTAIN and source cache while the process lives; record recent only after Success.
 - [ ] Run focused and full JVM tests.
 - [ ] Commit: feat: prepare shared files while choosing destination
 
-### Task 5: Application Dependency Graph
+### Task 5: Hilt Application Dependency Graph
 
 **Files:**
+- Modify: build.gradle.kts
+- Modify: gradle/libs.versions.toml
+- Modify: app/build.gradle.kts
 - Modify: app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt
 - Modify: app/src/main/java/com/iamxpp/isaver/MainActivity.kt
+- Create: app/src/main/java/com/iamxpp/isaver/di/TransferModule.kt
 - Modify: app/src/test/java/com/iamxpp/isaver/ISaverApplicationTest.kt
 
-- [ ] Write RED factory tests that the production parser, cache, transfer repository, resolver, and recent recorder are wired once.
-- [ ] Add a TransferViewModel factory with SavedStateHandle support and IO dispatcher.
+- [ ] Write RED graph tests that the production parser, cache, transfer repository, resolver, recent recorder, IO dispatcher, and TransferViewModel are wired once.
+- [ ] Add the Hilt plugin/compiler, `@HiltAndroidApp`, `@AndroidEntryPoint`, a focused TransferModule, and `@HiltViewModel` SavedStateHandle injection without exposing Root operations to Activity/Composable.
+- [ ] Dispatch incoming intents before Root grant so private caching can overlap the Root gate; prohibit Root navigation/write until Granted and clean cache when the gate exits.
 - [ ] Ensure no Activity/Composable performs Root or ContentResolver work directly.
 - [ ] Run application graph and Activity tests.
 - [ ] Commit: feat: wire share save dependencies
@@ -91,7 +111,8 @@
 - [ ] Write RED Compose tests for hidden three-tab bar, centered compact title, cancel/back, overflow/save, close search spacing, directories enabled/files disabled, item count, two text fields, progress, retry, uncertain, and no Uri/cache semantics.
 - [ ] Implement a separate scaffold reusing location/browser rows but not FilesBottomBar.
 - [ ] Save is enabled only for cache-ready + valid directory + valid combined name + idle operation.
-- [ ] On Success emit one Activity finish event; do not finish for Failure or Uncertain.
+- [ ] Show Cancelling/Reconciliation after a post-boundary cancel and prevent a queued request from hiding an old Uncertain result.
+- [ ] On Success emit one Activity finish event only when no queued request exists; switch to queued request instead when present, and never finish for Failure or Uncertain.
 - [ ] Run focused instrumentation via Root pm install.
 - [ ] Commit: feat: add ios style share save picker
 
@@ -107,5 +128,5 @@
 - [ ] Check cache and target staging residue and confirm only Success updates recent items.
 - [ ] Capture picker screenshots and compare header, search, grid/list, save action, and two-field bottom panel with the approved mockup.
 - [ ] Perform one final manual WeChat smoke test using a user-selected PDF and a dedicated iSaver test target.
-- [ ] Run full unit/instrumentation/lint/assemble gates, git diff checks, specification review, and code-quality review.
+- [ ] Synchronize PRD/SDD with the final implemented state machine and Manifest, then run full unit/instrumentation/lint/assemble gates, git diff checks, specification review, and code-quality review.
 - [ ] Commit: test: complete share save picker acceptance
