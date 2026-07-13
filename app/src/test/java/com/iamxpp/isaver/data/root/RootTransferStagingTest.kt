@@ -2,6 +2,7 @@ package com.iamxpp.isaver.data.root
 
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
+import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import java.io.File
@@ -372,7 +373,7 @@ class RootTransferStagingTest {
     private enum class CopyFailure { EXCEPTION, TIMEOUT, CANCEL }
 
     private fun path(value: String) = RootPath.parse(value).getOrThrow()
-    private fun name(value: String) = FolderName.parse(value).getOrThrow()
+    private fun name(value: String) = EntryName.parse(value).getOrThrow()
     private fun record(name: String, path: String, type: String, size: String, symlink: String = "0") =
         listOf(b64(name), b64(path), type, size, "2", "1", "1", symlink).joinToString("\t")
     private fun b64(value: String) = Base64.getEncoder().encodeToString(value.toByteArray())

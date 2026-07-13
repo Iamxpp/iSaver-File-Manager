@@ -5,6 +5,7 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.FolderName
+import com.iamxpp.isaver.domain.EntryName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -112,7 +113,7 @@ class LibsuRootFileSystem internal constructor(
     override suspend fun transferFromAppCache(
         source:AppCachePath,
         targetDirectory:RootPath,
-        finalName:FolderName,
+        finalName:EntryName,
         expectedSizeBytes:Long,
     ):OperationResult<DirectoryEntry>{
         if(expectedSizeBytes<0)return failure(ErrorCode.SOURCE_UNREADABLE,"无法读取来源文件","Negative source size")
@@ -161,7 +162,7 @@ class LibsuRootFileSystem internal constructor(
             val published=parsePublishedIdentity(execution.stdout)
             if(published !is OperationResult.Success)return@withContext uncertainTransfer("Malformed copy-publish result")
             if(published.value.sizeBytes!=expectedSizeBytes)return@withContext uncertainTransfer("Published size did not match source")
-            val finalPath=FolderName.join(directory.canonical,finalName)
+            val finalPath=EntryName.join(directory.canonical,finalName)
             val finalEntry=stat(finalPath)
             if(finalEntry !is OperationResult.Success)return@withContext uncertainTransfer("Published file could not be verified")
             if(finalEntry.value.type!=com.iamxpp.isaver.domain.EntryType.FILE||finalEntry.value.symbolicLink||finalEntry.value.sizeBytes!=expectedSizeBytes){
@@ -235,10 +236,10 @@ class LibsuRootFileSystem internal constructor(
     private suspend fun reconcileLostTransfer(
         directory:PreparedTransferDirectory,
         stage:TransferStage,
-        finalName:FolderName,
+        finalName:EntryName,
         reason:String,
     ):OperationResult.Failure = withContext(NonCancellable){
-        val finalPath=FolderName.join(directory.canonical,finalName)
+        val finalPath=EntryName.join(directory.canonical,finalName)
         val finalState=stat(finalPath)
         if(finalState is OperationResult.Failure&&finalState.code==ErrorCode.NOT_FOUND){
             cleanupStage(directory,stage)

@@ -4,6 +4,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.FolderName
+import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.ErrorCode
 
 interface RootFileSystem {
@@ -21,7 +22,7 @@ interface RootFileSystem {
     suspend fun transferFromAppCache(
         source:AppCachePath,
         targetDirectory:RootPath,
-        finalName:FolderName,
+        finalName:EntryName,
         expectedSizeBytes:Long,
     ):OperationResult<DirectoryEntry> = unsupportedTransfer()
 }

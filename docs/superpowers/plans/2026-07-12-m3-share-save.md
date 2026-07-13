@@ -54,9 +54,9 @@
 - Test: `app/src/test/java/com/iamxpp/isaver/transfer/TargetNameResolverTest.kt`
 - Test: `app/src/test/java/com/iamxpp/isaver/transfer/RootFileTransferRepositoryTest.kt`
 
-- [ ] RED：`a.txt`→`a (1).txt`、无扩展/多点/隐藏文件、最多尝试；两阶段状态；Root失效不重放；取消双端清理；NO_SPACE；结果不确定。
-- [ ] GREEN：进度 Flow 与最终保存结果。
-- [ ] 提交 `feat: save shared files to root locations`。
+- [x] RED：纯函数 `TargetNameResolver` 锁定原名、无扩展/多点/隐藏文件、UTF-8 255 字节和最大尝试边界；Repository 锁定仅 `ALREADY_EXISTS` 推进候选名、Root 失效不重放、取消清理、NO_SPACE 与结果不确定语义。
+- [x] GREEN：使用文件专用 `EntryName`；`RootFileTransferRepository` 直接调用 cohesive `RootFileSystem.transferFromAppCache`（Root 层内部管理私有 stage），输出 `Resolving`、`Publishing(candidate, attempt)` 与单一 `Success`/`Failure` terminal。确定成功、确定失败和普通取消清理 app cache；`OUTCOME_UNCERTAIN` 保留 cache；清理失败只附加 warning，不覆盖发布结果。不伪造字节百分比，消息不得包含 content Uri、cache 或目标绝对路径。
+- [x] 提交 `feat: save shared files to root locations`。
 
 ### Task 5: 最近项目持久化
 
