@@ -39,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -57,44 +58,89 @@ import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 
 @Composable
-fun FilesLargeTitleHeader(
+fun FilesPageHeader(
     title: String,
-    onBack: (() -> Unit)? = null,
+    query: String,
+    onQueryChange: (String) -> Unit,
     onOverflow: () -> Unit,
+    onBack: (() -> Unit)? = null,
+    topBarTestTag: String = "files-top-bar",
+    searchTestTag: String = "files-search",
     modifier: Modifier = Modifier,
+    overflowMenuContent: @Composable BoxScope.() -> Unit = {},
 ) {
     Column(
         modifier = modifier
-            .fillMaxWidth()
-            .background(ISaverCard)
-            .padding(horizontal = 16.dp),
+            .fillMaxWidth(),
     ) {
-        Box(
+        FilesTopBar(
+            title = title,
+            onBack = onBack,
+            onOverflow = onOverflow,
+            testTag = topBarTestTag,
+            overflowMenuContent = overflowMenuContent,
+        )
+        FilesSearchField(
+            query = query,
+            onQueryChange = onQueryChange,
             modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-        ) {
+                .testTag(searchTestTag)
+                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+        )
+    }
+}
+
+@Composable
+fun FilesTopBar(
+    title: String,
+    onOverflow: () -> Unit,
+    onBack: (() -> Unit)? = null,
+    testTag: String = "files-top-bar",
+    modifier: Modifier = Modifier,
+    overflowMenuContent: @Composable BoxScope.() -> Unit = {},
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .background(ISaverCard)
+            .padding(horizontal = 16.dp)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             if (onBack != null) {
                 HeaderAction(
                     contentDescription = "返回",
                     onClick = onBack,
-                    modifier = Modifier.align(Alignment.CenterStart),
                 ) { BackChevron() }
             }
+        }
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = title,
+                color = ISaverPrimaryText,
+                fontSize = 24.sp,
+                lineHeight = 29.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .testTag("files-top-bar-title")
+                    .semantics { contentDescription = "页面标题：$title" },
+            )
+        }
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             HeaderAction(
                 contentDescription = "更多操作",
                 onClick = onOverflow,
-                modifier = Modifier.align(Alignment.CenterEnd),
+                modifier = Modifier.testTag("files-top-bar-overflow"),
             ) { OverflowGlyph() }
+            overflowMenuContent()
         }
-        Text(
-            text = title,
-            color = ISaverPrimaryText,
-            fontSize = 34.sp,
-            lineHeight = 41.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 10.dp),
-        )
     }
 }
 
@@ -314,6 +360,7 @@ fun FilesOverflowMenu(
     canCreateFolder: Boolean,
     canCompress: Boolean,
     canConnectServer: Boolean,
+    onAddLocation: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     DropdownMenu(
@@ -323,6 +370,13 @@ fun FilesOverflowMenu(
             .widthIn(min = 280.dp)
             .background(ISaverCard),
     ) {
+        if (onAddLocation != null) {
+            FilesMenuItem(
+                text = "添加位置",
+                onClick = onAddLocation,
+                modifier = Modifier.testTag("views-add-location-menu"),
+            )
+        }
         FilesMenuItem(
             text = "新建文件夹",
             enabled = canCreateFolder,
@@ -367,8 +421,14 @@ private fun FilesMenuItem(
     text: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
-    selected: Boolean = false,
+    selected: Boolean? = null,
+    modifier: Modifier = Modifier,
 ) {
+    val selectionModifier = if (selected == null) {
+        modifier
+    } else {
+        modifier.semantics { this.selected = selected }
+    }
     DropdownMenuItem(
         text = {
             Text(
@@ -380,12 +440,10 @@ private fun FilesMenuItem(
         onClick = onClick,
         enabled = enabled,
         leadingIcon = {
-            MenuSelectionMark(selected = selected)
+            MenuSelectionMark(selected = selected == true)
         },
         contentPadding = PaddingValues(horizontal = 16.dp),
-        modifier = Modifier
-            .heightIn(min = 48.dp)
-            .semantics { this.selected = selected },
+        modifier = selectionModifier.heightIn(min = 48.dp),
     )
 }
 
@@ -513,7 +571,7 @@ private fun HeaderAction(
         modifier = modifier
             .size(48.dp)
             .semantics { this.contentDescription = contentDescription }
-            .clickable(onClick = onClick),
+            .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         icon()

@@ -15,11 +15,13 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPath
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -29,18 +31,56 @@ class FilesComponentsTest {
     val compose = createComposeRule()
 
     @Test
-    fun largeTitleHeaderExposesTitleAndActions() {
+    fun pageHeaderExposesCompactTitleActionsAndSearch() {
         compose.setContent {
-            FilesLargeTitleHeader(
+            FilesPageHeader(
                 title = "浏览",
+                query = "",
+                onQueryChange = {},
                 onBack = {},
                 onOverflow = {},
+                topBarTestTag = "page-top-bar",
+                searchTestTag = "page-search",
             )
         }
 
         compose.onNodeWithText("浏览").assertIsDisplayed()
         compose.onNodeWithContentDescription("返回").assertIsDisplayed()
         compose.onNodeWithContentDescription("更多操作").assertIsDisplayed()
+        compose.onNodeWithTag("page-top-bar").assertIsDisplayed()
+        compose.onNodeWithTag("page-search").assertIsDisplayed()
+    }
+
+    @Test
+    fun compactTopBarCentersTitleBesideOverflowWithoutInventingBackAction() {
+        var overflowClicks = 0
+        compose.setContent {
+            FilesTopBar(
+                title = "视图",
+                onOverflow = { overflowClicks += 1 },
+            )
+        }
+
+        val barBounds = compose.onNodeWithTag("files-top-bar").fetchSemanticsNode().boundsInRoot
+        val titleBounds = compose.onNodeWithTag("files-top-bar-title")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val overflowBounds = compose.onNodeWithTag("files-top-bar-overflow")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertEquals(barBounds.center.x, titleBounds.center.x, 1f)
+        assertTrue(titleBounds.top < overflowBounds.bottom && overflowBounds.top < titleBounds.bottom)
+        val overflowConfig = compose.onNodeWithTag("files-top-bar-overflow")
+            .fetchSemanticsNode()
+            .config
+        assertTrue(overflowConfig.contains(SemanticsProperties.Role))
+        assertEquals(Role.Button, overflowConfig[SemanticsProperties.Role])
+        compose.onNodeWithContentDescription("返回").assertDoesNotExist()
+        compose.onNodeWithTag("files-top-bar-overflow").performClick()
+        compose.runOnIdle { assertEquals(1, overflowClicks) }
     }
 
     @Test
@@ -206,6 +246,15 @@ class FilesComponentsTest {
         compose.onNodeWithText("新建文件夹").assertIsEnabled()
         compose.onNodeWithText("压缩文件").assertIsNotEnabled()
         compose.onNodeWithText("连接服务器").assertIsNotEnabled()
+        val commandConfig = compose.onNodeWithText("新建文件夹")
+            .fetchSemanticsNode()
+            .config
+        assertFalse(commandConfig.contains(SemanticsProperties.Selected))
+        val unselectedModeConfig = compose.onNodeWithText("列表")
+            .fetchSemanticsNode()
+            .config
+        assertTrue(unselectedModeConfig.contains(SemanticsProperties.Selected))
+        assertEquals(false, unselectedModeConfig[SemanticsProperties.Selected])
         compose.onNodeWithText("日期").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(SortField.MODIFIED_AT, selectedField)

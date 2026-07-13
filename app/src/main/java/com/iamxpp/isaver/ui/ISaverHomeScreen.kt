@@ -15,6 +15,8 @@ import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesBottomBar
 import com.iamxpp.isaver.ui.files.HomeTab
 import com.iamxpp.isaver.ui.files.SortSpec
+import com.iamxpp.isaver.ui.files.SortDirection
+import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.theme.ISaverBackground
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 
@@ -24,6 +26,7 @@ fun ISaverHomeScreen(
     locationState: LocationHomeUiState,
     browserState: BrowserUiState,
     displayMode: DisplayMode,
+    sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     onSelectTab: (HomeTab) -> Unit,
     onOpenLocation: (RootPath, String) -> Unit,
     onAddCustomLocation: (String, String) -> Unit,
@@ -54,6 +57,9 @@ fun ISaverHomeScreen(
                     onRemove = onRemoveCustomLocation,
                     onRetry = onRetryLocations,
                     onClearAddError = onClearLocationError,
+                    sortSpec = sortSpec,
+                    onDisplayModeChange = onDisplayModeChange,
+                    onSortChange = onSortChange,
                     modifier = Modifier.weight(1f),
                 )
                 HomeTab.BROWSE -> Unit

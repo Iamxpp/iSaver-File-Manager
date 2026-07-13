@@ -39,8 +39,11 @@ import com.iamxpp.isaver.locations.StorageLocation
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FileGridCell
 import com.iamxpp.isaver.ui.files.FileListRow
-import com.iamxpp.isaver.ui.files.FilesLargeTitleHeader
-import com.iamxpp.isaver.ui.files.FilesSearchField
+import com.iamxpp.isaver.ui.files.FilesOverflowMenu
+import com.iamxpp.isaver.ui.files.FilesPageHeader
+import com.iamxpp.isaver.ui.files.SortDirection
+import com.iamxpp.isaver.ui.files.SortField
+import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.ui.theme.ISaverBackground
 
 @Composable
@@ -53,6 +56,9 @@ fun LocationHomeScreen(
     onRemove: (LocationId) -> Unit,
     onRetry: () -> Unit,
     onClearAddError: () -> Unit = {},
+    sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
+    onDisplayModeChange: (DisplayMode) -> Unit = {},
+    onSortChange: (SortSpec) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
@@ -65,49 +71,48 @@ fun LocationHomeScreen(
         editor = null
     }
 
-    val visibleApps = state.appGroups.filterForQuery(query)
-    val visibleCommon = state.commonLocations.filter { it.displayName.contains(query, ignoreCase = true) }
-    val visibleCustom = state.customLocations.filter { it.location.displayName.contains(query, ignoreCase = true) }
+    val content = sortLocationContent(
+        apps = state.appGroups.filterForQuery(query),
+        common = state.commonLocations.filter { it.displayName.contains(query, ignoreCase = true) },
+        custom = state.customLocations.filter { it.location.displayName.contains(query, ignoreCase = true) },
+        sortSpec = sortSpec,
+    )
 
-    if (displayMode == DisplayMode.LIST) {
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .background(ISaverBackground),
-        ) {
-            LocationHomeHeader(
-                query = query,
-                onQueryChange = { query = it },
-                error = state.error,
-                onAdd = { onClearAddError(); adding = true },
-                onRetry = onRetry,
-            )
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(ISaverBackground),
+    ) {
+        LocationHomeHeader(
+            query = query,
+            onQueryChange = { query = it },
+            error = state.error,
+            displayMode = displayMode,
+            sortSpec = sortSpec,
+            onAdd = { onClearAddError(); adding = true },
+            onRetry = onRetry,
+            onDisplayModeChange = onDisplayModeChange,
+            onSortChange = onSortChange,
+        )
+        if (displayMode == DisplayMode.LIST) {
             LocationList(
                 state = state,
-                apps = visibleApps,
-                common = visibleCommon,
-                custom = visibleCustom,
+                content = content,
+                onOpenLocation = onOpenLocation,
+                onEdit = { onClearAddError(); editor = it },
+                onRemove = { removal = it },
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            LocationHomeGrid(
+                state = state,
+                content = content,
                 onOpenLocation = onOpenLocation,
                 onEdit = { onClearAddError(); editor = it },
                 onRemove = { removal = it },
                 modifier = Modifier.weight(1f),
             )
         }
-    } else {
-        LocationHomeGrid(
-            state = state,
-            apps = visibleApps,
-            common = visibleCommon,
-            custom = visibleCustom,
-            query = query,
-            onQueryChange = { query = it },
-            onAdd = { onClearAddError(); adding = true },
-            onRetry = onRetry,
-            onOpenLocation = onOpenLocation,
-            onEdit = { onClearAddError(); editor = it },
-            onRemove = { removal = it },
-            modifier = modifier.fillMaxSize().background(ISaverBackground),
-        )
     }
 
     if (adding || editor != null) {
@@ -150,72 +155,141 @@ private fun LocationHomeHeader(
     query: String,
     onQueryChange: (String) -> Unit,
     error: String?,
+    displayMode: DisplayMode,
+    sortSpec: SortSpec,
     onAdd: () -> Unit,
     onRetry: () -> Unit,
+    onDisplayModeChange: (DisplayMode) -> Unit,
+    onSortChange: (SortSpec) -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Column {
-        FilesLargeTitleHeader(title = "视图", onOverflow = {})
-        FilesSearchField(
+        FilesPageHeader(
+            title = "视图",
             query = query,
             onQueryChange = onQueryChange,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            onOverflow = { menuExpanded = true },
+            topBarTestTag = "views-top-bar",
+            searchTestTag = "views-search",
+            overflowMenuContent = {
+                FilesOverflowMenu(
+                    expanded = menuExpanded,
+                    displayMode = displayMode,
+                    sortSpec = sortSpec,
+                    onDismissRequest = { menuExpanded = false },
+                    onDisplayModeChange = {
+                        menuExpanded = false
+                        onDisplayModeChange(it)
+                    },
+                    onSortFieldChange = {
+                        menuExpanded = false
+                        onSortChange(sortSpec.copy(field = it))
+                    },
+                    onSortDirectionToggle = {
+                        menuExpanded = false
+                        onSortChange(
+                            sortSpec.copy(
+                                direction = if (sortSpec.direction == SortDirection.ASCENDING) {
+                                    SortDirection.DESCENDING
+                                } else {
+                                    SortDirection.ASCENDING
+                                },
+                            ),
+                        )
+                    },
+                    onCreateFolder = { menuExpanded = false },
+                    onCompress = { menuExpanded = false },
+                    onConnectServer = { menuExpanded = false },
+                    canCreateFolder = false,
+                    canCompress = false,
+                    canConnectServer = false,
+                    onAddLocation = {
+                        menuExpanded = false
+                        onAdd()
+                    },
+                )
+            },
         )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Button(onClick = onAdd) { Text("添加位置") }
-            if (error != null) {
-                Spacer(Modifier.width(8.dp))
+        if (error != null) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp),
+            ) {
+                Text(error, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
                 TextButton(onClick = onRetry) { Text("重试") }
             }
         }
-        if (error != null) Text(error, modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 
 @Composable
 private fun LocationList(
     state: LocationHomeUiState,
-    apps: List<ResolvedAppLocation>,
-    common: List<StorageLocation.Direct>,
-    custom: List<CustomLocationState>,
+    content: SortedLocationContent,
     onOpenLocation: (RootPath, String) -> Unit,
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier) {
-        item { SectionTitle("应用位置") }
-        apps.forEach { group ->
-            item(key = group.templateId.value) { Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp)) }
-            if (group.empty) {
-                item(key = "${group.templateId.value}.empty") {
-                    Text("未找到可用${group.displayName}目录", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        content.sectionOrder.forEach { section ->
+            when (section) {
+                LocationSection.APP -> {
+                    item(key = "section-app") { SectionTitle("应用位置") }
+                    content.apps.forEach { group ->
+                        item(key = group.templateId.value) {
+                            Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp))
+                        }
+                        if (group.empty) {
+                            item(key = "${group.templateId.value}.empty") {
+                                Text(
+                                    "未找到可用${group.displayName}目录",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                )
+                            }
+                        } else {
+                            items(group.children, key = { it.id.value }) { location ->
+                                LocationRow(location, location.path.value) {
+                                    onOpenLocation(location.path, location.displayName)
+                                }
+                            }
+                        }
+                    }
                 }
-            } else {
-                items(group.children, key = { it.id.value }) { location ->
-                    LocationRow(location, location.path.value) { onOpenLocation(location.path, location.displayName) }
+
+                LocationSection.COMMON -> {
+                    item(key = "section-common") { SectionTitle("通用位置") }
+                    items(content.common, key = { it.id.value }) { location ->
+                        LocationRow(location, location.path.value) {
+                            onOpenLocation(location.path, location.displayName)
+                        }
+                    }
                 }
-            }
-        }
 
-        item { SectionTitle("通用位置") }
-        items(common, key = { it.id.value }) { location ->
-            LocationRow(location, location.path.value) { onOpenLocation(location.path, location.displayName) }
-        }
-
-        item { SectionTitle("自定义位置") }
-        items(custom, key = { it.location.id.value }) { item ->
-            LocationRow(item.location, item.availability.label, item.availability) {
-                onOpenLocation(item.location.path, item.location.displayName)
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                TextButton(
-                    onClick = { onEdit(item.location) },
-                    modifier = Modifier.semantics { contentDescription = "编辑视图：${item.location.displayName}" },
-                ) { Text("编辑") }
-                TextButton(
-                    onClick = { onRemove(item.location) },
-                    modifier = Modifier.semantics { contentDescription = "移除视图：${item.location.displayName}" },
-                ) { Text("移除视图") }
+                LocationSection.CUSTOM -> {
+                    item(key = "section-custom") { SectionTitle("自定义位置") }
+                    items(content.custom, key = { it.location.id.value }) { item ->
+                        LocationRow(item.location, item.availability.label, item.availability) {
+                            onOpenLocation(item.location.path, item.location.displayName)
+                        }
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                            TextButton(
+                                onClick = { onEdit(item.location) },
+                                modifier = Modifier.semantics {
+                                    contentDescription = "编辑视图：${item.location.displayName}"
+                                },
+                            ) { Text("编辑") }
+                            TextButton(
+                                onClick = { onRemove(item.location) },
+                                modifier = Modifier.semantics {
+                                    contentDescription = "移除视图：${item.location.displayName}"
+                                },
+                            ) { Text("移除视图") }
+                        }
+                    }
+                }
             }
         }
         if (state.loading) item { Text("正在加载位置…", modifier = Modifier.padding(16.dp)) }
@@ -230,13 +304,7 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 @Composable
 private fun LocationHomeGrid(
     state: LocationHomeUiState,
-    apps: List<ResolvedAppLocation>,
-    common: List<StorageLocation.Direct>,
-    custom: List<CustomLocationState>,
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onAdd: () -> Unit,
-    onRetry: () -> Unit,
+    content: SortedLocationContent,
     onOpenLocation: (RootPath, String) -> Unit,
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
@@ -246,37 +314,65 @@ private fun LocationHomeGrid(
         columns = GridCells.Fixed(3),
         modifier = modifier.testTag("location-home-grid"),
     ) {
-        fullSpanItem("home-header") {
-            LocationHomeHeader(query, onQueryChange, state.error, onAdd, onRetry)
-        }
-        fullSpanItem("section-app") { SectionTitle("应用位置", Modifier.testTag("section-app")) }
-        apps.forEach { group ->
-            fullSpanItem(group.templateId.value) { Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp)) }
-            if (group.empty) {
-                fullSpanItem("${group.templateId.value}.empty") {
-                    Text("未找到可用${group.displayName}目录", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        content.sectionOrder.forEach { section ->
+            when (section) {
+                LocationSection.APP -> {
+                    fullSpanItem("section-app") { SectionTitle("应用位置", Modifier.testTag("section-app")) }
+                    content.apps.forEach { group ->
+                        fullSpanItem(group.templateId.value) {
+                            Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp))
+                        }
+                        if (group.empty) {
+                            fullSpanItem("${group.templateId.value}.empty") {
+                                Text(
+                                    "未找到可用${group.displayName}目录",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                )
+                            }
+                        } else {
+                            locationItems(
+                                entries = group.children.map { PresentedLocation(it, it.path.value) },
+                                testTag = "grid-app",
+                                onOpenLocation = onOpenLocation,
+                                onEdit = onEdit,
+                                onRemove = onRemove,
+                            )
+                        }
+                    }
                 }
-            } else {
-                locationItems(
-                    entries = group.children.map { PresentedLocation(it, it.path.value) },
-                    testTag = "grid-app",
-                    onOpenLocation = onOpenLocation,
-                    onEdit = onEdit,
-                    onRemove = onRemove,
-                )
+
+                LocationSection.COMMON -> {
+                    fullSpanItem("section-common") { SectionTitle("通用位置", Modifier.testTag("section-common")) }
+                    if (content.common.isEmpty()) {
+                        fullSpanItem("common-empty") { Text("暂无通用位置", modifier = Modifier.padding(16.dp)) }
+                    } else {
+                        locationItems(
+                            content.common.map { PresentedLocation(it, it.path.value) },
+                            "grid-common",
+                            onOpenLocation,
+                            onEdit,
+                            onRemove,
+                        )
+                    }
+                }
+
+                LocationSection.CUSTOM -> {
+                    fullSpanItem("section-custom") { SectionTitle("自定义位置", Modifier.testTag("section-custom")) }
+                    if (content.custom.isEmpty()) {
+                        fullSpanItem("custom-empty") { Text("暂无自定义位置", modifier = Modifier.padding(16.dp)) }
+                    } else {
+                        locationItems(
+                            content.custom.map {
+                                PresentedLocation(it.location, it.availability.label, it.availability)
+                            },
+                            "grid-custom",
+                            onOpenLocation,
+                            onEdit,
+                            onRemove,
+                        )
+                    }
+                }
             }
-        }
-        fullSpanItem("section-common") { SectionTitle("通用位置", Modifier.testTag("section-common")) }
-        if (common.isEmpty()) {
-            fullSpanItem("common-empty") { Text("暂无通用位置", modifier = Modifier.padding(16.dp)) }
-        } else {
-            locationItems(common.map { PresentedLocation(it, it.path.value) }, "grid-common", onOpenLocation, onEdit, onRemove)
-        }
-        fullSpanItem("section-custom") { SectionTitle("自定义位置", Modifier.testTag("section-custom")) }
-        if (custom.isEmpty()) {
-            fullSpanItem("custom-empty") { Text("暂无自定义位置", modifier = Modifier.padding(16.dp)) }
-        } else {
-            locationItems(custom.map { PresentedLocation(it.location, it.availability.label, it.availability) }, "grid-custom", onOpenLocation, onEdit, onRemove)
         }
         if (state.loading) fullSpanItem("locations-loading") { Text("正在加载位置…", modifier = Modifier.padding(16.dp)) }
     }
@@ -339,6 +435,65 @@ private fun List<ResolvedAppLocation>.filterForQuery(query: String): List<Resolv
     else group.copy(children = group.children.filter { it.displayName.contains(query, ignoreCase = true) })
         .takeIf { it.children.isNotEmpty() }
 }
+
+private fun sortLocationContent(
+    apps: List<ResolvedAppLocation>,
+    common: List<StorageLocation.Direct>,
+    custom: List<CustomLocationState>,
+    sortSpec: SortSpec,
+): SortedLocationContent {
+    val itemDirection = when (sortSpec.field) {
+        SortField.TYPE -> SortDirection.ASCENDING
+        SortField.DISPLAY_NAME, SortField.MODIFIED_AT, SortField.SIZE -> sortSpec.direction
+    }
+    val locationComparator = locationComparator(itemDirection)
+    val groupComparator = appGroupComparator(itemDirection)
+    val sectionOrder = if (sortSpec.field == SortField.TYPE && sortSpec.direction == SortDirection.DESCENDING) {
+        LocationSection.entries.reversed()
+    } else {
+        LocationSection.entries
+    }
+    return SortedLocationContent(
+        apps = apps
+            .sortedWith(groupComparator)
+            .map { group -> group.copy(children = group.children.sortedWith(locationComparator)) },
+        common = common.sortedWith(locationComparator),
+        custom = custom.sortedWith { left, right ->
+            locationComparator.compare(left.location, right.location)
+        },
+        sectionOrder = sectionOrder,
+    )
+}
+
+private fun locationComparator(direction: SortDirection): Comparator<StorageLocation.Direct> =
+    Comparator<StorageLocation.Direct> { left, right ->
+        compareDisplayText(left.displayName, right.displayName)
+            .takeIf { it != 0 }
+            ?: compareDisplayText(left.id.value, right.id.value).takeIf { it != 0 }
+            ?: compareDisplayText(left.path.value, right.path.value)
+    }.inDirection(direction)
+
+private fun appGroupComparator(direction: SortDirection): Comparator<ResolvedAppLocation> =
+    Comparator<ResolvedAppLocation> { left, right ->
+        compareDisplayText(left.displayName, right.displayName)
+            .takeIf { it != 0 }
+            ?: compareDisplayText(left.templateId.value, right.templateId.value)
+    }.inDirection(direction)
+
+private fun compareDisplayText(left: String, right: String): Int =
+    left.compareTo(right, ignoreCase = true).takeIf { it != 0 } ?: left.compareTo(right)
+
+private fun <T> Comparator<T>.inDirection(direction: SortDirection): Comparator<T> =
+    if (direction == SortDirection.ASCENDING) this else reversed()
+
+private data class SortedLocationContent(
+    val apps: List<ResolvedAppLocation>,
+    val common: List<StorageLocation.Direct>,
+    val custom: List<CustomLocationState>,
+    val sectionOrder: List<LocationSection>,
+)
+
+private enum class LocationSection { APP, COMMON, CUSTOM }
 
 private data class PresentedLocation(
     val location: StorageLocation.Direct,

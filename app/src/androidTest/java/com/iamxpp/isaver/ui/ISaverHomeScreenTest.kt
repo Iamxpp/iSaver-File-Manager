@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.runtime.getValue
@@ -16,6 +17,9 @@ import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.StorageLocation
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.HomeTab
+import com.iamxpp.isaver.ui.files.SortDirection
+import com.iamxpp.isaver.ui.files.SortField
+import com.iamxpp.isaver.ui.files.SortSpec
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -115,5 +119,33 @@ class ISaverHomeScreenTest {
 
         compose.onNodeWithContentDescription("列表项：工作资料").performClick()
         compose.runOnIdle { assertEquals(path to "工作资料", opened) }
+    }
+
+    @Test
+    fun viewsOverflowForwardsSharedPresentationPreferences() {
+        val currentSort = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING)
+        var mode: DisplayMode? = null
+        var sort: SortSpec? = null
+        compose.setContent {
+            ISaverHomeScreen(
+                homeState = ISaverHomeUiState(),
+                locationState = LocationHomeUiState(loading = false),
+                browserState = BrowserUiState(currentPath = RootPath.parse("/").getOrThrow()),
+                displayMode = DisplayMode.LIST,
+                sortSpec = currentSort,
+                onSelectTab = {}, onOpenLocation = { _, _ -> }, onAddCustomLocation = { _, _ -> },
+                onEditCustomLocation = { _, _, _ -> }, onRemoveCustomLocation = {}, onRetryLocations = {},
+                onEnterDirectory = {}, onBrowserBack = {}, onRetryBrowser = {}, onLoadMore = {},
+                onDisplayModeChange = { mode = it },
+                onSortChange = { sort = it },
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-overflow").performClick()
+        compose.onNodeWithText("图标").performClick()
+        compose.runOnIdle { assertEquals(DisplayMode.GRID, mode) }
+        compose.onNodeWithTag("files-top-bar-overflow").performClick()
+        compose.onNodeWithText("大小").performClick()
+        compose.runOnIdle { assertEquals(currentSort.copy(field = SortField.SIZE), sort) }
     }
 }

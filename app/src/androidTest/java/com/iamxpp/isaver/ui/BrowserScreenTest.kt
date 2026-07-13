@@ -5,12 +5,15 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsNode
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
@@ -26,6 +29,109 @@ import org.junit.Test
 
 class BrowserScreenTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun rootLevelUsesCompactHeaderWithSearchImmediatelyBelow() {
+        compose.setContent {
+            BrowserScreen(
+                state = state(title = "/", canGoBack = false),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+            )
+        }
+
+        val topBar = compose.onNodeWithTag("browser-top-bar")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val title = compose.onNodeWithTag("files-top-bar-title")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val overflow = compose.onNodeWithTag("files-top-bar-overflow")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val search = compose.onNodeWithTag("browser-search")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val searchField = compose.onNodeWithContentDescription("搜索文件")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertEquals(topBar.center.x, title.center.x, 1f)
+        assertTrue(title.top < overflow.bottom && overflow.top < title.bottom)
+        assertEquals(topBar.bottom, search.top, 1f)
+        assertEquals(topBar.bottom, searchField.top, 1f)
+        assertEquals(search.top, searchField.top, 1f)
+        compose.onNodeWithContentDescription("返回").assertDoesNotExist()
+    }
+
+    @Test fun nestedLevelAlignsBackLongTitleAndOverflowOnOneLine() {
+        compose.setContent {
+            BrowserScreen(
+                state = state(
+                    title = "Android/data/com.tencent.mm/MicroMsg/Download/非常长的目录名称",
+                    canGoBack = true,
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+            )
+        }
+
+        val topBar = compose.onNodeWithTag("browser-top-bar")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val back = compose.onNodeWithContentDescription("返回")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val title = compose.onNodeWithTag("files-top-bar-title")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val overflow = compose.onNodeWithTag("files-top-bar-overflow")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val search = compose.onNodeWithTag("browser-search")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertEquals(topBar.center.x, title.center.x, 1f)
+        assertTrue(title.top < back.bottom && back.top < title.bottom)
+        assertTrue(title.top < overflow.bottom && overflow.top < title.bottom)
+        assertTrue(title.height < overflow.height)
+        assertTrue(title.left >= back.right)
+        assertTrue(title.right <= overflow.left)
+        assertEquals(topBar.bottom, search.top, 1f)
+    }
+
+    @Test fun overflowMenuIsAnchoredToTheRightActionSlot() {
+        compose.setContent {
+            BrowserScreen(
+                state = state(title = "cache", canGoBack = true),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+            )
+        }
+
+        val topBar = compose.onNodeWithTag("browser-top-bar")
+            .fetchSemanticsNode()
+            .boundsOnScreen()
+        val overflow = compose.onNodeWithTag("files-top-bar-overflow")
+            .fetchSemanticsNode()
+            .boundsOnScreen()
+        compose.onNodeWithTag("files-top-bar-overflow").performClick()
+        val firstCommand = compose.onNodeWithText("新建文件夹")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsOnScreen()
+
+        assertTrue("command=$firstCommand topBar=$topBar", firstCommand.center.x > topBar.center.x)
+        assertEquals(overflow.right, firstCommand.right, 1f)
+        assertTrue("command=$firstCommand overflow=$overflow", firstCommand.top - overflow.bottom < firstCommand.height)
+    }
 
     @Test fun titleBackSearchAndPresentationCallbacksAreWired() {
         var backed = false
@@ -244,5 +350,15 @@ class BrowserScreenTest {
         path = RootPath.parse("/$name").getOrThrow(), name = name, type = type,
         sizeBytes = 1024, modifiedAtEpochSeconds = 1_700_000_000,
         readable = true, writable = true, symbolicLink = false,
+    )
+}
+
+private fun SemanticsNode.boundsOnScreen(): Rect {
+    val topLeft = positionOnScreen
+    return Rect(
+        left = topLeft.x,
+        top = topLeft.y,
+        right = topLeft.x + size.width,
+        bottom = topLeft.y + size.height,
     )
 }

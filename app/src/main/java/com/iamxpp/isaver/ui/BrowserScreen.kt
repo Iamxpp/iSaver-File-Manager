@@ -35,9 +35,8 @@ import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FileGridCell
 import com.iamxpp.isaver.ui.files.FileListRow
 import com.iamxpp.isaver.ui.files.FilesGrid
-import com.iamxpp.isaver.ui.files.FilesLargeTitleHeader
 import com.iamxpp.isaver.ui.files.FilesOverflowMenu
-import com.iamxpp.isaver.ui.files.FilesSearchField
+import com.iamxpp.isaver.ui.files.FilesPageHeader
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.ui.theme.ISaverBackground
@@ -69,58 +68,57 @@ fun BrowserScreen(
     var unavailableFeature by remember { mutableStateOf<String?>(null) }
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
-        Box {
-            FilesLargeTitleHeader(
-                title = state.title,
-                onBack = if (state.canGoBack) onBack else null,
-                onOverflow = { menuExpanded = true },
-            )
-            FilesOverflowMenu(
-                expanded = menuExpanded,
-                displayMode = state.displayMode,
-                sortSpec = state.sortSpec,
-                onDismissRequest = { menuExpanded = false },
-                onDisplayModeChange = {
-                    menuExpanded = false
-                    onDisplayModeChange(it)
-                },
-                onSortFieldChange = {
-                    menuExpanded = false
-                    onSortChange(state.sortSpec.copy(field = it))
-                },
-                onSortDirectionToggle = {
-                    menuExpanded = false
-                    onSortChange(
-                        state.sortSpec.copy(
-                            direction = if (state.sortSpec.direction == SortDirection.ASCENDING) {
-                                SortDirection.DESCENDING
-                            } else {
-                                SortDirection.ASCENDING
-                            },
-                        ),
-                    )
-                },
-                onCreateFolder = {
-                    menuExpanded = false
-                    createDialogVisible = true
-                },
-                onCompress = {
-                    menuExpanded = false
-                    onCompress?.invoke() ?: run { unavailableFeature = "压缩文件将在后续阶段提供" }
-                },
-                onConnectServer = {
-                    menuExpanded = false
-                    onConnectServer?.invoke() ?: run { unavailableFeature = "连接服务器将在后续阶段提供" }
-                },
-                canCreateFolder = state.canCreateDirectory && !state.creatingDirectory,
-                canCompress = true,
-                canConnectServer = true,
-            )
-        }
-        FilesSearchField(
+        FilesPageHeader(
+            title = state.title,
             query = state.searchQuery,
             onQueryChange = onSearchQueryChange,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            onBack = if (state.canGoBack) onBack else null,
+            onOverflow = { menuExpanded = true },
+            topBarTestTag = "browser-top-bar",
+            searchTestTag = "browser-search",
+            overflowMenuContent = {
+                FilesOverflowMenu(
+                    expanded = menuExpanded,
+                    displayMode = state.displayMode,
+                    sortSpec = state.sortSpec,
+                    onDismissRequest = { menuExpanded = false },
+                    onDisplayModeChange = {
+                        menuExpanded = false
+                        onDisplayModeChange(it)
+                    },
+                    onSortFieldChange = {
+                        menuExpanded = false
+                        onSortChange(state.sortSpec.copy(field = it))
+                    },
+                    onSortDirectionToggle = {
+                        menuExpanded = false
+                        onSortChange(
+                            state.sortSpec.copy(
+                                direction = if (state.sortSpec.direction == SortDirection.ASCENDING) {
+                                    SortDirection.DESCENDING
+                                } else {
+                                    SortDirection.ASCENDING
+                                },
+                            ),
+                        )
+                    },
+                    onCreateFolder = {
+                        menuExpanded = false
+                        createDialogVisible = true
+                    },
+                    onCompress = {
+                        menuExpanded = false
+                        onCompress?.invoke() ?: run { unavailableFeature = "压缩文件将在后续阶段提供" }
+                    },
+                    onConnectServer = {
+                        menuExpanded = false
+                        onConnectServer?.invoke() ?: run { unavailableFeature = "连接服务器将在后续阶段提供" }
+                    },
+                    canCreateFolder = state.canCreateDirectory && !state.creatingDirectory,
+                    canCompress = true,
+                    canConnectServer = true,
+                )
+            },
         )
         BrowserContent(
             state = state,

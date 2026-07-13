@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
                         locationState = locationState,
                         browserState = browserState,
                         displayMode = browserState.displayMode,
+                        sortSpec = browserState.sortSpec,
                         onSelectTab = homeViewModel::selectTab,
                         onOpenLocation = homeViewModel::openLocation,
                         onAddCustomLocation = locationHomeViewModel::addCustomLocation,
