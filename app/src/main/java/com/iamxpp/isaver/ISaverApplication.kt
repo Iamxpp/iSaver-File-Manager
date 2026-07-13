@@ -17,6 +17,7 @@ import com.iamxpp.isaver.locations.CustomLocationResult
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.LocationResolver
 import com.iamxpp.isaver.locations.StorageLocation
+import com.iamxpp.isaver.recent.RecentRepository
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import kotlinx.coroutines.CoroutineScope
@@ -30,12 +31,20 @@ class ISaverApplication : Application() {
     internal val rootSession: RootSession by lazy { LibsuRootSession() }
     internal val rootFileSystem: RootFileSystem by lazy { LibsuRootFileSystem("${applicationInfo.nativeLibraryDir}/libisaver_fs_helper.so") }
     internal val database: ISaverDatabase by lazy {
-        Room.databaseBuilder(this, ISaverDatabase::class.java, DATABASE_NAME).build()
+        Room.databaseBuilder(this, ISaverDatabase::class.java, DATABASE_NAME)
+            .addMigrations(ISaverDatabase.MIGRATION_1_2)
+            .build()
     }
     internal val customLocationRepository: CustomLocationRepository by lazy {
         CustomLocationRepository(
             dao = database.customLocationDao(),
             idFactory = { LocationId.of(UUID.randomUUID().toString()) },
+            clock = System::currentTimeMillis,
+        )
+    }
+    internal val recentRepository: RecentRepository by lazy {
+        RecentRepository(
+            dao = database.recentItemDao(),
             clock = System::currentTimeMillis,
         )
     }

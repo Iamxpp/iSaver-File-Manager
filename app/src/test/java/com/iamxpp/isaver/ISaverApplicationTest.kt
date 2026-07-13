@@ -19,6 +19,7 @@ class ISaverApplicationTest {
     fun applicationOwnsSingleLocationGraph() {
         assertSame(application.database, application.database)
         assertSame(application.customLocationRepository, application.customLocationRepository)
+        assertSame(application.recentRepository, application.recentRepository)
         assertSame(application.locationResolver, application.locationResolver)
         assertSame(application.locationHomeAppResolver, application.locationHomeAppResolver)
         assertSame(application.locationHomeCustomStore, application.locationHomeCustomStore)

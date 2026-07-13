@@ -67,9 +67,9 @@
 - Create: `app/src/main/java/com/iamxpp/isaver/recent/RecentRepository.kt`
 - Test: `app/src/test/java/com/iamxpp/isaver/recent/RecentRepositoryTest.kt`
 
-- [ ] RED：成功访问/保存 upsert、最近优先、上限、路径备注、失效保留状态；失败传输不记录。
-- [ ] GREEN：Room migration v1→v2 与 schema。
-- [ ] 提交 `feat: persist recent file activity`。
+- [x] RED：成功访问/保存 upsert、最近优先、100 项明确上限、路径备注、失效保留状态；失败传输没有写入 API，由调用方仅在确认成功后调用 `recordAccess`/`recordSaved`。
+- [x] GREEN：`recent_items` 以调用方提供的 canonical `RootPath` 字符串为主键，DAO 在单事务内 upsert/裁剪；Room migration v1→v2、schema 2 与小米 9 instrumentation migration 测试完成。
+- [x] 提交 `feat: persist recent file activity`。
 
 ### Task 6: TransferViewModel 与分享导航
 

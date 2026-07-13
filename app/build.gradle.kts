@@ -21,6 +21,7 @@ android {
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     ndkVersion = "27.2.12479018"
     buildFeatures { compose = true }
+    sourceSets { getByName("androidTest").assets.srcDir("$projectDir/schemas") }
     packaging { jniLibs.useLegacyPackaging = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
@@ -54,6 +55,7 @@ dependencies {
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.room.testing)
 }
 
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
