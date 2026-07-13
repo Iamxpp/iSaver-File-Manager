@@ -45,4 +45,5 @@ class RootShellCoordinatorTest {
     fun `default session and filesystem share the application coordinator`() {
         assertSame(LibsuRootSession().shellCoordinator, LibsuRootFileSystem().shellCoordinator)
     }
+
 }

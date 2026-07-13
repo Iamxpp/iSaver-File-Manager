@@ -7,16 +7,26 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.FolderName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import java.util.UUID
 
 internal data class RootCommandResult(
     val exitCode: Int,
@@ -33,6 +43,10 @@ class LibsuRootFileSystem internal constructor(
     private val ioDispatcher: CoroutineDispatcher,
     private val timeoutMillis: Long,
     helperExecutable:String="/data/local/tmp/isaver_fs_helper",
+    private val stageNameFactory:()->String={ ".isaver-stage-${UUID.randomUUID()}" },
+    private val transferCommandRunner:RootTransferCommandRunner=IsolatedLibsuRootTransferCommandRunner,
+    private val transferTimeoutGraceMillis:Long=2_000,
+    private val helperOperationTimeoutMillis:Long=3_000,
 ) : RootFileSystem {
     private val transferHelper=RootTransferHelper(helperExecutable)
     constructor(
@@ -46,7 +60,11 @@ class LibsuRootFileSystem internal constructor(
         commandRunner: RootCommandRunner,
         ioDispatcher: CoroutineDispatcher,
         timeoutMillis: Long,
-    ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis)
+        stageNameFactory:()->String={ ".isaver-stage-${UUID.randomUUID()}" },
+        transferCommandRunner:RootTransferCommandRunner=RootTransferCommandRunner{commandRunner.run(it)},
+        transferTimeoutGraceMillis:Long=2_000,
+        helperOperationTimeoutMillis:Long=3_000,
+    ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis, stageNameFactory=stageNameFactory,transferCommandRunner=transferCommandRunner,transferTimeoutGraceMillis=transferTimeoutGraceMillis,helperOperationTimeoutMillis=helperOperationTimeoutMillis)
 
     override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> =
         execute(buildListCommand(path)).flatMap { DirectoryListingParser.parse(it) }
@@ -91,74 +109,159 @@ class LibsuRootFileSystem internal constructor(
         return finalChild
     }
 
-    override suspend fun copyFromAppCache(source:AppCachePath,targetDirectory:RootPath,temporaryName:FolderName,expectedSizeBytes:Long):OperationResult<DirectoryEntry>{
-        val prepared=prepareWritableDirectory(targetDirectory);if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
-        val (canonical,identity)=prepared.value
-        val temporary=FolderName.join(canonical,temporaryName)
-        if(stat(temporary) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"临时文件已存在","Temporary exists")
-        val result=try{execute(transferHelper.copy(source,canonical.value,temporaryName.value,identity,expectedSizeBytes),"无法缓存到目标目录")}catch(cancelled:CancellationException){
-            withContext(NonCancellable){cleanupIncompleteTemporary(canonical,temporaryName,expectedSizeBytes)}
+    override suspend fun transferFromAppCache(
+        source:AppCachePath,
+        targetDirectory:RootPath,
+        finalName:FolderName,
+        expectedSizeBytes:Long,
+    ):OperationResult<DirectoryEntry>{
+        if(expectedSizeBytes<0)return failure(ErrorCode.SOURCE_UNREADABLE,"无法读取来源文件","Negative source size")
+        val prepared=prepareWritableDirectory(targetDirectory)
+        if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
+        val directory=prepared.value
+        val stageName=stageNameFactory()
+        if(!STAGE_NAME.matches(stageName))return failure(ErrorCode.COMMAND_FAILED,"无法准备目标目录","Invalid generated stage name")
+
+        val preparedStage=prepareStage(directory,stageName)
+        if(preparedStage !is OperationResult.Success)return preparedStage as OperationResult.Failure
+        val stage=preparedStage.value
+        try{
+            currentCoroutineContext().ensureActive()
+        }catch(cancelled:CancellationException){
+            cleanupStage(directory,stage)
             throw cancelled
         }
-        if(result is OperationResult.Failure){
-            val post=stat(temporary)
-            if(post is OperationResult.Success&&post.value.type==com.iamxpp.isaver.domain.EntryType.FILE&&!post.value.symbolicLink&&post.value.sizeBytes==expectedSizeBytes)return uncertain("Copy result lost after complete temporary appeared")
-            if(post is OperationResult.Success)removeTemporary(canonical,temporaryName)
-            return result
+
+        val command=transferHelper.copyPublish(
+            directory.original.value,directory.canonical.value,stage,finalName.value,
+            directory.identity,source,expectedSizeBytes,timeoutMillis,
+        )
+        val callerJob=currentCoroutineContext()[Job]
+        val dispatch=awaitTransferExecution(command,callerJob)
+        if(!dispatch.dispatched){
+            cleanupStage(directory,stage)
+            throw CancellationException("Transfer cancelled before dispatch")
         }
-        val verified=stat(temporary)
-        if(verified !is OperationResult.Success)return uncertain("Copied temporary could not be verified")
-        if(verified.value.symbolicLink||verified.value.type!=com.iamxpp.isaver.domain.EntryType.FILE||verified.value.sizeBytes!=expectedSizeBytes)return failure(ErrorCode.COMMAND_FAILED,"文件复制不完整","Temporary size mismatch")
-        return verified
-    }
-
-    private suspend fun cleanupIncompleteTemporary(directory:RootPath,name:FolderName,expected:Long){
-        val temporary=FolderName.join(directory,name);val post=stat(temporary)
-        if(post is OperationResult.Success&&!(post.value.type==com.iamxpp.isaver.domain.EntryType.FILE&&!post.value.symbolicLink&&post.value.sizeBytes==expected))removeTemporary(directory,name)
-    }
-
-    override suspend fun moveTemporary(directory:RootPath,temporaryName:FolderName,finalName:FolderName):OperationResult<DirectoryEntry>{
-        if(!isTemporaryName(temporaryName.value))return failure(ErrorCode.COMMAND_FAILED,"临时文件名无效","Invalid temporary name")
-        val prepared=prepareWritableDirectory(directory);if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
-        val (canonical,identity)=prepared.value
-        val temporary=FolderName.join(canonical,temporaryName);val final=FolderName.join(canonical,finalName)
-        if(stat(final) is OperationResult.Success)return failure(ErrorCode.ALREADY_EXISTS,"文件已存在","Final exists")
-        val tempStat=stat(temporary);if(tempStat !is OperationResult.Success)return tempStat as OperationResult.Failure
-        if(tempStat.value.symbolicLink||tempStat.value.type!=com.iamxpp.isaver.domain.EntryType.FILE)return failure(ErrorCode.COMMAND_FAILED,"临时文件无效","Temporary not regular")
-        val tempIdentity=readIdentity(temporary);if(tempIdentity !is OperationResult.Success)return tempIdentity as OperationResult.Failure
-        val moved=try{execute(transferHelper.publish(canonical.value,temporaryName.value,finalName.value,identity,tempIdentity.value,tempStat.value.sizeBytes?:return failure(ErrorCode.COMMAND_FAILED,"临时文件无效","Missing size")),"无法完成保存")}catch(cancelled:CancellationException){
-            withContext(NonCancellable){postMoveOutcome(final,temporary)}
-            throw cancelled
+        return withContext(NonCancellable){
+            val execution=dispatch.result.getOrElse{error->
+                val reason=when{
+                    dispatch.waitTimedOut->"Copy-publish wait timed out before backend completion"
+                    dispatch.callerCancelled->"Copy-publish caller was cancelled after dispatch"
+                    error is java.net.SocketTimeoutException->"Copy-publish backend timed out after dispatch"
+                    else->"Copy-publish result was lost"
+                }
+                return@withContext reconcileLostTransfer(directory,stage,finalName,reason)
+            }
+            if(execution.exitCode!=0){
+                if(execution.exitCode==55||execution.exitCode==137){
+                    return@withContext reconcileLostTransfer(directory,stage,finalName,"Native helper reported an uncertain outcome")
+                }
+                return@withContext mapExitCode(execution.exitCode,execution.stderr.isNotEmpty(),"无法完成保存")
+            }
+            val published=parsePublishedIdentity(execution.stdout)
+            if(published !is OperationResult.Success)return@withContext uncertainTransfer("Malformed copy-publish result")
+            if(published.value.sizeBytes!=expectedSizeBytes)return@withContext uncertainTransfer("Published size did not match source")
+            val finalPath=FolderName.join(directory.canonical,finalName)
+            val finalEntry=stat(finalPath)
+            if(finalEntry !is OperationResult.Success)return@withContext uncertainTransfer("Published file could not be verified")
+            if(finalEntry.value.type!=com.iamxpp.isaver.domain.EntryType.FILE||finalEntry.value.symbolicLink||finalEntry.value.sizeBytes!=expectedSizeBytes){
+                return@withContext uncertainTransfer("Published path was not the expected regular file")
+            }
+            val finalIdentity=readIdentity(finalPath)
+            if(finalIdentity !is OperationResult.Success||finalIdentity.value!=published.value.identity){
+                return@withContext uncertainTransfer("Published file identity changed")
+            }
+            finalEntry
         }
-        if(moved is OperationResult.Failure){
-            if(postMoveOutcome(final,temporary))return uncertain("Move result lost after final appeared")
-            return moved
+    }
+
+    private suspend fun awaitTransferExecution(command:String,callerJob:Job?):TransferDispatch =
+        withContext(NonCancellable){
+            if(callerJob?.isActive==false)return@withContext TransferDispatch.notDispatched()
+            val scope=CoroutineScope(SupervisorJob()+ioDispatcher)
+            val backend=scope.async(start=CoroutineStart.LAZY){runCatching{transferCommandRunner.run(command)}}
+            if(callerJob?.isActive==false){
+                scope.cancel()
+                return@withContext TransferDispatch.notDispatched()
+            }
+            backend.start()
+            val softResult=withTimeoutOrNull(timeoutMillis){backend.await()}
+            if(softResult!=null){
+                scope.cancel()
+                return@withContext TransferDispatch(softResult,false,callerJob?.isCancelled==true,true)
+            }
+            val graceResult=withTimeoutOrNull(transferTimeoutGraceMillis){backend.await()}
+            if(graceResult!=null){
+                scope.cancel()
+                return@withContext TransferDispatch(graceResult,true,callerJob?.isCancelled==true,true)
+            }
+            scope.cancel()
+            TransferDispatch(
+                Result.failure(RootTransferDeadlineException("Copy-publish exceeded hard deadline")),
+                true,callerJob?.isCancelled==true,true,
+            )
         }
-        val verified=stat(final);return if(verified is OperationResult.Success)verified else uncertain("Move outcome could not be verified")
+
+    private suspend fun prepareStage(directory:PreparedTransferDirectory,stageName:String):OperationResult<TransferStage>{
+        val command=transferHelper.prepare(
+            directory.original.value,directory.canonical.value,stageName,directory.identity,
+        )
+        val result=runHelperBounded(command,helperOperationTimeoutMillis).getOrElse{
+            return uncertainTransfer("Prepare-stage exceeded its bounded deadline or lost its result")
+        }
+        if(result.exitCode!=0)return mapExitCode(result.exitCode,result.stderr.isNotEmpty(),"无法准备目标目录")
+        return RootFileIdentity.parse(result.stdout).fold(
+            onSuccess={OperationResult.Success(TransferStage(stageName,it))},
+            onFailure={uncertainTransfer("Malformed prepare-stage identity")},
+        )
     }
 
-    private suspend fun postMoveOutcome(final:RootPath,temporary:RootPath):Boolean{
-        val finalState=stat(final);val temporaryState=stat(temporary)
-        return finalState is OperationResult.Success&&finalState.value.type==com.iamxpp.isaver.domain.EntryType.FILE&&!finalState.value.symbolicLink&&temporaryState is OperationResult.Failure&&temporaryState.code==ErrorCode.NOT_FOUND
+    private suspend fun cleanupStage(directory:PreparedTransferDirectory,stage:TransferStage){
+        runHelperBounded(
+            transferHelper.removeStage(directory.original.value,directory.canonical.value,stage,directory.identity),
+            helperOperationTimeoutMillis,
+        )
     }
 
-    override suspend fun removeTemporary(directory:RootPath,temporaryName:FolderName):OperationResult<Unit>{
-        if(!isTemporaryName(temporaryName.value))return failure(ErrorCode.COMMAND_FAILED,"临时文件名无效","Invalid temporary name")
-        val prepared=prepareWritableDirectory(directory);if(prepared !is OperationResult.Success)return prepared as OperationResult.Failure
-        val (canonical,identity)=prepared.value;val temporary=FolderName.join(canonical,temporaryName)
-        val tempIdentity=readIdentity(temporary);if(tempIdentity is OperationResult.Failure&&tempIdentity.code==ErrorCode.NOT_FOUND)return OperationResult.Success(Unit);if(tempIdentity !is OperationResult.Success)return tempIdentity as OperationResult.Failure
-        return execute(transferHelper.remove(canonical.value,temporaryName.value,identity,tempIdentity.value),"无法清理临时文件").flatMap{OperationResult.Success(Unit)}
+    private suspend fun runHelperBounded(command:String,deadlineMillis:Long):Result<RootCommandResult> =
+        withContext(NonCancellable){
+            val scope=CoroutineScope(SupervisorJob()+ioDispatcher)
+            val backend=scope.async{runCatching{transferCommandRunner.run(command)}}
+            val result=withTimeoutOrNull(deadlineMillis){backend.await()}
+            scope.cancel()
+            result?:Result.failure(RootTransferDeadlineException("Helper operation exceeded deadline"))
+        }
+
+    private suspend fun reconcileLostTransfer(
+        directory:PreparedTransferDirectory,
+        stage:TransferStage,
+        finalName:FolderName,
+        reason:String,
+    ):OperationResult.Failure = withContext(NonCancellable){
+        val finalPath=FolderName.join(directory.canonical,finalName)
+        val finalState=stat(finalPath)
+        if(finalState is OperationResult.Failure&&finalState.code==ErrorCode.NOT_FOUND){
+            cleanupStage(directory,stage)
+        }
+        uncertainTransfer(reason)
     }
 
-    private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<Pair<RootPath,RootFileIdentity>>{
+    private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<PreparedTransferDirectory>{
+        if(original.value.length>1&&original.value.endsWith('/'))return failure(ErrorCode.COMMAND_FAILED,"目标目录路径无效","Trailing slash is not accepted for secure transfer")
         val first=stat(original);if(first !is OperationResult.Success)return first as OperationResult.Failure
         if(first.value.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"目标目录不能是符号链接","Parent symlink")
+        if(first.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY)return failure(ErrorCode.NOT_DIRECTORY,"路径不是目录","Parent was not directory")
+        if(!first.value.readable)return failure(ErrorCode.NOT_READABLE,"目录不可读","Parent not readable")
+        if(!first.value.writable)return failure(ErrorCode.NOT_WRITABLE,"目录不可写","Parent not writable")
         val canonical=canonicalize(original);if(canonical !is OperationResult.Success)return canonical as OperationResult.Failure
-        val identity=readIdentity(canonical.value);if(identity !is OperationResult.Success)return identity as OperationResult.Failure
-        return OperationResult.Success(canonical.value to identity.value)
+        if(canonical.value.value.length>1&&canonical.value.value.endsWith('/'))return failure(ErrorCode.COMMAND_FAILED,"目标目录路径无效","Canonical path had trailing slash")
+        val canonicalStat=stat(canonical.value);if(canonicalStat !is OperationResult.Success)return canonicalStat as OperationResult.Failure
+        if(canonicalStat.value.symbolicLink||canonicalStat.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY)return failure(ErrorCode.COMMAND_FAILED,"目标目录无效","Canonical parent was not a plain directory")
+        val originalIdentity=readIdentity(original);if(originalIdentity !is OperationResult.Success)return originalIdentity as OperationResult.Failure
+        val canonicalIdentity=readIdentity(canonical.value);if(canonicalIdentity !is OperationResult.Success)return canonicalIdentity as OperationResult.Failure
+        if(originalIdentity.value!=canonicalIdentity.value)return failure(ErrorCode.COMMAND_FAILED,"目标目录已变化","Original and canonical parent identities differed")
+        return OperationResult.Success(PreparedTransferDirectory(original,canonical.value,canonicalIdentity.value))
     }
-
-    private fun isTemporaryName(name:String)=Regex("\\.isaver-[0-9a-fA-F-]{36}\\.tmp").matches(name)
 
     private suspend fun execute(command: String, failureMessage: String = "无法读取目录信息"): OperationResult<List<String>> {
         val result = try {
@@ -177,12 +280,17 @@ class LibsuRootFileSystem internal constructor(
     }
 
     private fun mapExitCode(exitCode: Int, hadStderr: Boolean, failureMessage: String): OperationResult.Failure = when (exitCode) {
+        43 -> failure(ErrorCode.ROOT_DENIED,"请授予 Root 权限后运行 iSaver","Root access was lost")
         EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
         EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
         EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
         48 -> failure(ErrorCode.NOT_WRITABLE, "目录不可写", "Path was not writable")
         49 -> failure(ErrorCode.ALREADY_EXISTS, "文件已存在", "Final reservation already exists")
         50 -> failure(ErrorCode.NO_SPACE, "存储空间不足", "No space left on device")
+        54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
+        56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
+        55 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
+        137 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
         else -> failure(
             ErrorCode.COMMAND_FAILED,
             failureMessage,
@@ -280,8 +388,43 @@ class LibsuRootFileSystem internal constructor(
         const val EXIT_NOT_FOUND = 44
         const val EXIT_NOT_DIRECTORY = 45
         const val EXIT_NOT_READABLE = 46
+        val STAGE_NAME=Regex("\\.isaver-stage-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
     }
 }
+
+private data class PreparedTransferDirectory(
+    val original:RootPath,
+    val canonical:RootPath,
+    val identity:RootFileIdentity,
+)
+
+private data class PublishedFileIdentity(
+    val identity:RootFileIdentity,
+    val sizeBytes:Long,
+)
+
+private data class TransferDispatch(
+    val result:Result<RootCommandResult>,
+    val waitTimedOut:Boolean,
+    val callerCancelled:Boolean,
+    val dispatched:Boolean,
+){companion object{fun notDispatched()=TransferDispatch(Result.failure(CancellationException("Not dispatched")),false,true,false)}}
+
+private class RootTransferDeadlineException(message:String):Exception(message)
+
+private fun parsePublishedIdentity(lines:List<String>):OperationResult<PublishedFileIdentity> = runCatching{
+    require(lines.size==1)
+    val parts=lines.single().split(':')
+    require(parts.size==3)
+    val device=parts[0].toLong()
+    val inode=parts[1].toLong()
+    val size=parts[2].toLong()
+    require(device>=0&&inode>=0&&size>=0)
+    PublishedFileIdentity(RootFileIdentity(device,inode),size)
+}.fold(
+    onSuccess={OperationResult.Success(it)},
+    onFailure={failure(ErrorCode.OUTCOME_UNCERTAIN,"保存结果不确定，请刷新确认","Malformed published identity")},
+)
 
 private class CommandRunnerCoordinator(
     private val commandRunner: RootCommandRunner,
@@ -309,6 +452,7 @@ private fun malformedCanonicalOutput() = failure(
     "Malformed canonical path output",
 )
 private fun uncertain(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"文件夹可能已创建，请刷新确认",technical)
+private fun uncertainTransfer(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"保存结果不确定，请刷新确认",technical)
 
 private fun failure(code: ErrorCode, userMessage: String, technicalMessage: String) =
     OperationResult.Failure(code, userMessage, technicalMessage)

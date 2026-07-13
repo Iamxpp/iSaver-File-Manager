@@ -18,9 +18,12 @@ interface RootFileSystem {
      * the original cancellation; they do not clean up or claim a definite outcome.
      */
     suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>
-    suspend fun copyFromAppCache(source:AppCachePath,targetDirectory:RootPath,temporaryName:FolderName,expectedSizeBytes:Long):OperationResult<DirectoryEntry> = unsupportedTransfer()
-    suspend fun moveTemporary(directory:RootPath,temporaryName:FolderName,finalName:FolderName):OperationResult<DirectoryEntry> = unsupportedTransfer()
-    suspend fun removeTemporary(directory:RootPath,temporaryName:FolderName):OperationResult<Unit> = unsupportedTransfer()
+    suspend fun transferFromAppCache(
+        source:AppCachePath,
+        targetDirectory:RootPath,
+        finalName:FolderName,
+        expectedSizeBytes:Long,
+    ):OperationResult<DirectoryEntry> = unsupportedTransfer()
 }
 
 private fun <T> unsupportedTransfer():OperationResult<T> = OperationResult.Failure(ErrorCode.COMMAND_FAILED,"不支持文件传输","Transfer primitive unsupported")

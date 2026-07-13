@@ -33,6 +33,23 @@ internal class MutexRootShellCoordinator(
 internal object ApplicationRootShellCoordinator : RootShellCoordinator by
     MutexRootShellCoordinator(LibsuRootShellBackend)
 
+internal fun interface RootTransferCommandRunner{
+    suspend fun run(command:String):RootCommandResult
+}
+
+internal object IsolatedLibsuRootTransferCommandRunner:RootTransferCommandRunner{
+    override suspend fun run(command:String):RootCommandResult=runInterruptible{
+        val shell=Shell.Builder.create().build()
+        try{
+            if(!shell.isRoot)return@runInterruptible RootCommandResult(43,emptyList(),emptyList())
+            val result=shell.newJob().add(command).exec()
+            RootCommandResult(result.code,result.out.toList(),result.err.toList())
+        }finally{
+            runCatching{shell.close()}
+        }
+    }
+}
+
 private object LibsuRootShellBackend : RootShellBackend {
     override suspend fun execute(command: String): RootCommandResult = runInterruptible {
         val result = Shell.cmd(command).exec()

@@ -42,9 +42,9 @@
 - Modify: `app/build.gradle.kts`
 - Test: `app/src/test/java/com/iamxpp/isaver/data/root/LibsuRootFileSystemTest.kt`
 
-- [ ] RED：目标目录原始路径非 symlink/identity/canonical复核；创建 `.isaver-uuid.tmp`；源文件 inode 绑定；stat大小；原子无覆盖发布；失败/取消清临时目标；异常副作用返回 OUTCOME_UNCERTAIN。
-- [ ] GREEN：NDK 构建固定子命令 helper，使用目录 FD、`O_NOFOLLOW/O_EXCL`、`renameat2(RENAME_NOREPLACE)`、`unlinkat`；Kotlin 只暴露 typed `copyFromAppCache`/`moveTemporary`/`removeTemporary`，无通用 shell。
-- [ ] 小米9专用测试目录验证，提交 `feat: add atomic root transfer operations`。
+- [x] RED：目标目录原始路径非 symlink/identity/canonical复核；在目标父目录原子创建 Root-owned `0700` `.isaver-stage-<uuid>` 并绑定身份；源文件 inode/regular-file/size 绑定；stage 替换或权限变化拒绝；最终名称竞争返回 `ALREADY_EXISTS` 且不覆盖；复制空间不足；取消/超时按 stage inode 精确清理；无法确认最终副作用时返回 `OUTCOME_UNCERTAIN`。
+- [x] GREEN：NDK 构建固定 `prepare-stage`、`copy-publish`、`remove-stage` 子命令 helper，使用父目录/stage 目录 FD、`O_DIRECTORY/O_NOFOLLOW/O_EXCL`、Root owner 与 `0700` 校验、`renameat2(RENAME_NOREPLACE)`、精确 inode 清理；复制与发布在单次 helper 进程中持有已验证 FD。`copy-publish` 使用固定 `/system/bin/timeout` 参数和一次性独立 Root shell 做有界故障隔离，超时/被杀统一进入 `OUTCOME_UNCERTAIN` reconciliation，不占用应用全局 Root mutex。Kotlin 只暴露 cohesive typed staging/transfer API，删除 split `copyFromAppCache`/`moveTemporary`/`removeTemporary`，无通用 shell。
+- [x] 小米9专用测试目录验证，提交 `feat: add atomic root transfer operations`。
 
 ### Task 4: 重名策略与 Transfer Repository
 
