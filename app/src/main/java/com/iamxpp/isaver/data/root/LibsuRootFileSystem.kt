@@ -67,8 +67,13 @@ class LibsuRootFileSystem internal constructor(
         helperOperationTimeoutMillis:Long=3_000,
     ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis, stageNameFactory=stageNameFactory,transferCommandRunner=transferCommandRunner,transferTimeoutGraceMillis=transferTimeoutGraceMillis,helperOperationTimeoutMillis=helperOperationTimeoutMillis)
 
-    override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> =
-        execute(buildListCommand(path)).flatMap { DirectoryListingParser.parse(it) }
+    override suspend fun readDirectory(path: RootPath): OperationResult<DirectorySnapshot> =
+        executeDirectoryListing(transferHelper.listDirectory(path.value)).flatMap { lines ->
+            when (val parsed = NativeDirectoryListingParser.parse(lines, expectedParent = path)) {
+                is NativeDirectoryListingParseResult.Failure -> malformedNativeDirectoryOutput(parsed.reason)
+                is NativeDirectoryListingParseResult.Success -> OperationResult.Success(parsed.snapshot)
+            }
+        }
 
     override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> =
         execute(buildStatCommand(path)).flatMap { lines ->
@@ -280,6 +285,40 @@ class LibsuRootFileSystem internal constructor(
         return OperationResult.Success(result.stdout)
     }
 
+    private suspend fun executeDirectoryListing(command: String): OperationResult<List<String>> {
+        val result = try {
+            withTimeout(timeoutMillis) {
+                withContext(ioDispatcher) { shellCoordinator.execute(command) }
+            }
+        } catch (_: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            return failure(ErrorCode.COMMAND_FAILED, "Root 操作超时", "Native directory helper timed out")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper execution failed")
+        }
+        if (result.exitCode != 0) {
+            return mapDirectoryExitCode(result.exitCode, result.stderr.isNotEmpty())
+        }
+        return OperationResult.Success(result.stdout)
+    }
+
+    private fun mapDirectoryExitCode(exitCode: Int, hadStderr: Boolean): OperationResult.Failure = when (exitCode) {
+        43 -> failure(ErrorCode.ROOT_DENIED, "请授予 Root 权限后运行 iSaver", "Root access was lost")
+        EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
+        EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
+        EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
+        EXIT_NATIVE_IO -> failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper I/O failed")
+        EXIT_OUTPUT_LIMIT -> failure(ErrorCode.COMMAND_FAILED, "目录内容过多，无法读取", "Native directory listing exceeded protocol limits")
+        EXIT_USAGE -> failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper rejected its fixed invocation")
+        else -> failure(
+            ErrorCode.COMMAND_FAILED,
+            "无法读取目录信息",
+            if (hadStderr) "Native directory helper failed with diagnostic output" else "Native directory helper failed",
+        )
+    }
+
     private fun mapExitCode(exitCode: Int, hadStderr: Boolean, failureMessage: String): OperationResult.Failure = when (exitCode) {
         43 -> failure(ErrorCode.ROOT_DENIED,"请授予 Root 权限后运行 iSaver","Root access was lost")
         EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
@@ -297,20 +336,6 @@ class LibsuRootFileSystem internal constructor(
             failureMessage,
             if (hadStderr) "Root command failed with diagnostic output" else "Root command failed",
         )
-    }
-
-    private fun buildListCommand(path: RootPath): String {
-        val quoted = RootCommandCodec.quote(path.value)
-        return """
-            dir=$quoted
-            [ -e "${'$'}dir" ] || [ -L "${'$'}dir" ] || exit $EXIT_NOT_FOUND
-            [ -d "${'$'}dir" ] || exit $EXIT_NOT_DIRECTORY
-            [ -r "${'$'}dir" ] || exit $EXIT_NOT_READABLE
-            for p in "${'$'}dir"/* "${'$'}dir"/.[!.]* "${'$'}dir"/..?*; do
-              [ -e "${'$'}p" ] || [ -L "${'$'}p" ] || continue
-              emit_isaver_record "${'$'}p"
-            done
-        """.trimIndent().withRecordEmitter()
     }
 
     private fun buildStatCommand(path: RootPath): String {
@@ -360,11 +385,7 @@ class LibsuRootFileSystem internal constructor(
         malformedCanonicalOutput()
     }
 
-    /**
-     * Emits one safe record per entry. This M1 implementation performs per-entry stat and Base64
-     * subprocess work; Task6 must consume it asynchronously and limit visible batches for large
-     * directories without truncating this protocol.
-     */
+    /** Emits one structured record for the fixed stat target; directory listing uses the native helper. */
     private fun String.withRecordEmitter(): String = """
         emit_isaver_record() {
           item="${'$'}1"
@@ -389,6 +410,9 @@ class LibsuRootFileSystem internal constructor(
         const val EXIT_NOT_FOUND = 44
         const val EXIT_NOT_DIRECTORY = 45
         const val EXIT_NOT_READABLE = 46
+        const val EXIT_NATIVE_IO = 51
+        const val EXIT_OUTPUT_LIMIT = 57
+        const val EXIT_USAGE = 64
         val STAGE_NAME=Regex("\\.isaver-stage-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
     }
 }
@@ -445,6 +469,14 @@ private fun malformedOutput() = failure(
     ErrorCode.COMMAND_FAILED,
     "无法读取目录信息",
     "Unexpected structured record count",
+)
+
+private fun malformedNativeDirectoryOutput(
+    reason: NativeDirectoryListingProtocolFailure,
+) = failure(
+    ErrorCode.COMMAND_FAILED,
+    "无法读取目录信息",
+    "Malformed native directory listing protocol: ${reason.name}",
 )
 
 private fun malformedCanonicalOutput() = failure(

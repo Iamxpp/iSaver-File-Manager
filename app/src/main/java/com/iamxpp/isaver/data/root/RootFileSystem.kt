@@ -8,7 +8,14 @@ import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.ErrorCode
 
 interface RootFileSystem {
-    suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>>
+    suspend fun readDirectory(path: RootPath): OperationResult<DirectorySnapshot> =
+        unsupportedDirectorySnapshot()
+
+    suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> =
+        when (val result = readDirectory(path)) {
+            is OperationResult.Failure -> result
+            is OperationResult.Success -> OperationResult.Success(result.value.entries)
+        }
 
     suspend fun stat(path: RootPath): OperationResult<DirectoryEntry>
 
@@ -26,5 +33,11 @@ interface RootFileSystem {
         expectedSizeBytes:Long,
     ):OperationResult<DirectoryEntry> = unsupportedTransfer()
 }
+
+private fun unsupportedDirectorySnapshot(): OperationResult.Failure = OperationResult.Failure(
+    ErrorCode.COMMAND_FAILED,
+    "无法读取目录信息",
+    "Directory snapshot primitive unsupported",
+)
 
 private fun <T> unsupportedTransfer():OperationResult<T> = OperationResult.Failure(ErrorCode.COMMAND_FAILED,"不支持文件传输","Transfer primitive unsupported")

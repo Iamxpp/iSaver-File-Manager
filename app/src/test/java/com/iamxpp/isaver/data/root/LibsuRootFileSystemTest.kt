@@ -1,11 +1,14 @@
 package com.iamxpp.isaver.data.root
 
+import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.FolderName
 import java.util.Base64
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -16,15 +19,193 @@ import org.junit.Test
 class LibsuRootFileSystemTest {
     @Test fun `file identity parser accepts one nonnegative device inode pair only`(){assertEquals(RootFileIdentity(12,34),RootFileIdentity.parse(listOf("12:34")).getOrThrow());listOf(emptyList(),listOf("1:2","3:4"),listOf("-1:2"),listOf("a:2"),listOf("1:2:3")).forEach{assertTrue(RootFileIdentity.parse(it).isFailure)}}
     @Test
-    fun `list parses structured command output`() = runTest {
-        val runner = FakeRunner(RootCommandResult(0, listOf(record("a", "/tmp/a")), emptyList()))
+    fun `read directory returns parent capabilities and entries from one native invocation`() = runTest {
+        val runner = FakeRunner(
+            RootCommandResult(
+                0,
+                listOf(
+                    "ISAVER_LIST_V1\t259\t1024\t1\t0",
+                    record("a", "/tmp/a"),
+                ),
+                emptyList(),
+            ),
+        )
+        val fileSystem = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
+
+        val result = fileSystem.readDirectory(path("/tmp"))
+
+        val snapshot = (result as OperationResult.Success).value
+        assertEquals(259L, snapshot.parentDevice)
+        assertEquals(1024L, snapshot.parentInode)
+        assertTrue(snapshot.parentReadable)
+        assertFalse(snapshot.parentWritable)
+        assertEquals(listOf("a"), snapshot.entries.map { it.name })
+        assertEquals(1, runner.commands.size)
+        assertEquals(
+            "'/data/local/tmp/isaver_fs_helper' 'list-dir' '/tmp'",
+            runner.commands.single(),
+        )
+        assertFalse(runner.commands.single().contains("emit_isaver_record"))
+        assertFalse(runner.commands.single().contains("stat -c"))
+        assertFalse(runner.commands.single().contains("su -c"))
+    }
+
+    @Test
+    fun `list compatibility default unwraps the production native snapshot`() = runTest {
+        val runner = FakeRunner(
+            RootCommandResult(
+                0,
+                listOf(
+                    "ISAVER_LIST_V1\t1\t2\t1\t1",
+                    record("a", "/tmp/a"),
+                ),
+                emptyList(),
+            ),
+        )
         val fileSystem = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
 
         val result = fileSystem.list(path("/tmp"))
 
         assertEquals("a", ((result as OperationResult.Success).value.single()).name)
-        assertTrue(runner.command!!.contains("dir='/tmp'"))
-        assertFalse(runner.command!!.contains("su -c"))
+        assertEquals(1, runner.commands.size)
+        assertTrue(runner.commands.single().contains("'list-dir'"))
+        assertFalse(runner.commands.single().contains("emit_isaver_record"))
+    }
+
+    @Test
+    fun `read directory binds decoded children to the requested parent`() = runTest {
+        val runner = FakeRunner(
+            RootCommandResult(
+                0,
+                listOf(
+                    "ISAVER_LIST_V1\t1\t2\t1\t1",
+                    record("child", "/other/child"),
+                ),
+                emptyList(),
+            ),
+        )
+        val fileSystem = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
+
+        val result = fileSystem.readDirectory(path("/requested"))
+
+        val snapshot = (result as OperationResult.Success).value
+        assertTrue(snapshot.entries.isEmpty())
+        assertEquals(
+            NativeDirectoryListingRecordFailureReason.PATH_MISMATCH,
+            snapshot.recordFailures.single().reason,
+        )
+    }
+
+    @Test
+    fun `read directory maps native exits without transfer uncertainty semantics`() = runTest {
+        val cases = mapOf(
+            43 to ErrorCode.ROOT_DENIED,
+            44 to ErrorCode.NOT_FOUND,
+            45 to ErrorCode.NOT_DIRECTORY,
+            46 to ErrorCode.NOT_READABLE,
+            51 to ErrorCode.COMMAND_FAILED,
+            57 to ErrorCode.COMMAND_FAILED,
+            64 to ErrorCode.COMMAND_FAILED,
+            137 to ErrorCode.COMMAND_FAILED,
+        )
+
+        cases.forEach { (exitCode, expected) ->
+            val fileSystem = LibsuRootFileSystem(
+                FakeRunner(RootCommandResult(exitCode, emptyList(), listOf("sensitive path omitted"))),
+                StandardTestDispatcher(testScheduler),
+                5_000,
+            )
+
+            val result = fileSystem.readDirectory(path("/private"))
+
+            assertEquals(expected, (result as OperationResult.Failure).code)
+            assertFalse(result.technicalMessage.orEmpty().contains("/private"))
+        }
+    }
+
+    @Test
+    fun `read directory maps timeout and execution failure but preserves cancellation`() = runTest {
+        val timedOut = LibsuRootFileSystem(
+            RootCommandRunner {
+                delay(100)
+                RootCommandResult(0, listOf("ISAVER_LIST_V1\t1\t2\t1\t1"), emptyList())
+            },
+            StandardTestDispatcher(testScheduler),
+            10,
+        )
+        val failed = LibsuRootFileSystem(
+            RootCommandRunner { error("boom") },
+            StandardTestDispatcher(testScheduler),
+            5_000,
+        )
+        val cancelled = LibsuRootFileSystem(
+            RootCommandRunner { throw CancellationException("stop") },
+            StandardTestDispatcher(testScheduler),
+            5_000,
+        )
+
+        assertEquals(
+            ErrorCode.COMMAND_FAILED,
+            (timedOut.readDirectory(path("/tmp")) as OperationResult.Failure).code,
+        )
+        assertEquals(
+            ErrorCode.COMMAND_FAILED,
+            (failed.readDirectory(path("/tmp")) as OperationResult.Failure).code,
+        )
+        try {
+            cancelled.readDirectory(path("/tmp"))
+            throw AssertionError("expected cancellation")
+        } catch (_: CancellationException) {
+        }
+    }
+
+    @Test
+    fun `read directory preserves a caller timeout shorter than its filesystem timeout`() = runTest {
+        var returnedFailure = false
+        val fileSystem = LibsuRootFileSystem(
+            RootCommandRunner {
+                delay(100)
+                RootCommandResult(0, listOf("ISAVER_LIST_V1\t1\t2\t1\t1"), emptyList())
+            },
+            StandardTestDispatcher(testScheduler),
+            5_000,
+        )
+
+        try {
+            withTimeout(10) {
+                returnedFailure = fileSystem.readDirectory(path("/tmp")) is OperationResult.Failure
+            }
+            throw AssertionError("expected caller timeout cancellation")
+        } catch (_: CancellationException) {
+        }
+        assertFalse("caller timeout was converted to a filesystem failure", returnedFailure)
+    }
+
+    @Test
+    fun `read directory rejects fatal malformed native output without exposing it`() = runTest {
+        val runner = FakeRunner(
+            RootCommandResult(
+                0,
+                listOf("ISAVER_LIST_V2\t/private/raw\toutput\t1\t1"),
+                emptyList(),
+            ),
+        )
+        val fileSystem = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
+
+        val result = fileSystem.readDirectory(path("/private"))
+
+        assertEquals(ErrorCode.COMMAND_FAILED, (result as OperationResult.Failure).code)
+        assertFalse(result.technicalMessage.orEmpty().contains("/private/raw"))
+    }
+
+    @Test
+    fun `legacy list fake does not fabricate parent identity for snapshots`() = runTest {
+        val fileSystem = LegacyListOnlyFileSystem()
+
+        assertTrue(fileSystem.list(path("/tmp")) is OperationResult.Success)
+        val snapshot = fileSystem.readDirectory(path("/tmp"))
+
+        assertEquals(ErrorCode.COMMAND_FAILED, (snapshot as OperationResult.Failure).code)
     }
 
     @Test
@@ -213,10 +394,22 @@ class LibsuRootFileSystemTest {
 
     private class FakeRunner(private val result: RootCommandResult) : RootCommandRunner {
         var command: String? = null
+        val commands = mutableListOf<String>()
         override suspend fun run(command: String): RootCommandResult {
             this.command = command
+            commands += command
             return result
         }
+    }
+    private class LegacyListOnlyFileSystem : RootFileSystem {
+        override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> =
+            OperationResult.Success(emptyList())
+        override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = error("unused")
+        override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = error("unused")
+        override suspend fun createDirectory(
+            parent: RootPath,
+            name: FolderName,
+        ): OperationResult<DirectoryEntry> = error("unused")
     }
     private class QueueRunner(private val results:ArrayDeque<RootCommandResult>):RootCommandRunner{val commands=mutableListOf<String>();override suspend fun run(command:String):RootCommandResult{commands+=command;return results.removeFirst()}}
     private inner class OriginalSymlinkRunner:RootCommandRunner{
