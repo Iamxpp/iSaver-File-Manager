@@ -26,10 +26,8 @@ import com.iamxpp.isaver.ui.ISaverHomeViewModel
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import com.iamxpp.isaver.ui.LocationHomeViewModel
-import com.iamxpp.isaver.ui.ShareSavePickerScreen
+import com.iamxpp.isaver.ui.files.HomeTab
 import com.iamxpp.isaver.ui.theme.ISaverTheme
-import com.iamxpp.isaver.transfer.ActiveTransferUiState
-import com.iamxpp.isaver.transfer.NullableTransferUiState
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.transfer.TransferViewModel
 import kotlinx.coroutines.Dispatchers
@@ -81,23 +79,24 @@ class MainActivity : ComponentActivity() {
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
                     val destination = homeState.destination
                     val pickerActive = transferState != TransferUiState.Idle
-                    val transferRequestKey = when (val current = transferState) {
-                        is ActiveTransferUiState -> current.share
-                        is NullableTransferUiState -> current.share
-                        else -> null
-                    }
 
                     LaunchedEffect(pickerActive) {
-                        if (pickerActive) {
-                            browserViewModel.openRoot(
-                                com.iamxpp.isaver.domain.RootPath.parse("/").getOrThrow(),
-                                "浏览",
-                            )
+                        if (pickerActive) homeViewModel.selectTab(HomeTab.VIEWS)
+                    }
+
+                    LaunchedEffect(destination) {
+                        if (destination is HomeDestination.Browser) {
+                            browserViewModel.openRoot(destination.path, destination.title)
                         }
                     }
 
-                    LaunchedEffect(pickerActive, browserState.currentPath, transferRequestKey) {
-                        if (pickerActive) transferViewModel.selectTarget(browserState.currentPath)
+                    LaunchedEffect(pickerActive, destination, browserState.currentPath) {
+                        if (pickerActive) {
+                            when (destination) {
+                                is HomeDestination.Browser -> transferViewModel.selectTarget(browserState.currentPath)
+                                is HomeDestination.Tab -> transferViewModel.clearTarget()
+                            }
+                        }
                     }
 
                     LaunchedEffect(transferState) {
@@ -108,52 +107,21 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    LaunchedEffect(destination, pickerActive) {
-                        if (!pickerActive && destination is HomeDestination.Browser) {
-                            browserViewModel.openRoot(destination.path, destination.title)
-                        }
+                    fun cancelPicker() {
+                        finishAfterTransferCancel = true
+                        transferViewModel.exitRootGate()
                     }
 
                     fun handleBrowserBack() {
-                        if (homeViewModel.onBrowserBack(browserViewModel.back()) == HomeBackResult.EXIT_APP) finish()
+                        if (homeViewModel.onBrowserBack(browserViewModel.back()) == HomeBackResult.EXIT_APP) {
+                            if (pickerActive) cancelPicker() else finish()
+                        }
                     }
 
-                    if (pickerActive) {
-                        fun cancelPicker() {
-                            finishAfterTransferCancel = true
-                            transferViewModel.exitRootGate()
-                        }
-
-                        BackHandler {
-                            if (browserState.canGoBack) {
-                                browserViewModel.back()
-                            } else {
-                                cancelPicker()
-                            }
-                        }
-                        ShareSavePickerScreen(
-                            transferState = transferState,
-                            browserState = browserState,
-                            onCancel = ::cancelPicker,
-                            onSave = transferViewModel::save,
-                            onStemChange = transferViewModel::setStem,
-                            onExtensionChange = transferViewModel::setExtension,
-                            onEnterDirectory = { browserViewModel.enterDirectory(it) },
-                            onBack = {
-                                if (browserViewModel.back() == com.iamxpp.isaver.ui.BrowserBackResult.RETURN_HOME) {
-                                    cancelPicker()
-                                }
-                            },
-                            onRetryBrowser = browserViewModel::retry,
-                            onLoadMore = browserViewModel::loadMore,
-                            onSearchQueryChange = browserViewModel::setSearchQuery,
-                            onRetryTransfer = transferViewModel::retry,
-                            onAcknowledgeUncertain = transferViewModel::acknowledgeUncertain,
-                            onContinueQueued = transferViewModel::continueWithQueued,
-                        )
-                    } else {
-                        BackHandler(enabled = destination is HomeDestination.Browser) { handleBrowserBack() }
-                        ISaverHomeScreen(
+                    BackHandler(enabled = pickerActive || destination is HomeDestination.Browser) {
+                        if (destination is HomeDestination.Browser) handleBrowserBack() else cancelPicker()
+                    }
+                    ISaverHomeScreen(
                         homeState = homeState,
                         locationState = locationState,
                         browserState = browserState,
@@ -174,8 +142,14 @@ class MainActivity : ComponentActivity() {
                         onDisplayModeChange = browserViewModel::setDisplayMode,
                         onSortChange = browserViewModel::setSort,
                         onCreateDirectory = browserViewModel::createDirectory,
-                        )
-                    }
+                        transferState = transferState,
+                        onSave = transferViewModel::save,
+                        onStemChange = transferViewModel::setStem,
+                        onExtensionChange = transferViewModel::setExtension,
+                        onRetryTransfer = transferViewModel::retry,
+                        onAcknowledgeUncertain = transferViewModel::acknowledgeUncertain,
+                        onContinueQueued = transferViewModel::continueWithQueued,
+                    )
                 } else {
                     RootGateScreen(
                         uiState = uiState,
