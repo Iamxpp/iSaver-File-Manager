@@ -13,21 +13,18 @@ sealed class TargetNameException(message: String) : IllegalArgumentException(mes
 class TargetNameResolver(val maxAttempts: Int = 100) {
     init { require(maxAttempts > 0) }
 
-    fun resolve(originalName: String, attempt: Int): Result<EntryName> {
+    fun resolve(draft: OutputNameDraft, attempt: Int): Result<EntryName> {
         if (attempt < 0) return Result.failure(TargetNameException.InvalidAttempt())
         if (attempt >= maxAttempts) return Result.failure(TargetNameException.AttemptsExhausted())
-        val original = EntryName.parse(originalName)
-        if (original.isFailure) return Result.failure(mapValidation(original.exceptionOrNull()))
-        if (attempt == 0) return original
-        val split = extensionStart(originalName)
-        val candidate = if (split == null) "$originalName ($attempt)"
-        else originalName.substring(0, split) + " ($attempt)" + originalName.substring(split)
-        return EntryName.parse(candidate).fold({ Result.success(it) }, { Result.failure(mapValidation(it)) })
-    }
-
-    private fun extensionStart(name: String): Int? {
-        val dot = name.lastIndexOf('.')
-        return if (dot <= 0) null else dot
+        val candidate = if (attempt == 0) {
+            draft
+        } else {
+            draft.copy(stem = "${draft.stem} ($attempt)")
+        }
+        return candidate.toEntryName().fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(mapValidation(it)) },
+        )
     }
 
     private fun mapValidation(error: Throwable?): TargetNameException =

@@ -24,13 +24,17 @@ class RootFileTransferRepository(
     private val nameResolver: TargetNameResolver,
     private val cleanupCache: suspend (CachedIncomingFile) -> Boolean,
 ) {
-    fun transfer(cached: CachedIncomingFile, originalDisplayName: String, targetDirectory: RootPath): Flow<TransferState> = flow {
+    fun transfer(
+        cached: CachedIncomingFile,
+        outputName: OutputNameDraft,
+        targetDirectory: RootPath,
+    ): Flow<TransferState> = flow {
         emit(TransferState.Resolving)
         var attempt = 0
         var rootWriteStarted = false
         try {
             while (true) {
-                val candidate = nameResolver.resolve(originalDisplayName, attempt).getOrElse { error ->
+                val candidate = nameResolver.resolve(outputName, attempt).getOrElse { error ->
                     val warning = cleanupWarning(cached)
                     emit(TransferState.Failure(ErrorCode.COMMAND_FAILED, safeNameFailure(error), warning))
                     return@flow
