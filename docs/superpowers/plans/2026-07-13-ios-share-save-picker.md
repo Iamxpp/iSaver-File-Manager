@@ -8,6 +8,8 @@
 
 **Tech Stack:** Android Intent/ContentResolver, Kotlin coroutines/StateFlow, SavedStateHandle, Compose, Room recent items, native Root transfer helper, JVM/Android instrumentation/ADB.
 
+**Implementation status (2026-07-14):** Tasks 1–3、5–6 已实现并通过 JVM/lint/build、小米 9 Manifest resolution 与 Compose instrumentation；Task 4 的即时缓存、publish 边界、单 queued generation、retry/uncertain reconciliation 和 orphan TTL 已实现。Task 7 仍需补齐旋转/进程死亡/大文件/ENOSPC 的整套端到端矩阵与最终人工微信 PDF 烟测，完成前不得宣称整个分享里程碑发布完成。
+
 ---
 
 ### Task 1: SEND and VIEW Parser Contract
