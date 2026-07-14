@@ -120,6 +120,45 @@ class IncomingFileCacheTest {
         assertFalse(cached.file.exists())
     }
 
+    @Test fun `validation rejects changed size identity and missing cache files`() = runTest {
+        register { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
+        val cache = cache()
+        val cached = (cache.cache(share(3)) {} as IncomingFileCacheResult.Success).file
+
+        assertTrue(cache.validate(cached))
+
+        cached.file.appendBytes(byteArrayOf(4))
+        assertFalse(cache.validate(cached))
+
+        cached.file.delete()
+        assertFalse(cache.validate(cached))
+    }
+
+    @Test fun `orphan cleanup removes only expired unowned UUID cache files`() = runTest {
+        val nowMillis = 2_000_000_000_000L
+        register { ByteArrayInputStream(byteArrayOf(1)) }
+        val cache = cache()
+        val owned = (cache.cache(share(1)) {} as IncomingFileCacheResult.Success).file
+        val incoming = owned.file.parentFile!!
+        val orphan = File(incoming, "223e4567-e89b-12d3-a456-426614174000.tmp").apply { writeText("old") }
+        val fresh = File(incoming, "323e4567-e89b-12d3-a456-426614174000.tmp").apply { writeText("fresh") }
+        val unrelated = File(incoming, "do-not-delete.txt").apply { writeText("old") }
+        val expired = nowMillis - IncomingFileCache.ORPHAN_TTL_MILLIS - 1L
+        listOf(owned.file, orphan, unrelated).forEach { assertTrue(it.setLastModified(expired)) }
+        assertTrue(fresh.setLastModified(nowMillis - 1L))
+
+        val removed = cache.cleanupOrphans(
+            nowMillis = nowMillis,
+            owned = setOf(owned.appCachePath),
+        )
+
+        assertEquals(1, removed)
+        assertTrue(owned.file.exists())
+        assertFalse(orphan.exists())
+        assertTrue(fresh.exists())
+        assertTrue(unrelated.exists())
+    }
+
     private fun cache(openOutput: (File) -> OutputStream = { it.outputStream().buffered() }) =
         IncomingFileCache(context.contentResolver, context.cacheDir, Dispatchers.Unconfined, { opener() }, openOutput)
     private fun share(size:Long?)=IncomingShare(uri,"report.pdf",size,"application/pdf")

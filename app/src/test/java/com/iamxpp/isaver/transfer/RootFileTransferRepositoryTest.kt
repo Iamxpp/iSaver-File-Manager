@@ -31,7 +31,7 @@ class RootFileTransferRepositoryTest {
         assertEquals(1, cleanup.calls)
     }
 
-    @Test fun `definite failures do not retry and cleanup warning does not replace failure`() = runTest {
+    @Test fun `definite failures do not retry and retain cache for explicit policy`() = runTest {
         listOf(ErrorCode.NO_SPACE, ErrorCode.ROOT_DENIED, ErrorCode.ROOT_UNAVAILABLE, ErrorCode.SOURCE_UNREADABLE,
             ErrorCode.COMMAND_FAILED, ErrorCode.NOT_WRITABLE).forEach { code ->
             val fs = FakeFs(mutableListOf(failure(code))); val cleanup = CleanupSpy(false)
@@ -40,7 +40,7 @@ class RootFileTransferRepositoryTest {
                 .toList()
                 .last()
             assertEquals(1, fs.names.size); assertEquals(code, (terminal as TransferState.Failure).code)
-            assertNotNull(terminal.cleanupWarning); assertEquals(1, cleanup.calls)
+            assertNull(terminal.cleanupWarning); assertEquals(0, cleanup.calls)
             assertFalse(terminal.message.contains("/private/target")); assertFalse(terminal.message.contains("content://"))
         }
     }
@@ -61,9 +61,9 @@ class RootFileTransferRepositoryTest {
         assertEquals(1, successStates.count { it is TransferState.Success || it is TransferState.Failure })
 
         val failureStates = RootFileTransferRepository(FakeFs(mutableListOf(failure(ErrorCode.NO_SPACE))), TargetNameResolver(10),
-            { throw CancellationException("cleanup cancellation") })
+            { throw CancellationException("cleanup must not run") })
             .transfer(fakeCached(), draft("a.txt"), path("/target")).toList()
-        assertNotNull((failureStates.last() as TransferState.Failure).cleanupWarning)
+        assertNull((failureStates.last() as TransferState.Failure).cleanupWarning)
 
     }
 
@@ -74,7 +74,20 @@ class RootFileTransferRepositoryTest {
         assertEquals(listOf("a.txt", "a (1).txt"), fs.names)
         assertEquals(1, states.count { it is TransferState.Success || it is TransferState.Failure })
         assertEquals(ErrorCode.COMMAND_FAILED, (states.last() as TransferState.Failure).code)
-        assertEquals(1, cleanup.calls)
+        assertEquals(0, cleanup.calls)
+    }
+
+    @Test fun `queued generation stops after already exists before another publish window`() = runTest {
+        val cleanup = CleanupSpy(true)
+        val fs = FakeFs(mutableListOf(failure(ErrorCode.ALREADY_EXISTS), success("a (1).txt")))
+
+        val states = repository(fs, cleanup)
+            .transfer(fakeCached(), draft("a.txt"), path("/target")) { false }
+            .toList()
+
+        assertEquals(listOf("a.txt"), fs.names)
+        assertEquals(ErrorCode.CANCELLED, (states.last() as TransferState.Failure).code)
+        assertEquals(0, cleanup.calls)
     }
 
     @Test fun `cancellation before root dispatch is rethrown and cleans cache`() = runTest {

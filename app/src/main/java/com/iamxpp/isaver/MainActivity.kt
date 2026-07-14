@@ -1,5 +1,6 @@
 package com.iamxpp.isaver
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -25,10 +26,19 @@ import com.iamxpp.isaver.ui.ISaverHomeViewModel
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import com.iamxpp.isaver.ui.LocationHomeViewModel
+import com.iamxpp.isaver.ui.ShareSavePickerScreen
 import com.iamxpp.isaver.ui.theme.ISaverTheme
+import com.iamxpp.isaver.transfer.ActiveTransferUiState
+import com.iamxpp.isaver.transfer.NullableTransferUiState
+import com.iamxpp.isaver.transfer.TransferUiState
+import com.iamxpp.isaver.transfer.TransferViewModel
 import kotlinx.coroutines.Dispatchers
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    private var finishAfterTransferCancel = false
+    private val transferViewModel by viewModels<TransferViewModel>()
     private val homeViewModel by viewModels<ISaverHomeViewModel>()
     private val locationHomeViewModel by viewModels<LocationHomeViewModel> {
         val app = application as ISaverApplication
@@ -45,6 +55,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (
+            ShareIntentDispatchPolicy.shouldHandleInitial(
+                hasSavedState = savedInstanceState != null,
+                flags = intent.flags,
+            )
+        ) {
+            transferViewModel.handleIntent(intent)
+        }
         val rootGateViewModel = ViewModelProvider(
             this,
             RootGateViewModelFactory(
@@ -57,13 +75,41 @@ class MainActivity : ComponentActivity() {
 
             ISaverTheme {
                 if (uiState == RootGateUiState.Granted) {
+                    val transferState by transferViewModel.state.collectAsStateWithLifecycle()
                     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
                     val locationState by locationHomeViewModel.state.collectAsStateWithLifecycle()
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
                     val destination = homeState.destination
+                    val pickerActive = transferState != TransferUiState.Idle
+                    val transferRequestKey = when (val current = transferState) {
+                        is ActiveTransferUiState -> current.share
+                        is NullableTransferUiState -> current.share
+                        else -> null
+                    }
 
-                    LaunchedEffect(destination) {
-                        if (destination is HomeDestination.Browser) {
+                    LaunchedEffect(pickerActive) {
+                        if (pickerActive) {
+                            browserViewModel.openRoot(
+                                com.iamxpp.isaver.domain.RootPath.parse("/").getOrThrow(),
+                                "浏览",
+                            )
+                        }
+                    }
+
+                    LaunchedEffect(pickerActive, browserState.currentPath, transferRequestKey) {
+                        if (pickerActive) transferViewModel.selectTarget(browserState.currentPath)
+                    }
+
+                    LaunchedEffect(transferState) {
+                        if (transferState is TransferUiState.Success ||
+                            (finishAfterTransferCancel && transferState == TransferUiState.Idle)
+                        ) {
+                            finish()
+                        }
+                    }
+
+                    LaunchedEffect(destination, pickerActive) {
+                        if (!pickerActive && destination is HomeDestination.Browser) {
                             browserViewModel.openRoot(destination.path, destination.title)
                         }
                     }
@@ -72,8 +118,42 @@ class MainActivity : ComponentActivity() {
                         if (homeViewModel.onBrowserBack(browserViewModel.back()) == HomeBackResult.EXIT_APP) finish()
                     }
 
-                    BackHandler(enabled = destination is HomeDestination.Browser) { handleBrowserBack() }
-                    ISaverHomeScreen(
+                    if (pickerActive) {
+                        fun cancelPicker() {
+                            finishAfterTransferCancel = true
+                            transferViewModel.exitRootGate()
+                        }
+
+                        BackHandler {
+                            if (browserState.canGoBack) {
+                                browserViewModel.back()
+                            } else {
+                                cancelPicker()
+                            }
+                        }
+                        ShareSavePickerScreen(
+                            transferState = transferState,
+                            browserState = browserState,
+                            onCancel = ::cancelPicker,
+                            onSave = transferViewModel::save,
+                            onStemChange = transferViewModel::setStem,
+                            onExtensionChange = transferViewModel::setExtension,
+                            onEnterDirectory = { browserViewModel.enterDirectory(it) },
+                            onBack = {
+                                if (browserViewModel.back() == com.iamxpp.isaver.ui.BrowserBackResult.RETURN_HOME) {
+                                    cancelPicker()
+                                }
+                            },
+                            onRetryBrowser = browserViewModel::retry,
+                            onLoadMore = browserViewModel::loadMore,
+                            onSearchQueryChange = browserViewModel::setSearchQuery,
+                            onRetryTransfer = transferViewModel::retry,
+                            onAcknowledgeUncertain = transferViewModel::acknowledgeUncertain,
+                            onContinueQueued = transferViewModel::continueWithQueued,
+                        )
+                    } else {
+                        BackHandler(enabled = destination is HomeDestination.Browser) { handleBrowserBack() }
+                        ISaverHomeScreen(
                         homeState = homeState,
                         locationState = locationState,
                         browserState = browserState,
@@ -94,9 +174,27 @@ class MainActivity : ComponentActivity() {
                         onDisplayModeChange = browserViewModel::setDisplayMode,
                         onSortChange = browserViewModel::setSort,
                         onCreateDirectory = browserViewModel::createDirectory,
+                        )
+                    }
+                } else {
+                    RootGateScreen(
+                        uiState = uiState,
+                        onRetry = rootGateViewModel::retry,
+                        onExit = {
+                            transferViewModel.exitRootGate()
+                            finish()
+                        },
                     )
-                } else RootGateScreen(uiState, rootGateViewModel::retry, ::finish)
+                }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (ShareIntentDispatchPolicy.shouldHandleNewIntent(intent.flags)) {
+            transferViewModel.handleIntent(intent)
         }
     }
 }

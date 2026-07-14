@@ -3,6 +3,7 @@ package com.iamxpp.isaver.transfer
 import android.content.ContentResolver
 import com.iamxpp.isaver.data.root.AppCachePath
 import android.system.ErrnoException
+import android.system.Os
 import android.system.OsConstants
 import com.iamxpp.isaver.share.IncomingShare
 import java.io.File
@@ -87,7 +88,63 @@ class IncomingFileCache internal constructor(
         !candidate.exists() || candidate.delete()
     }
 
+    suspend fun validate(cached: CachedIncomingFile): Boolean = withContext(ioDispatcher) {
+        val candidate = cached.file
+        val incoming = try {
+            incomingDir.canonicalFile
+        } catch (_: IOException) {
+            return@withContext false
+        }
+        val canonical = try {
+            candidate.canonicalFile
+        } catch (_: IOException) {
+            return@withContext false
+        }
+        if (canonical.parentFile != incoming || !candidate.exists()) return@withContext false
+        val identity = try {
+            Os.lstat(candidate.path)
+        } catch (_: Exception) {
+            return@withContext false
+        }
+        OsConstants.S_ISREG(identity.st_mode) &&
+            identity.st_dev == cached.appCachePath.device &&
+            identity.st_ino == cached.appCachePath.inode &&
+            identity.st_size == cached.sizeBytes
+    }
+
+    suspend fun cleanupOrphans(
+        nowMillis: Long,
+        owned: Set<AppCachePath> = emptySet(),
+    ): Int = withContext(NonCancellable + ioDispatcher) {
+        val cutoff = nowMillis - ORPHAN_TTL_MILLIS
+        var removed = 0
+        incomingDir.listFiles().orEmpty().forEach { candidate ->
+            if (!INCOMING_NAME.matches(candidate.name) || candidate.lastModified() > cutoff) return@forEach
+            val identity = try {
+                Os.lstat(candidate.path)
+            } catch (_: Exception) {
+                return@forEach
+            }
+            if (!OsConstants.S_ISREG(identity.st_mode)) return@forEach
+            val isOwned = owned.any { owner ->
+                owner.value == candidate.canonicalPath &&
+                    owner.device == identity.st_dev &&
+                    owner.inode == identity.st_ino
+            }
+            if (!isOwned && candidate.delete()) removed += 1
+        }
+        removed
+    }
+
     private fun failure(reason: IncomingFileCacheFailure) = IncomingFileCacheResult.Failure(reason)
 
     private class SourceReadException(cause: IOException) : RuntimeException(cause)
+
+    companion object {
+        const val ORPHAN_TTL_MILLIS = 24L * 60L * 60L * 1_000L
+        private val INCOMING_NAME = Regex(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-" +
+                "[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\\.tmp",
+        )
+    }
 }

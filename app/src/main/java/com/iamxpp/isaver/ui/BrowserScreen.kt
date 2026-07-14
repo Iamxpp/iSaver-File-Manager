@@ -150,7 +150,7 @@ fun BrowserScreen(
 }
 
 @Composable
-private fun BrowserContent(
+internal fun BrowserContent(
     state: BrowserUiState,
     onEnterDirectory: (DirectoryEntry) -> Unit,
     onRetry: () -> Unit,

@@ -10,6 +10,9 @@ import com.iamxpp.isaver.data.local.ISaverDatabase
 import com.iamxpp.isaver.data.root.LibsuRootSession
 import com.iamxpp.isaver.data.root.RootSession
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.EntryType
+import com.iamxpp.isaver.domain.ErrorCode
+import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.data.root.LibsuRootFileSystem
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.locations.CustomLocationRepository
@@ -18,14 +21,23 @@ import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.LocationResolver
 import com.iamxpp.isaver.locations.StorageLocation
 import com.iamxpp.isaver.recent.RecentRepository
+import com.iamxpp.isaver.recent.RecentItemType
+import com.iamxpp.isaver.share.ShareIntentParser
+import com.iamxpp.isaver.transfer.IncomingFileCache
+import com.iamxpp.isaver.transfer.RootFileTransferRepository
+import com.iamxpp.isaver.transfer.TargetNameResolver
+import com.iamxpp.isaver.transfer.TransferDependencies
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import java.util.UUID
+import dagger.hilt.android.HiltAndroidApp
 
+@HiltAndroidApp
 class ISaverApplication : Application() {
     private val applicationScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     internal val rootSession: RootSession by lazy { LibsuRootSession() }
@@ -65,10 +77,67 @@ class ISaverApplication : Application() {
             ),
         )
     }
+    internal val shareIntentParser: ShareIntentParser by lazy { ShareIntentParser(this) }
+    internal val incomingFileCache: IncomingFileCache by lazy {
+        IncomingFileCache(contentResolver, cacheDir, Dispatchers.IO)
+    }
+    internal val transferRepository: RootFileTransferRepository by lazy {
+        RootFileTransferRepository(
+            fileSystem = rootFileSystem,
+            nameResolver = TargetNameResolver(),
+            cleanupCache = incomingFileCache::cleanup,
+        )
+    }
+    internal val transferDependencies: TransferDependencies by lazy {
+        TransferDependencies(
+            parseShare = shareIntentParser::parseAsync,
+            validateTarget = ::validateTransferTarget,
+            cacheIncoming = incomingFileCache::cache,
+            validateCache = incomingFileCache::validate,
+            cleanupIncoming = incomingFileCache::cleanup,
+            transferCached = { cached, outputName, target, mayContinue ->
+                transferRepository.transfer(cached, outputName, target, mayContinue)
+            },
+            recordSaved = { entry ->
+                recentRepository.recordSaved(
+                    canonicalPath = entry.path,
+                    displayName = entry.name,
+                    note = null,
+                    type = RecentItemType.FILE,
+                )
+            },
+            workDispatcher = Dispatchers.IO,
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
         // Detailed libsu logging stays disabled, including in debug builds, to avoid path disclosure.
+        applicationScope.launch {
+            incomingFileCache.cleanupOrphans(System.currentTimeMillis())
+        }
+    }
+
+    private suspend fun validateTransferTarget(path: RootPath): OperationResult<RootPath> {
+        val original = rootFileSystem.stat(path)
+        if (original !is OperationResult.Success ||
+            original.value.type != EntryType.DIRECTORY ||
+            !original.value.writable ||
+            original.value.symbolicLink
+        ) {
+            return OperationResult.Failure(ErrorCode.NOT_WRITABLE, "请选择可写的真实文件夹")
+        }
+        val canonical = rootFileSystem.canonicalize(path)
+        if (canonical !is OperationResult.Success) return canonical
+        val canonicalEntry = rootFileSystem.stat(canonical.value)
+        if (canonicalEntry !is OperationResult.Success ||
+            canonicalEntry.value.type != EntryType.DIRECTORY ||
+            !canonicalEntry.value.writable ||
+            canonicalEntry.value.symbolicLink
+        ) {
+            return OperationResult.Failure(ErrorCode.NOT_WRITABLE, "请选择可写的真实文件夹")
+        }
+        return canonical
     }
 
     private companion object {

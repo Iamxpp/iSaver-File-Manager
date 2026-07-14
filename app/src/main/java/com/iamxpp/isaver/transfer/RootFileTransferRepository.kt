@@ -28,6 +28,7 @@ class RootFileTransferRepository(
         cached: CachedIncomingFile,
         outputName: OutputNameDraft,
         targetDirectory: RootPath,
+        mayContinueAfterCollision: () -> Boolean = { true },
     ): Flow<TransferState> = flow {
         emit(TransferState.Resolving)
         var attempt = 0
@@ -35,21 +36,37 @@ class RootFileTransferRepository(
         try {
             while (true) {
                 val candidate = nameResolver.resolve(outputName, attempt).getOrElse { error ->
-                    val warning = cleanupWarning(cached)
-                    emit(TransferState.Failure(ErrorCode.COMMAND_FAILED, safeNameFailure(error), warning))
+                    emit(TransferState.Failure(ErrorCode.COMMAND_FAILED, safeNameFailure(error)))
                     return@flow
                 }
                 emit(TransferState.Publishing(candidate, attempt))
                 rootWriteStarted = true
-                when (val result = fileSystem.transferFromAppCache(cached.appCachePath, targetDirectory, candidate, cached.sizeBytes)) {
+                when (
+                    val result = withContext(NonCancellable) {
+                        runCatching {
+                            fileSystem.transferFromAppCache(
+                                cached.appCachePath,
+                                targetDirectory,
+                                candidate,
+                                cached.sizeBytes,
+                            )
+                        }
+                    }.getOrThrow()
+                ) {
                     is OperationResult.Success -> {
                         emit(TransferState.Success(result.value, candidate, cleanupWarning(cached)))
                         return@flow
                     }
                     is OperationResult.Failure -> {
-                        if (result.code == ErrorCode.ALREADY_EXISTS) { attempt++; continue }
-                        val warning = if (result.code == ErrorCode.OUTCOME_UNCERTAIN) null else cleanupWarning(cached)
-                        emit(TransferState.Failure(result.code, safeFailureMessage(result.code), warning))
+                        if (result.code == ErrorCode.ALREADY_EXISTS) {
+                            if (!mayContinueAfterCollision()) {
+                                emit(TransferState.Failure(ErrorCode.CANCELLED, safeFailureMessage(ErrorCode.CANCELLED)))
+                                return@flow
+                            }
+                            attempt++
+                            continue
+                        }
+                        emit(TransferState.Failure(result.code, safeFailureMessage(result.code)))
                         return@flow
                     }
                 }
