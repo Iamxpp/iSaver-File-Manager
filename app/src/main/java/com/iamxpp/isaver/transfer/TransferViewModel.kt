@@ -142,6 +142,17 @@ class TransferViewModel(
         }
     }
 
+    fun clearTarget() {
+        val request = active ?: return
+        if (publishInFlight || mutableState.value is TransferUiState.Uncertain) return
+        targetValidationJob?.cancel()
+        request.targetValidationGeneration++
+        request.targetDirectory = null
+        request.validatedCanonical = null
+        request.targetMessage = null
+        render(request)
+    }
+
     fun setStem(stem: String) = updateOutputName { it.copy(stem = stem) }
 
     fun setExtension(extension: String) = updateOutputName { it.copy(extension = extension) }

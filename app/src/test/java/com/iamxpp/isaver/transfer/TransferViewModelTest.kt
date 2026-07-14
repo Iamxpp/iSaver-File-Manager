@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -87,6 +88,27 @@ class TransferViewModelTest {
         val choosing = viewModel.state.value as TransferUiState.Choosing
         assertEquals(root("/target"), choosing.targetDirectory)
         assertTrue(choosing.canSave)
+    }
+
+    @Test
+    fun `clearing target disables save without discarding cached share`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val viewModel = viewModel(
+            validateTarget = { OperationResult.Success(it) },
+            dispatcher = dispatcher,
+        )
+        viewModel.acceptShare(share("report.pdf"))
+        advanceUntilIdle()
+        viewModel.selectTarget(root("/target"))
+        advanceUntilIdle()
+        assertTrue((viewModel.state.value as TransferUiState.Choosing).canSave)
+
+        viewModel.clearTarget()
+
+        val choosing = viewModel.state.value as TransferUiState.Choosing
+        assertNull(choosing.targetDirectory)
+        assertFalse(choosing.canSave)
+        assertEquals(OutputNameDraft("report", "pdf"), choosing.outputName)
     }
 
     @Test
