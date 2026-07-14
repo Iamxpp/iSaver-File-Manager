@@ -37,6 +37,7 @@ import com.iamxpp.isaver.ui.files.FileListRow
 import com.iamxpp.isaver.ui.files.FilesGrid
 import com.iamxpp.isaver.ui.files.FilesOverflowMenu
 import com.iamxpp.isaver.ui.files.FilesPageHeader
+import com.iamxpp.isaver.ui.files.FilesSaveAction
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.ui.theme.ISaverBackground
@@ -62,6 +63,7 @@ fun BrowserScreen(
     onDismissCreateError: () -> Unit = {},
     onCompress: (() -> Unit)? = null,
     onConnectServer: (() -> Unit)? = null,
+    saveAction: FilesSaveAction? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var createDialogVisible by remember { mutableStateOf(false) }
@@ -74,6 +76,7 @@ fun BrowserScreen(
             onQueryChange = onSearchQueryChange,
             onBack = if (state.canGoBack) onBack else null,
             onOverflow = { menuExpanded = true },
+            saveAction = saveAction,
             topBarTestTag = "browser-top-bar",
             searchTestTag = "browser-search",
             overflowMenuContent = {

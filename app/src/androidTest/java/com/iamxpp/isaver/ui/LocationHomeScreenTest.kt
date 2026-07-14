@@ -30,6 +30,7 @@ import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.ResolvedAppLocation
 import com.iamxpp.isaver.locations.StorageLocation
 import com.iamxpp.isaver.ui.files.DisplayMode
+import com.iamxpp.isaver.ui.files.FilesSaveAction
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -91,6 +92,25 @@ class LocationHomeScreenTest {
         assertTrue(firstSection.top - search.bottom < search.height)
         compose.onNodeWithContentDescription("返回").assertDoesNotExist()
         compose.onNodeWithText("添加位置").assertDoesNotExist()
+    }
+
+    @Test
+    fun saveModeReplacesViewsOverflowWithDisabledSave() {
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(loading = false),
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { _, _ -> },
+                onAdd = { _, _ -> },
+                onEdit = { _, _, _ -> },
+                onRemove = {},
+                onRetry = {},
+                saveAction = FilesSaveAction(enabled = false, onSave = {}),
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-save").assertIsNotEnabled()
+        compose.onNodeWithTag("files-top-bar-overflow").assertDoesNotExist()
     }
 
     @Test

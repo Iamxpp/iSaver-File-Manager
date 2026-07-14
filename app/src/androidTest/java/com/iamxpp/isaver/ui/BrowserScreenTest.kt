@@ -19,6 +19,7 @@ import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.ui.files.DisplayMode
+import com.iamxpp.isaver.ui.files.FilesSaveAction
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -29,6 +30,25 @@ import org.junit.Test
 
 class BrowserScreenTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun saveModeReplacesBrowserOverflowAndForwardsClick() {
+        var saved = false
+        compose.setContent {
+            BrowserScreen(
+                state = state(title = "Download"),
+                onEnterDirectory = {},
+                onBack = {},
+                onRetry = {},
+                onLoadMore = {},
+                saveAction = FilesSaveAction(enabled = true, onSave = { saved = true }),
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-save").assertIsEnabled().performClick()
+        compose.onNodeWithTag("files-top-bar-overflow").assertDoesNotExist()
+        assertTrue(saved)
+    }
 
     @Test fun rootLevelUsesCompactHeaderWithSearchImmediatelyBelow() {
         compose.setContent {

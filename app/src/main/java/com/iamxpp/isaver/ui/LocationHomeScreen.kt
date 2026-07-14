@@ -41,10 +41,14 @@ import com.iamxpp.isaver.ui.files.FileGridCell
 import com.iamxpp.isaver.ui.files.FileListRow
 import com.iamxpp.isaver.ui.files.FilesOverflowMenu
 import com.iamxpp.isaver.ui.files.FilesPageHeader
+import com.iamxpp.isaver.ui.files.FilesSaveAction
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.ui.theme.ISaverBackground
+import com.iamxpp.isaver.ui.theme.ISaverBlue
+import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
+import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 
 @Composable
 fun LocationHomeScreen(
@@ -59,6 +63,7 @@ fun LocationHomeScreen(
     sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     onDisplayModeChange: (DisplayMode) -> Unit = {},
     onSortChange: (SortSpec) -> Unit = {},
+    saveAction: FilesSaveAction? = null,
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
@@ -93,6 +98,7 @@ fun LocationHomeScreen(
             onRetry = onRetry,
             onDisplayModeChange = onDisplayModeChange,
             onSortChange = onSortChange,
+            saveAction = saveAction,
         )
         if (displayMode == DisplayMode.LIST) {
             LocationList(
@@ -161,6 +167,7 @@ private fun LocationHomeHeader(
     onRetry: () -> Unit,
     onDisplayModeChange: (DisplayMode) -> Unit,
     onSortChange: (SortSpec) -> Unit,
+    saveAction: FilesSaveAction?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -170,6 +177,7 @@ private fun LocationHomeHeader(
             query = query,
             onQueryChange = onQueryChange,
             onOverflow = { menuExpanded = true },
+            saveAction = saveAction,
             topBarTestTag = "views-top-bar",
             searchTestTag = "views-search",
             overflowMenuContent = {
@@ -217,8 +225,12 @@ private fun LocationHomeHeader(
                     .fillMaxWidth()
                     .padding(start = 16.dp, end = 8.dp),
             ) {
-                Text(error, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
-                TextButton(onClick = onRetry) { Text("重试") }
+                Text(
+                    text = error,
+                    color = ISaverPrimaryText,
+                    modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                )
+                TextButton(onClick = onRetry) { Text("重试", color = ISaverBlue) }
             }
         }
     }
@@ -240,12 +252,17 @@ private fun LocationList(
                     item(key = "section-app") { SectionTitle("应用位置") }
                     content.apps.forEach { group ->
                         item(key = group.templateId.value) {
-                            Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp))
+                            Text(
+                                text = group.displayName,
+                                color = ISaverPrimaryText,
+                                modifier = Modifier.padding(16.dp, 8.dp),
+                            )
                         }
                         if (group.empty) {
                             item(key = "${group.templateId.value}.empty") {
                                 Text(
                                     "未找到可用${group.displayName}目录",
+                                    color = ISaverSecondaryText,
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                                 )
                             }
@@ -292,13 +309,19 @@ private fun LocationList(
                 }
             }
         }
-        if (state.loading) item { Text("正在加载位置…", modifier = Modifier.padding(16.dp)) }
+        if (state.loading) item {
+            Text("正在加载位置…", color = ISaverSecondaryText, modifier = Modifier.padding(16.dp))
+        }
     }
 }
 
 @Composable
 private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+    Text(
+        text = text,
+        color = ISaverSecondaryText,
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+    )
 }
 
 @Composable
@@ -320,12 +343,17 @@ private fun LocationHomeGrid(
                     fullSpanItem("section-app") { SectionTitle("应用位置", Modifier.testTag("section-app")) }
                     content.apps.forEach { group ->
                         fullSpanItem(group.templateId.value) {
-                            Text(group.displayName, modifier = Modifier.padding(16.dp, 8.dp))
+                            Text(
+                                text = group.displayName,
+                                color = ISaverPrimaryText,
+                                modifier = Modifier.padding(16.dp, 8.dp),
+                            )
                         }
                         if (group.empty) {
                             fullSpanItem("${group.templateId.value}.empty") {
                                 Text(
                                     "未找到可用${group.displayName}目录",
+                                    color = ISaverSecondaryText,
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                                 )
                             }
@@ -344,7 +372,9 @@ private fun LocationHomeGrid(
                 LocationSection.COMMON -> {
                     fullSpanItem("section-common") { SectionTitle("通用位置", Modifier.testTag("section-common")) }
                     if (content.common.isEmpty()) {
-                        fullSpanItem("common-empty") { Text("暂无通用位置", modifier = Modifier.padding(16.dp)) }
+                        fullSpanItem("common-empty") {
+                            Text("暂无通用位置", color = ISaverSecondaryText, modifier = Modifier.padding(16.dp))
+                        }
                     } else {
                         locationItems(
                             content.common.map { PresentedLocation(it, it.path.value) },
@@ -359,7 +389,9 @@ private fun LocationHomeGrid(
                 LocationSection.CUSTOM -> {
                     fullSpanItem("section-custom") { SectionTitle("自定义位置", Modifier.testTag("section-custom")) }
                     if (content.custom.isEmpty()) {
-                        fullSpanItem("custom-empty") { Text("暂无自定义位置", modifier = Modifier.padding(16.dp)) }
+                        fullSpanItem("custom-empty") {
+                            Text("暂无自定义位置", color = ISaverSecondaryText, modifier = Modifier.padding(16.dp))
+                        }
                     } else {
                         locationItems(
                             content.custom.map {
@@ -374,7 +406,9 @@ private fun LocationHomeGrid(
                 }
             }
         }
-        if (state.loading) fullSpanItem("locations-loading") { Text("正在加载位置…", modifier = Modifier.padding(16.dp)) }
+        if (state.loading) fullSpanItem("locations-loading") {
+            Text("正在加载位置…", color = ISaverSecondaryText, modifier = Modifier.padding(16.dp))
+        }
     }
 }
 

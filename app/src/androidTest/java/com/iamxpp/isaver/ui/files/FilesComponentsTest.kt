@@ -84,6 +84,25 @@ class FilesComponentsTest {
     }
 
     @Test
+    fun saveActionReplacesOverflowAndForwardsClick() {
+        var saved = false
+        compose.setContent {
+            FilesTopBar(
+                title = "视图",
+                onOverflow = {},
+                saveAction = FilesSaveAction(
+                    enabled = true,
+                    onSave = { saved = true },
+                ),
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-save").assertIsEnabled().performClick()
+        compose.onNodeWithTag("files-top-bar-overflow").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(saved) }
+    }
+
+    @Test
     fun bottomBarExposesThreeTabsAndSelectedState() {
         compose.setContent {
             FilesBottomBar(

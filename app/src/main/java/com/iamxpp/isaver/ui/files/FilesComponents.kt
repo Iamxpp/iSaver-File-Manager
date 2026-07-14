@@ -32,6 +32,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,11 @@ import com.iamxpp.isaver.ui.theme.ISaverDivider
 import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 
+data class FilesSaveAction(
+    val enabled: Boolean,
+    val onSave: () -> Unit,
+)
+
 @Composable
 fun FilesPageHeader(
     title: String,
@@ -64,6 +70,7 @@ fun FilesPageHeader(
     onQueryChange: (String) -> Unit,
     onOverflow: () -> Unit,
     onBack: (() -> Unit)? = null,
+    saveAction: FilesSaveAction? = null,
     topBarTestTag: String = "files-top-bar",
     searchTestTag: String = "files-search",
     modifier: Modifier = Modifier,
@@ -77,6 +84,7 @@ fun FilesPageHeader(
             title = title,
             onBack = onBack,
             onOverflow = onOverflow,
+            saveAction = saveAction,
             testTag = topBarTestTag,
             overflowMenuContent = overflowMenuContent,
         )
@@ -95,6 +103,7 @@ fun FilesTopBar(
     title: String,
     onOverflow: () -> Unit,
     onBack: (() -> Unit)? = null,
+    saveAction: FilesSaveAction? = null,
     testTag: String = "files-top-bar",
     modifier: Modifier = Modifier,
     overflowMenuContent: @Composable BoxScope.() -> Unit = {},
@@ -134,12 +143,29 @@ fun FilesTopBar(
             )
         }
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            HeaderAction(
-                contentDescription = "更多操作",
-                onClick = onOverflow,
-                modifier = Modifier.testTag("files-top-bar-overflow"),
-            ) { OverflowGlyph() }
-            overflowMenuContent()
+            if (saveAction == null) {
+                HeaderAction(
+                    contentDescription = "更多操作",
+                    onClick = onOverflow,
+                    modifier = Modifier.testTag("files-top-bar-overflow"),
+                ) { OverflowGlyph() }
+                overflowMenuContent()
+            } else {
+                TextButton(
+                    onClick = saveAction.onSave,
+                    enabled = saveAction.enabled,
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("files-top-bar-save"),
+                ) {
+                    Text(
+                        text = "存储",
+                        color = if (saveAction.enabled) ISaverBlue else ISaverSecondaryText,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
         }
     }
 }
