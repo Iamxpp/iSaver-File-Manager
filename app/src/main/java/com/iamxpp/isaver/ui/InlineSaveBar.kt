@@ -79,8 +79,8 @@ fun InlineSaveBar(
             .fillMaxWidth()
             .height(112.dp)
             .background(ISaverCard)
-            .padding(vertical = 4.dp)
-            .testTag("inline-save-bar"),
+            .testTag("inline-save-bar")
+            .padding(vertical = 4.dp),
     ) {
         Text(
             text = "$itemCount 个项目",

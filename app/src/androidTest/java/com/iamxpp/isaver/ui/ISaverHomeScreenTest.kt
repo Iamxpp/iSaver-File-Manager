@@ -1,7 +1,10 @@
 package com.iamxpp.isaver.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -15,12 +18,16 @@ import androidx.compose.runtime.setValue
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.StorageLocation
+import com.iamxpp.isaver.transfer.OutputNameDraft
+import com.iamxpp.isaver.transfer.ShareSummary
+import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.HomeTab
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -148,4 +155,98 @@ class ISaverHomeScreenTest {
         compose.onNodeWithText("大小").performClick()
         compose.runOnIdle { assertEquals(currentSort.copy(field = SortField.SIZE), sort) }
     }
+
+    @Test
+    fun saveModeKeepsViewsLocationsTabsAndVisibleDefaultName() {
+        val path = RootPath.parse("/data/local/tmp/work").getOrThrow()
+        val custom = StorageLocation.Direct(
+            id = LocationId.of("custom.work"),
+            displayName = "工作资料",
+            path = path,
+            source = StorageLocation.Source.CUSTOM,
+        )
+        compose.setContent {
+            ISaverHomeScreen(
+                homeState = ISaverHomeUiState(),
+                locationState = LocationHomeUiState(
+                    loading = false,
+                    customLocations = listOf(
+                        CustomLocationState(custom, LocationAvailability.Available(true, true)),
+                    ),
+                ),
+                browserState = BrowserUiState(currentPath = RootPath.parse("/").getOrThrow()),
+                displayMode = DisplayMode.LIST,
+                transferState = choosing(canSave = false, targetDirectory = null),
+                onSelectTab = {},
+                onOpenLocation = { _, _ -> },
+                onAddCustomLocation = { _, _ -> },
+                onEditCustomLocation = { _, _, _ -> },
+                onRemoveCustomLocation = {},
+                onRetryLocations = {},
+                onEnterDirectory = {},
+                onBrowserBack = {},
+                onRetryBrowser = {},
+                onLoadMore = {},
+            )
+        }
+
+        compose.onNodeWithText("最近项目").assertIsDisplayed()
+        compose.onNode(hasText("视图") and hasClickAction()).assertIsSelected()
+        compose.onNodeWithText("浏览").assertIsDisplayed()
+        compose.onNodeWithContentDescription("列表项：工作资料").assertIsDisplayed()
+        compose.onNodeWithTag("inline-save-bar").assertIsDisplayed()
+        compose.onNodeWithTag("inline-save-stem").assertTextEquals("测试 报告")
+        compose.onNodeWithTag("inline-save-extension").assertTextEquals("pdf")
+        compose.onNodeWithTag("files-top-bar-save").assertIsNotEnabled()
+        compose.onNodeWithTag("files-top-bar-overflow").assertDoesNotExist()
+    }
+
+    @Test
+    fun realDirectoryEnablesSaveAndPlacesBarImmediatelyAboveTabs() {
+        val path = RootPath.parse("/data/local/tmp/work").getOrThrow()
+        compose.setContent {
+            ISaverHomeScreen(
+                homeState = ISaverHomeUiState(
+                    selectedTab = HomeTab.VIEWS,
+                    destination = HomeDestination.Browser(path, "工作资料", HomeTab.VIEWS),
+                ),
+                locationState = LocationHomeUiState(loading = false),
+                browserState = BrowserUiState(
+                    currentPath = path,
+                    rootTitle = "工作资料",
+                    title = "work",
+                    totalCount = 3,
+                ),
+                displayMode = DisplayMode.LIST,
+                transferState = choosing(canSave = true, targetDirectory = path),
+                onSelectTab = {},
+                onOpenLocation = { _, _ -> },
+                onAddCustomLocation = { _, _ -> },
+                onEditCustomLocation = { _, _, _ -> },
+                onRemoveCustomLocation = {},
+                onRetryLocations = {},
+                onEnterDirectory = {},
+                onBrowserBack = {},
+                onRetryBrowser = {},
+                onLoadMore = {},
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-save").assertIsEnabled()
+        val saveBar = compose.onNodeWithTag("inline-save-bar").fetchSemanticsNode().boundsInRoot
+        val tabs = compose.onNodeWithTag("files-bottom-bar").fetchSemanticsNode().boundsInRoot
+        assertEquals(saveBar.bottom, tabs.top, 1f)
+        assertTrue(saveBar.height < tabs.height * 1.5f)
+    }
+
+    private fun choosing(
+        canSave: Boolean,
+        targetDirectory: RootPath?,
+    ) = TransferUiState.Choosing(
+        share = ShareSummary("测试 报告.pdf", 37L, "application/pdf"),
+        outputName = OutputNameDraft("测试 报告", "pdf"),
+        cachedBytes = 37L,
+        targetDirectory = targetDirectory,
+        canSave = canSave,
+    )
 }
