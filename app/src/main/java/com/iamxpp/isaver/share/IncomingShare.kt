@@ -9,7 +9,7 @@ data class IncomingShare(
     val mimeType: String?,
 ) {
     override fun toString(): String =
-        "IncomingShare(uri=<redacted>, displayName=$displayName, sizeBytes=$sizeBytes, mimeType=$mimeType)"
+        "IncomingShare(uri=<redacted>, displayName=<redacted>, sizeBytes=$sizeBytes, mimeType=<redacted>)"
 }
 
 sealed interface ShareIntentParseResult {
@@ -26,5 +26,6 @@ enum class ShareIntentFailureReason {
     MISSING_STREAM,
     INVALID_SHARE,
     UNSUPPORTED_URI,
+    PROVIDER_TIMEOUT,
     SOURCE_UNREADABLE,
 }
