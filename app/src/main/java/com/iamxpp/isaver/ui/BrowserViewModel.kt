@@ -3,6 +3,7 @@ package com.iamxpp.isaver.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
@@ -16,6 +17,7 @@ import com.iamxpp.isaver.ui.files.SortSpec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +28,7 @@ class BrowserViewModel(
     private val rootFileSystem: RootFileSystem,
     private val ioDispatcher: CoroutineDispatcher,
     private val preferencesStore: BrowserPreferencesStore,
+    private val snapshotCache: DirectorySnapshotCache = DirectorySnapshotCache(),
     private val sorter: (List<DirectoryEntry>, SortSpec) -> List<DirectoryEntry> = FileEntrySorter::sort,
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
@@ -53,7 +56,6 @@ class BrowserViewModel(
                 if (sortChanged) refreshPresentation()
             }
         }
-        load(initialPath)
     }
 
     fun enterDirectory(entry: DirectoryEntry): Boolean {
@@ -155,63 +157,129 @@ class BrowserViewModel(
         val request = ++generation
         loadJob?.cancel()
         resetPresentationWindow()
+        val cached = snapshotCache.get(path)
+        val cachedSnapshot = cached?.snapshot
+        val requestedPresentationKey = DirectoryPresentationKey(
+            mutableState.value.sortSpec,
+            mutableState.value.searchQuery,
+        )
+        val cachedEntries = cached
+            ?.takeIf { it.presentationKey == requestedPresentationKey }
+            ?.presentedEntries
+            .orEmpty()
+        if (cached != null) presentedEntries = cachedEntries
         mutableState.value = BrowserUiState(
             currentPath = path,
             rootTitle = mutableState.value.rootTitle,
             title = displayTitle(path),
+            allEntries = cachedSnapshot?.entries.orEmpty(),
+            entries = cachedEntries.take(PAGE_SIZE),
+            totalCount = cachedEntries.size,
+            refreshing = true,
             canGoBack = stack.isNotEmpty(),
+            hasMore = cachedEntries.size > PAGE_SIZE,
+            canCreateDirectory = cachedSnapshot?.parentWritable == true,
             locationTarget = locationTarget,
             displayMode = mutableState.value.displayMode,
             sortSpec = mutableState.value.sortSpec,
             searchQuery = mutableState.value.searchQuery,
         )
+        val cachedPresentationJob = if (cachedSnapshot != null && cachedEntries.isEmpty()) {
+            refreshPresentation()
+        } else {
+            null
+        }
+        val loadingIndicatorJob = if (cachedSnapshot == null) {
+            viewModelScope.launch {
+                delay(LOADING_INDICATOR_DELAY_MILLIS)
+                if (request == generation) {
+                    mutableState.value = mutableState.value.copy(loading = true)
+                }
+            }
+        } else {
+            null
+        }
         loadJob = viewModelScope.launch {
             try {
-                val (result, canCreateDirectory) = withContext(ioDispatcher) {
-                    val listed = rootFileSystem.list(path)
-                    val writable = try {
-                        when (val stat = rootFileSystem.stat(path)) {
-                            is OperationResult.Failure -> false
-                            is OperationResult.Success -> stat.value.type == EntryType.DIRECTORY &&
-                                stat.value.writable &&
-                                !stat.value.symbolicLink
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        false
-                    }
-                    listed to writable
-                }
+                val result = withContext(ioDispatcher) { rootFileSystem.readDirectory(path) }
                 when (result) {
                     is OperationResult.Failure -> if (request == generation) {
-                        mutableState.value = mutableState.value.copy(
-                            loading = false,
-                            errorMessage = result.userMessage,
-                            canCreateDirectory = false,
-                        )
+                        cachedPresentationJob?.join()
+                        if (request == generation) {
+                            mutableState.value = if (cachedSnapshot == null) {
+                                mutableState.value.copy(
+                                    loading = false,
+                                    refreshing = false,
+                                    errorMessage = result.userMessage,
+                                    canCreateDirectory = false,
+                                )
+                            } else {
+                                mutableState.value.copy(loading = false, refreshing = false)
+                            }
+                        }
                     }
-                    is OperationResult.Success -> if (request == generation) {
-                        val allEntries = result.value
-                        resetPresentationWindow()
-                        mutableState.value = mutableState.value.copy(
-                            allEntries = allEntries,
-                            loading = false,
-                            canCreateDirectory = canCreateDirectory,
-                        )
-                        refreshPresentation()
-                    }
+                    is OperationResult.Success -> publishSnapshot(path, result.value, request)
                 }
             } catch (cancelled: CancellationException) {
                 if (request == generation) {
-                    mutableState.value = mutableState.value.copy(loading = false)
+                    mutableState.value = mutableState.value.copy(loading = false, refreshing = false)
                 }
                 throw cancelled
             } catch (_: Exception) {
                 if (request == generation) {
-                    mutableState.value = mutableState.value.copy(loading = false, errorMessage = "无法读取目录")
+                    cachedPresentationJob?.join()
+                    if (request == generation) {
+                        mutableState.value = if (cachedSnapshot == null) {
+                            mutableState.value.copy(
+                                loading = false,
+                                refreshing = false,
+                                errorMessage = "无法读取目录",
+                            )
+                        } else {
+                            mutableState.value.copy(loading = false, refreshing = false)
+                        }
+                    }
                 }
+            } finally {
+                loadingIndicatorJob?.cancel()
             }
+        }
+    }
+
+    private suspend fun publishSnapshot(
+        path: RootPath,
+        snapshot: DirectorySnapshot,
+        request: Long,
+    ) {
+        while (request == generation) {
+            val presentationState = mutableState.value
+            val sortSpec = presentationState.sortSpec
+            val searchQuery = presentationState.searchQuery
+            val derived = withContext(ioDispatcher) {
+                derivePresentation(snapshot.entries, searchQuery, sortSpec)
+            }
+            if (request != generation) return
+            val current = mutableState.value
+            if (current.sortSpec != sortSpec || current.searchQuery != searchQuery) continue
+
+            visibleCount = PAGE_SIZE
+            presentedEntries = derived
+            snapshotCache.put(
+                path,
+                snapshot,
+                derived,
+                DirectoryPresentationKey(sortSpec, searchQuery),
+            )
+            mutableState.value = current.copy(
+                allEntries = snapshot.entries,
+                entries = derived.take(visibleCount),
+                totalCount = derived.size,
+                loading = false,
+                refreshing = false,
+                canCreateDirectory = snapshot.parentWritable,
+                hasMore = visibleCount < derived.size,
+            )
+            return
         }
     }
 
@@ -244,17 +312,12 @@ class BrowserViewModel(
         }
     }
 
-    private fun refreshPresentation() {
+    private fun refreshPresentation(): Job {
         val current = mutableState.value
         presentationJob?.cancel()
-        presentationJob = viewModelScope.launch {
+        return viewModelScope.launch {
             val derived = withContext(ioDispatcher) {
-                sorter(
-                    current.allEntries.filter { entry ->
-                        current.searchQuery.isEmpty() || entry.name.contains(current.searchQuery, ignoreCase = true)
-                    },
-                    current.sortSpec,
-                )
+                derivePresentation(current.allEntries, current.searchQuery, current.sortSpec)
             }
             if (
                 mutableState.value.allEntries == current.allEntries &&
@@ -268,12 +331,24 @@ class BrowserViewModel(
                     hasMore = visibleCount < derived.size,
                 )
             }
-        }
+        }.also { presentationJob = it }
     }
+
+    private fun derivePresentation(
+        entries: List<DirectoryEntry>,
+        searchQuery: String,
+        sortSpec: SortSpec,
+    ): List<DirectoryEntry> = sorter(
+        entries.filter { entry ->
+            searchQuery.isEmpty() || entry.name.contains(searchQuery, ignoreCase = true)
+        },
+        sortSpec,
+    )
 
     internal companion object {
         const val INITIAL_PATH = "/storage/emulated/0"
         const val PAGE_SIZE = 200
+        const val LOADING_INDICATOR_DELAY_MILLIS = 120L
     }
 }
 

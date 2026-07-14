@@ -15,7 +15,8 @@ data class BrowserUiState(
     val allEntries: List<DirectoryEntry> = emptyList(),
     val entries: List<DirectoryEntry> = emptyList(),
     val totalCount: Int = 0,
-    val loading: Boolean = true,
+    val loading: Boolean = false,
+    val refreshing: Boolean = false,
     val errorMessage: String? = null,
     val canGoBack: Boolean = false,
     val hasMore: Boolean = false,
@@ -28,7 +29,7 @@ data class BrowserUiState(
     val searchQuery: String = "",
     val presentationError: String? = null,
 ) {
-    val empty: Boolean get() = !loading && errorMessage == null && totalCount == 0
+    val empty: Boolean get() = !loading && !refreshing && errorMessage == null && totalCount == 0
 }
 
 data class BrowserOperationError(

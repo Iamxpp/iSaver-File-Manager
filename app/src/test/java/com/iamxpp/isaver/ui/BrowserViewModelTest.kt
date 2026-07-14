@@ -2,6 +2,7 @@ package com.iamxpp.isaver.ui
 
 import com.iamxpp.isaver.data.local.BrowserPreferences
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
@@ -15,11 +16,14 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -27,6 +31,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.After
@@ -79,6 +84,7 @@ class BrowserViewModelTest {
             StandardTestDispatcher(testScheduler),
             preferences,
         )
+        vm.openInitial()
         advanceUntilIdle()
 
         preferences.emit(
@@ -106,6 +112,7 @@ class BrowserViewModelTest {
             StandardTestDispatcher(testScheduler),
             preferences,
         )
+        vm.openInitial()
         advanceUntilIdle()
         vm.loadMore()
         assertEquals(400, vm.state.value.entries.size)
@@ -197,6 +204,7 @@ class BrowserViewModelTest {
             StandardTestDispatcher(testScheduler),
             FakeBrowserPreferencesStore(BrowserPreferences()),
         )
+        vm.openInitial()
         advanceUntilIdle()
 
         vm.setSearchQuery("mAtCh")
@@ -223,6 +231,7 @@ class BrowserViewModelTest {
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
         )
+        vm.openInitial()
         advanceUntilIdle()
         vm.loadMore()
         assertEquals(400, vm.state.value.entries.size)
@@ -244,6 +253,7 @@ class BrowserViewModelTest {
             StandardTestDispatcher(testScheduler),
             preferences,
         )
+        vm.openInitial()
         testScheduler.runCurrent()
 
         preferences.emit(
@@ -268,6 +278,7 @@ class BrowserViewModelTest {
     @Test fun `opening browse root clears navigation and returns home from slash`() = runTest {
         val fs = FakeFileSystem { OperationResult.Success(emptyList()) }
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
         vm.enterDirectory(entry("child", EntryType.DIRECTORY, "/storage/emulated/0/child"))
         advanceUntilIdle()
@@ -317,6 +328,7 @@ class BrowserViewModelTest {
             }
         }
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
 
         vm.enterDirectory(entry("old", EntryType.DIRECTORY, "/storage/emulated/0/old"))
@@ -331,28 +343,491 @@ class BrowserViewModelTest {
         assertEquals("new", vm.state.value.title)
     }
 
-    @Test fun `init asynchronously loads storage root and exposes loading then success`() = runTest {
-        val gate = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
-        val fs = FakeFileSystem { gate.await() }
+    @Test fun `init does not prefetch storage before an explicit open`() = runTest {
+        val fs = FakeFileSystem { OperationResult.Success(emptyList()) }
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
-        assertTrue(vm.state.value.loading)
-        assertEquals("/storage/emulated/0", vm.state.value.currentPath.value)
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.loading)
+        assertTrue(fs.readDirectories.isEmpty())
+        assertTrue(fs.listed.isEmpty())
+    }
+
+    @Test fun `explicit open consumes entries and parent capabilities from one snapshot`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val child = entry("child", EntryType.FILE, "/data/local/tmp/child")
+        val fs = FakeFileSystem(
+            snapshotBlock = {
+                OperationResult.Success(snapshot(entries = listOf(child), writable = true))
+            },
+            statBlock = { error("snapshot parent metadata must replace stat") },
+            listBlock = { error("snapshot primitive must replace list") },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+
+        vm.openRoot(openedPath, "测试位置")
+        advanceUntilIdle()
+
+        assertEquals(listOf(openedPath.value), fs.readDirectories)
+        assertTrue(fs.listed.isEmpty())
+        assertEquals(listOf("child"), vm.state.value.entries.map { it.name })
+        assertTrue(vm.state.value.canCreateDirectory)
+    }
+
+    @Test fun `cache hit shows old snapshot immediately while refreshing in background`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val cachedEntry = entry("cached", EntryType.FILE, "/data/local/tmp/cached")
+        val freshEntry = entry("fresh", EntryType.FILE, "/data/local/tmp/fresh")
+        val freshSnapshot = snapshot(entries = listOf(freshEntry))
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, snapshot(entries = listOf(cachedEntry), writable = true))
+        }
+        val refresh = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val fs = FakeFileSystem(
+            snapshotBlock = { refresh.await() },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(
+            fs,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+
+        vm.openRoot(openedPath, "测试位置")
+
+        assertEquals(listOf("cached"), vm.state.value.allEntries.map { it.name })
+        assertEquals(listOf("cached"), vm.state.value.entries.map { it.name })
+        assertTrue(vm.state.value.refreshing)
+        assertFalse(vm.state.value.loading)
         testScheduler.runCurrent()
-        assertEquals(listOf("/storage/emulated/0"), fs.listed)
-        gate.complete(OperationResult.Success(listOf(entry("a", EntryType.FILE))))
+        assertEquals(listOf("cached"), vm.state.value.entries.map { it.name })
+        assertEquals(listOf(openedPath.value), fs.readDirectories)
+
+        refresh.complete(OperationResult.Success(freshSnapshot))
+        advanceUntilIdle()
+
+        assertEquals(listOf("fresh"), vm.state.value.entries.map { it.name })
+        assertFalse(vm.state.value.refreshing)
+        assertSame(freshSnapshot, cache.get(openedPath)?.snapshot)
+    }
+
+    @Test fun `cache hit keeps raw snapshot entries while showing its prepared presentation`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val alpha = entry("alpha", EntryType.FILE, "/data/local/tmp/alpha")
+        val beta = entry("beta", EntryType.FILE, "/data/local/tmp/beta")
+        val cachedSnapshot = snapshot(entries = listOf(beta, alpha))
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(
+                openedPath,
+                cachedSnapshot,
+                presentedEntries = listOf(alpha),
+                presentationKey = DirectoryPresentationKey(
+                    SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
+                    "alpha",
+                ),
+            )
+        }
+        val refresh = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                snapshotBlock = { refresh.await() },
+                listBlock = { error("unused") },
+            ),
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+        vm.setSearchQuery("alpha")
+        advanceUntilIdle()
+
+        vm.openRoot(openedPath, "测试位置")
+
+        assertEquals(listOf("beta", "alpha"), vm.state.value.allEntries.map { it.name })
+        assertEquals(listOf("alpha"), vm.state.value.entries.map { it.name })
+        refresh.complete(OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "test"))
+        advanceUntilIdle()
+        assertEquals(listOf("alpha"), vm.state.value.entries.map { it.name })
+        assertFalse(vm.state.value.refreshing)
+    }
+
+    @Test fun `query mismatch never synchronously shows rows from the cached presentation`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val alpha = entry("alpha", EntryType.FILE, "/data/local/tmp/alpha")
+        val beta = entry("beta", EntryType.FILE, "/data/local/tmp/beta")
+        val cachedSnapshot = snapshot(entries = listOf(alpha, beta))
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, cachedSnapshot, presentedEntries = listOf(alpha, beta))
+        }
+        val refresh = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                snapshotBlock = { refresh.await() },
+                listBlock = { error("unused") },
+            ),
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+        vm.setSearchQuery("alpha")
+
+        vm.openRoot(openedPath, "测试位置")
+
+        assertEquals("alpha", vm.state.value.searchQuery)
+        assertTrue(vm.state.value.entries.isEmpty())
+        assertTrue(vm.state.value.refreshing)
+        assertFalse(vm.state.value.empty)
+        refresh.complete(OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "test"))
+        advanceUntilIdle()
+        assertEquals(listOf("alpha"), vm.state.value.entries.map { it.name })
+        assertFalse(vm.state.value.refreshing)
+    }
+
+    @Test fun `sort mismatch never synchronously shows rows from the cached presentation`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val alpha = entry("alpha", EntryType.FILE, "/data/local/tmp/alpha")
+        val beta = entry("beta", EntryType.FILE, "/data/local/tmp/beta")
+        val cachedSnapshot = snapshot(entries = listOf(alpha, beta))
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, cachedSnapshot, presentedEntries = listOf(alpha, beta))
+        }
+        val refresh = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val descending = SortSpec(SortField.DISPLAY_NAME, SortDirection.DESCENDING)
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                snapshotBlock = { refresh.await() },
+                listBlock = { error("unused") },
+            ),
+            StandardTestDispatcher(testScheduler),
+            FakeBrowserPreferencesStore(BrowserPreferences(sortSpec = descending)),
+            snapshotCache = cache,
+        )
+        advanceUntilIdle()
+
+        vm.openRoot(openedPath, "测试位置")
+
+        assertEquals(descending, vm.state.value.sortSpec)
+        assertTrue(vm.state.value.entries.isEmpty())
+        assertTrue(vm.state.value.refreshing)
+        assertFalse(vm.state.value.empty)
+        refresh.complete(OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "test"))
+        advanceUntilIdle()
+        assertEquals(listOf("beta", "alpha"), vm.state.value.entries.map { it.name })
+        assertFalse(vm.state.value.refreshing)
+    }
+
+    @Test fun `live failure waits for mismatched cached presentation before ending refresh`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val alpha = entry("alpha", EntryType.FILE, "/data/local/tmp/alpha")
+        val beta = entry("beta", EntryType.FILE, "/data/local/tmp/beta")
+        val cachedSnapshot = snapshot(entries = listOf(alpha, beta))
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, cachedSnapshot, presentedEntries = listOf(alpha, beta))
+        }
+        val gatedDispatcher = GateNextDispatcher(StandardTestDispatcher(testScheduler))
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                snapshotBlock = {
+                    OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "test")
+                },
+                listBlock = { error("unused") },
+            ),
+            gatedDispatcher,
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+        vm.setSearchQuery("alpha")
+        advanceUntilIdle()
+        gatedDispatcher.gateNext()
+
+        vm.openRoot(openedPath, "测试位置")
+        testScheduler.runCurrent()
+
+        assertTrue(gatedDispatcher.hasGatedTask)
+        assertTrue(vm.state.value.entries.isEmpty())
+        assertTrue(vm.state.value.refreshing)
+        assertFalse(vm.state.value.empty)
+
+        gatedDispatcher.release()
+        advanceUntilIdle()
+
+        assertEquals(listOf("alpha"), vm.state.value.entries.map { it.name })
+        assertFalse(vm.state.value.refreshing)
+        assertFalse(vm.state.value.empty)
+    }
+
+    @Test fun `fresh refresh atomically replaces cached rows without an empty state`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val cachedEntry = entry("cached", EntryType.FILE, "/data/local/tmp/cached")
+        val freshEntry = entry("fresh", EntryType.FILE, "/data/local/tmp/fresh")
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, snapshot(entries = listOf(cachedEntry)))
+        }
+        val refresh = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val fs = FakeFileSystem(
+            snapshotBlock = { refresh.await() },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(
+            fs,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+        val observedStates = mutableListOf<BrowserUiState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.state.collect(observedStates::add)
+        }
+
+        vm.openRoot(openedPath, "测试位置")
+        testScheduler.runCurrent()
+        val refreshStartIndex = observedStates.size
+
+        refresh.complete(OperationResult.Success(snapshot(entries = listOf(freshEntry))))
+        advanceUntilIdle()
+
+        val refreshStates = observedStates.drop(refreshStartIndex)
+        val firstFreshIndex = refreshStates.indexOfFirst { state ->
+            state.entries.map { it.name } == listOf("fresh")
+        }
+        assertTrue(firstFreshIndex >= 0)
+        assertTrue(
+            refreshStates.take(firstFreshIndex).all { state ->
+                state.entries.map { it.name } == listOf("cached")
+            },
+        )
+        assertTrue(refreshStates.all { state -> !state.empty && state.errorMessage == null })
+    }
+
+    @Test fun `late cached refresh cannot overwrite a newer navigation generation`() = runTest {
+        val oldPath = RootPath.parse("/data/local/tmp/old").getOrThrow()
+        val newPath = RootPath.parse("/data/local/tmp/new").getOrThrow()
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(
+                oldPath,
+                snapshot(listOf(entry("cached", EntryType.FILE, "/data/local/tmp/old/cached"))),
+            )
+        }
+        val oldRefresh = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val newLoad = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val fs = FakeFileSystem(
+            snapshotBlock = { path ->
+                when (path) {
+                    oldPath -> withContext(NonCancellable) { oldRefresh.await() }
+                    newPath -> newLoad.await()
+                    else -> error("unexpected path")
+                }
+            },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(
+            fs,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+
+        vm.openRoot(oldPath, "旧目录")
+        testScheduler.runCurrent()
+        assertEquals(listOf("cached"), vm.state.value.entries.map { it.name })
+
+        vm.openRoot(newPath, "新目录")
+        testScheduler.runCurrent()
+        newLoad.complete(
+            OperationResult.Success(
+                snapshot(listOf(entry("fresh", EntryType.FILE, "/data/local/tmp/new/fresh"))),
+            ),
+        )
+        advanceUntilIdle()
+        oldRefresh.complete(
+            OperationResult.Success(
+                snapshot(listOf(entry("stale", EntryType.FILE, "/data/local/tmp/old/stale"))),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(newPath, vm.state.value.currentPath)
+        assertEquals(listOf("fresh"), vm.state.value.entries.map { it.name })
+        assertEquals("新目录", vm.state.value.title)
+    }
+
+    @Test fun `refresh failure keeps cached rows without replacing them with an error`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val cachedEntry = entry("cached", EntryType.FILE, "/data/local/tmp/cached")
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, snapshot(entries = listOf(cachedEntry), writable = true))
+        }
+        val fs = FakeFileSystem(
+            snapshotBlock = {
+                OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "hidden")
+            },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(
+            fs,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+
+        vm.openRoot(openedPath, "测试位置")
+        advanceUntilIdle()
+
+        assertEquals(listOf("cached"), vm.state.value.entries.map { it.name })
+        assertNull(vm.state.value.errorMessage)
+        assertFalse(vm.state.value.refreshing)
+        assertTrue(vm.state.value.canCreateDirectory)
+    }
+
+    @Test fun `refresh exception also keeps cached rows without exposing details`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val cachedEntry = entry("cached", EntryType.FILE, "/data/local/tmp/cached")
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, snapshot(entries = listOf(cachedEntry), writable = false))
+        }
+        val fs = FakeFileSystem(
+            snapshotBlock = { error("sensitive refresh detail") },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(
+            fs,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+
+        vm.openRoot(openedPath, "测试位置")
+        advanceUntilIdle()
+
+        assertEquals(listOf("cached"), vm.state.value.entries.map { it.name })
+        assertNull(vm.state.value.errorMessage)
+        assertFalse(vm.state.value.refreshing)
+    }
+
+    @Test fun `cached writable capability remains a hint and filesystem still decides writes`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val cachedEntry = entry("cached", EntryType.FILE, "/data/local/tmp/cached")
+        val cache = DirectorySnapshotCache(monotonicNowMillis = { 0L }).apply {
+            putForTest(openedPath, snapshot(entries = listOf(cachedEntry), writable = true))
+        }
+        var createCalls = 0
+        val fs = FakeFileSystem(
+            snapshotBlock = {
+                OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "refresh failed")
+            },
+            createBlock = { _, _ ->
+                createCalls += 1
+                OperationResult.Failure(ErrorCode.NOT_WRITABLE, "目录不可写", "recheck denied")
+            },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(
+            fs,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = cache,
+        )
+        vm.openRoot(openedPath, "测试位置")
+        advanceUntilIdle()
+        assertTrue(vm.state.value.canCreateDirectory)
+
+        vm.createDirectory("folder")
+        advanceUntilIdle()
+
+        assertEquals(1, createCalls)
+        assertEquals(ErrorCode.NOT_WRITABLE, vm.state.value.createDirectoryError?.code)
+        assertEquals(listOf("cached"), vm.state.value.entries.map { it.name })
+    }
+
+    @Test fun `uncached load shows blocking spinner only after one hundred twenty milliseconds`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val result = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val fs = FakeFileSystem(
+            snapshotBlock = { result.await() },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+
+        vm.openRoot(openedPath, "测试位置")
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.loading)
+
+        advanceTimeBy(119L)
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.loading)
+
+        advanceTimeBy(1L)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.loading)
+
+        result.complete(OperationResult.Success(snapshot(emptyList())))
         advanceUntilIdle()
         assertFalse(vm.state.value.loading)
-        assertEquals(listOf("a"), vm.state.value.entries.map { it.name })
+    }
+
+    @Test fun `uncached loading grace period does not flash the empty state`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val result = CompletableDeferred<OperationResult<DirectorySnapshot>>()
+        val fs = FakeFileSystem(
+            snapshotBlock = { result.await() },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+
+        vm.openRoot(openedPath, "测试位置")
+        testScheduler.runCurrent()
+
+        assertFalse(vm.state.value.loading)
+        assertTrue(vm.state.value.refreshing)
+        assertFalse(vm.state.value.empty)
+
+        result.complete(OperationResult.Success(snapshot(emptyList())))
+        advanceUntilIdle()
+        assertTrue(vm.state.value.empty)
+    }
+
+    @Test fun `uncached load completing before one hundred twenty milliseconds never shows spinner`() = runTest {
+        val openedPath = RootPath.parse("/data/local/tmp").getOrThrow()
+        val loadedEntry = entry("fast", EntryType.FILE, "/data/local/tmp/fast")
+        val fs = FakeFileSystem(
+            snapshotBlock = {
+                delay(119L)
+                OperationResult.Success(snapshot(listOf(loadedEntry)))
+            },
+            listBlock = { error("unused") },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+
+        vm.openRoot(openedPath, "测试位置")
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.loading)
+
+        advanceTimeBy(119L)
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.loading)
+        assertEquals(listOf("fast"), vm.state.value.entries.map { it.name })
+
+        advanceTimeBy(1L)
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.loading)
     }
 
     @Test fun `empty and failure states retain current path and user message`() = runTest {
+        var nowMillis = 0L
         val results = ArrayDeque<OperationResult<List<DirectoryEntry>>>().apply {
             add(OperationResult.Success(emptyList()))
             add(OperationResult.Failure(ErrorCode.NOT_READABLE, "目录不可读", "hidden"))
         }
-        val vm = BrowserViewModel(FakeFileSystem { results.removeFirst() }, StandardTestDispatcher(testScheduler), defaultPreferences())
+        val vm = BrowserViewModel(
+            FakeFileSystem { results.removeFirst() },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            snapshotCache = DirectorySnapshotCache(monotonicNowMillis = { nowMillis }),
+        )
+        vm.openInitial()
         advanceUntilIdle()
         assertTrue(vm.state.value.empty)
+        nowMillis = 2_000L
         vm.retry(); advanceUntilIdle()
         assertEquals("目录不可读", vm.state.value.errorMessage)
         assertEquals("/storage/emulated/0", vm.state.value.currentPath.value)
@@ -361,12 +836,14 @@ class BrowserViewModelTest {
     @Test fun `sorts directories first with case insensitive natural numeric order`() = runTest {
         val input = listOf(entry("file10", EntryType.FILE), entry("Dir10", EntryType.DIRECTORY), entry("file2", EntryType.FILE), entry("dir2", EntryType.DIRECTORY), entry("Alpha", EntryType.FILE), entry("alpha", EntryType.FILE))
         val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(input) }, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
         assertEquals(listOf("dir2", "Dir10", "Alpha", "alpha", "file2", "file10"), vm.state.value.entries.map { it.name })
     }
 
     @Test fun `enter accepts only directories and back uses navigation stack`() = runTest {
         val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
         assertFalse(vm.enterDirectory(entry("file", EntryType.FILE)))
         assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
@@ -382,6 +859,7 @@ class BrowserViewModelTest {
     @Test fun `openRoot clears old navigation and loads requested location`() = runTest {
         val fs = FakeFileSystem { OperationResult.Success(emptyList()) }
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
         vm.enterDirectory(entry("child", EntryType.DIRECTORY, "/storage/emulated/0/child"))
         advanceUntilIdle()
@@ -393,7 +871,7 @@ class BrowserViewModelTest {
         assertEquals("测试位置", vm.state.value.rootTitle)
         assertFalse(vm.state.value.canGoBack)
         assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
-        assertEquals("/data/local/tmp", fs.listed.last())
+        assertEquals("/data/local/tmp", fs.readDirectories.last())
     }
 
     @Test fun `back at an opened location root requests the locations home`() = runTest {
@@ -420,6 +898,7 @@ class BrowserViewModelTest {
             },
         )
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
 
         vm.createDirectory("中文 folder")
@@ -437,6 +916,7 @@ class BrowserViewModelTest {
             listBlock = { listCount += 1; OperationResult.Success(emptyList()) },
         )
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
 
         vm.createDirectory("existing")
@@ -451,11 +931,12 @@ class BrowserViewModelTest {
     @Test fun `read only current directory disables and rejects folder creation`() = runTest {
         var createCalls = 0
         val fs = FakeFileSystem(
-            statBlock = { path -> OperationResult.Success(entry("readonly", EntryType.DIRECTORY, path.value, writable = false)) },
+            snapshotBlock = { OperationResult.Success(snapshot(emptyList(), writable = false)) },
             createBlock = { _, _ -> createCalls += 1; error("must not create") },
             listBlock = { OperationResult.Success(emptyList()) },
         )
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
 
         assertFalse(vm.state.value.canCreateDirectory)
@@ -466,16 +947,15 @@ class BrowserViewModelTest {
         assertEquals(ErrorCode.NOT_WRITABLE, vm.state.value.createDirectoryError?.code)
     }
 
-    @Test fun `writable directory symlink does not allow folder creation`() = runTest {
+    @Test fun `symlink directory listing failure does not allow folder creation`() = runTest {
         val fs = FakeFileSystem(
-            statBlock = { path ->
-                OperationResult.Success(
-                    entry("linked", EntryType.DIRECTORY, path.value, writable = true, symbolicLink = true),
-                )
+            snapshotBlock = {
+                OperationResult.Failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "symlink refused")
             },
             listBlock = { OperationResult.Success(emptyList()) },
         )
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
 
         assertFalse(vm.state.value.canCreateDirectory)
@@ -488,6 +968,7 @@ class BrowserViewModelTest {
             listBlock = { OperationResult.Success(emptyList()) },
         )
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
 
         vm.createDirectory("..")
@@ -503,6 +984,7 @@ class BrowserViewModelTest {
             listBlock = { OperationResult.Success(emptyList()) },
         )
         val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
 
         vm.createDirectory("folder")
@@ -517,7 +999,8 @@ class BrowserViewModelTest {
         val old = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fresh = CompletableDeferred<OperationResult<List<DirectoryEntry>>>()
         val fs = FakeFileSystem { path -> if (path.value.endsWith("old")) withContext(NonCancellable) { old.await() } else if (path.value.endsWith("new")) fresh.await() else OperationResult.Success(emptyList()) }
-        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences()); advanceUntilIdle()
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial(); advanceUntilIdle()
         vm.enterDirectory(entry("old", EntryType.DIRECTORY, "/storage/emulated/0/old")); testScheduler.runCurrent()
         vm.enterDirectory(entry("new", EntryType.DIRECTORY, "/storage/emulated/0/new")); testScheduler.runCurrent()
         fresh.complete(OperationResult.Success(listOf(entry("fresh", EntryType.FILE)))); advanceUntilIdle()
@@ -528,6 +1011,7 @@ class BrowserViewModelTest {
 
     @Test fun `cancellation does not become an error`() = runTest {
         val vm = BrowserViewModel(FakeFileSystem { throw CancellationException("cancel") }, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
         advanceUntilIdle()
         assertNull(vm.state.value.errorMessage)
         assertFalse(vm.state.value.loading)
@@ -546,6 +1030,7 @@ class BrowserViewModelTest {
                 com.iamxpp.isaver.ui.files.FileEntrySorter.sort(entries, spec)
             },
         )
+        vm.openInitial()
         advanceUntilIdle()
         assertTrue(sortedWithMarker)
         assertEquals(listOf("a", "b"), vm.state.value.entries.map { it.name })
@@ -553,7 +1038,8 @@ class BrowserViewModelTest {
 
     @Test fun `large results remain complete and reveal 200 entries per page`() = runTest {
         val all = (1..450).map { entry("file$it", EntryType.FILE) }
-        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(all) }, StandardTestDispatcher(testScheduler), defaultPreferences()); advanceUntilIdle()
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(all) }, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial(); advanceUntilIdle()
         assertEquals(450, vm.state.value.totalCount); assertEquals(200, vm.state.value.entries.size); assertTrue(vm.state.value.hasMore)
         vm.loadMore(); assertEquals(400, vm.state.value.entries.size)
         vm.loadMore(); assertEquals(450, vm.state.value.entries.size); assertFalse(vm.state.value.hasMore)
@@ -565,9 +1051,27 @@ class BrowserViewModelTest {
             OperationResult.Success(DirectoryEntry(path, "current", EntryType.DIRECTORY, 0, 0, true, true, false))
         },
         val createBlock: suspend (RootPath, FolderName) -> OperationResult<DirectoryEntry> = { _, _ -> error("unused") },
+        val snapshotBlock: (suspend (RootPath) -> OperationResult<DirectorySnapshot>)? = null,
         val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>,
     ) : RootFileSystem {
         val listed = mutableListOf<String>()
+        val readDirectories = mutableListOf<String>()
+        override suspend fun readDirectory(path: RootPath): OperationResult<DirectorySnapshot> {
+            readDirectories += path.value
+            snapshotBlock?.let { return it(path) }
+            return when (val result = listBlock(path)) {
+                is OperationResult.Failure -> result
+                is OperationResult.Success -> OperationResult.Success(
+                    DirectorySnapshot(
+                        parentDevice = 1L,
+                        parentInode = 2L,
+                        parentReadable = true,
+                        parentWritable = true,
+                        entries = result.value,
+                    ),
+                )
+            }
+        }
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> { listed += path.value; return listBlock(path) }
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = statBlock(path)
         override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = error("unused")
@@ -593,6 +1097,22 @@ class BrowserViewModelTest {
 
     private fun defaultPreferences() = FakeBrowserPreferencesStore(BrowserPreferences())
 
+    private fun DirectorySnapshotCache.putForTest(
+        path: RootPath,
+        snapshot: DirectorySnapshot,
+        presentedEntries: List<DirectoryEntry> = snapshot.entries,
+        presentationKey: DirectoryPresentationKey = DirectoryPresentationKey(
+            SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
+            "",
+        ),
+    ) {
+        put(path, snapshot, presentedEntries, presentationKey)
+    }
+
+    private fun BrowserViewModel.openInitial() {
+        openRoot(RootPath.parse(BrowserViewModel.INITIAL_PATH).getOrThrow(), "内部存储")
+    }
+
     private class MarkerDispatcher(
         private val delegate: CoroutineDispatcher,
         private val marker: ThreadLocal<Boolean>,
@@ -600,6 +1120,35 @@ class BrowserViewModelTest {
         override fun dispatch(context: CoroutineContext, block: Runnable) = delegate.dispatch(context) {
             marker.set(true)
             try { block.run() } finally { marker.remove() }
+        }
+    }
+
+    private class GateNextDispatcher(
+        private val delegate: CoroutineDispatcher,
+    ) : CoroutineDispatcher() {
+        private var armed = false
+        private var gatedTask: Pair<CoroutineContext, Runnable>? = null
+
+        val hasGatedTask: Boolean get() = gatedTask != null
+
+        fun gateNext() {
+            check(!armed && gatedTask == null)
+            armed = true
+        }
+
+        fun release() {
+            val (context, block) = checkNotNull(gatedTask)
+            gatedTask = null
+            delegate.dispatch(context, block)
+        }
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            if (armed) {
+                armed = false
+                gatedTask = context to block
+            } else {
+                delegate.dispatch(context, block)
+            }
         }
     }
 
@@ -611,4 +1160,15 @@ class BrowserViewModelTest {
         writable: Boolean = false,
         symbolicLink: Boolean = false,
     ) = DirectoryEntry(RootPath.parse(path).getOrThrow(), name, type, size, 2, true, writable, symbolicLink)
+
+    private fun snapshot(
+        entries: List<DirectoryEntry>,
+        writable: Boolean = false,
+    ) = DirectorySnapshot(
+        parentDevice = 1L,
+        parentInode = 2L,
+        parentReadable = true,
+        parentWritable = writable,
+        entries = entries,
+    )
 }
