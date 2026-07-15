@@ -24,6 +24,7 @@ import com.iamxpp.isaver.recent.RecentRepository
 import com.iamxpp.isaver.recent.RecentItemType
 import com.iamxpp.isaver.share.ShareIntentParser
 import com.iamxpp.isaver.transfer.IncomingFileCache
+import com.iamxpp.isaver.transfer.IncomingStreamRegistry
 import com.iamxpp.isaver.transfer.RootFileTransferRepository
 import com.iamxpp.isaver.transfer.TargetNameResolver
 import com.iamxpp.isaver.transfer.TransferDependencies
@@ -80,6 +81,12 @@ class ISaverApplication : Application() {
     internal val shareIntentParser: ShareIntentParser by lazy { ShareIntentParser(this) }
     internal val incomingFileCache: IncomingFileCache by lazy {
         IncomingFileCache(contentResolver, cacheDir, Dispatchers.IO)
+    }
+    internal val incomingStreamRegistry: IncomingStreamRegistry by lazy {
+        IncomingStreamRegistry(
+            authority = "$packageName.incoming-stream",
+            validate = incomingFileCache::validateNow,
+        )
     }
     internal val transferRepository: RootFileTransferRepository by lazy {
         RootFileTransferRepository(

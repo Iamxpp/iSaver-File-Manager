@@ -26,6 +26,7 @@ class ISaverApplicationTest {
         assertSame(application.browserPreferencesStore, application.browserPreferencesStore)
         assertSame(application.shareIntentParser, application.shareIntentParser)
         assertSame(application.incomingFileCache, application.incomingFileCache)
+        assertSame(application.incomingStreamRegistry, application.incomingStreamRegistry)
         assertSame(application.transferRepository, application.transferRepository)
         assertSame(application.transferDependencies, application.transferDependencies)
     }

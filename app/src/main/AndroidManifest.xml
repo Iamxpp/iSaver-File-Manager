@@ -6,6 +6,11 @@
         android:label="iSaver"
         android:supportsRtl="true"
         android:theme="@style/Theme.ISaver">
+        <provider
+            android:name=".transfer.IncomingStreamProvider"
+            android:authorities="${applicationId}.incoming-stream"
+            android:exported="true"
+            android:grantUriPermissions="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
