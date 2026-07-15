@@ -115,22 +115,6 @@ class LibsuRootFileSystem internal constructor(
         return finalChild
     }
 
-    override suspend fun transferFromAppCache(
-        source:AppCachePath,
-        targetDirectory:RootPath,
-        finalName:EntryName,
-        expectedSizeBytes:Long,
-    ):OperationResult<DirectoryEntry> = transfer(
-        targetDirectory = targetDirectory,
-        finalName = finalName,
-        expectedSizeBytes = expectedSizeBytes,
-    ) { directory, stage ->
-        transferHelper.copyPublish(
-            directory.original.value,directory.canonical.value,stage,finalName.value,
-            directory.identity,source,expectedSizeBytes,timeoutMillis,
-        )
-    }
-
     override suspend fun transferFromStream(
         source: RootTransferSource,
         targetDirectory: RootPath,

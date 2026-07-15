@@ -1,6 +1,7 @@
 package com.iamxpp.isaver.transfer
 
 import com.iamxpp.isaver.data.root.RootFileSystem
+import com.iamxpp.isaver.data.root.RootTransferSource
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.ErrorCode
@@ -22,6 +23,8 @@ sealed interface TransferState {
 class RootFileTransferRepository(
     private val fileSystem: RootFileSystem,
     private val nameResolver: TargetNameResolver,
+    private val issueSource: (CachedIncomingFile) -> OperationResult<RootTransferSource>,
+    private val revokeSource: (RootTransferSource) -> Unit,
     private val cleanupCache: suspend (CachedIncomingFile) -> Boolean,
 ) {
     fun transfer(
@@ -39,36 +42,46 @@ class RootFileTransferRepository(
                     emit(TransferState.Failure(ErrorCode.COMMAND_FAILED, safeNameFailure(error)))
                     return@flow
                 }
-                emit(TransferState.Publishing(candidate, attempt))
-                rootWriteStarted = true
-                when (
-                    val result = withContext(NonCancellable) {
-                        runCatching {
-                            fileSystem.transferFromAppCache(
-                                cached.appCachePath,
-                                targetDirectory,
-                                candidate,
-                                cached.sizeBytes,
-                            )
-                        }
-                    }.getOrThrow()
-                ) {
-                    is OperationResult.Success -> {
-                        emit(TransferState.Success(result.value, candidate, cleanupWarning(cached)))
-                        return@flow
-                    }
+                val source = when (val issued = issueSource(cached)) {
+                    is OperationResult.Success -> issued.value
                     is OperationResult.Failure -> {
-                        if (result.code == ErrorCode.ALREADY_EXISTS) {
-                            if (!mayContinueAfterCollision()) {
-                                emit(TransferState.Failure(ErrorCode.CANCELLED, safeFailureMessage(ErrorCode.CANCELLED)))
-                                return@flow
-                            }
-                            attempt++
-                            continue
-                        }
-                        emit(TransferState.Failure(result.code, safeFailureMessage(result.code)))
+                        emit(TransferState.Failure(issued.code, safeFailureMessage(issued.code)))
                         return@flow
                     }
+                }
+                try {
+                    emit(TransferState.Publishing(candidate, attempt))
+                    rootWriteStarted = true
+                    when (
+                        val result = withContext(NonCancellable) {
+                            runCatching {
+                                fileSystem.transferFromStream(
+                                    source,
+                                    targetDirectory,
+                                    candidate,
+                                )
+                            }
+                        }.getOrThrow()
+                    ) {
+                        is OperationResult.Success -> {
+                            emit(TransferState.Success(result.value, candidate, cleanupWarning(cached)))
+                            return@flow
+                        }
+                        is OperationResult.Failure -> {
+                            if (result.code == ErrorCode.ALREADY_EXISTS) {
+                                if (!mayContinueAfterCollision()) {
+                                    emit(TransferState.Failure(ErrorCode.CANCELLED, safeFailureMessage(ErrorCode.CANCELLED)))
+                                    return@flow
+                                }
+                                attempt++
+                                continue
+                            }
+                            emit(TransferState.Failure(result.code, safeFailureMessage(result.code)))
+                            return@flow
+                        }
+                    }
+                } finally {
+                    revokeSource(source)
                 }
             }
         } catch (cancelled: CancellationException) {

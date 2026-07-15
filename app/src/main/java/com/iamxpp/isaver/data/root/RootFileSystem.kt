@@ -26,13 +26,6 @@ interface RootFileSystem {
      * the original cancellation; they do not clean up or claim a definite outcome.
      */
     suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>
-    suspend fun transferFromAppCache(
-        source:AppCachePath,
-        targetDirectory:RootPath,
-        finalName:EntryName,
-        expectedSizeBytes:Long,
-    ):OperationResult<DirectoryEntry> = unsupportedTransfer()
-
     suspend fun transferFromStream(
         source: RootTransferSource,
         targetDirectory: RootPath,

@@ -13,20 +13,6 @@ internal class RootTransferHelper(private val executable:String){
         stage:TransferStage,
         final:String,
         parentId:RootFileIdentity,
-        source:AppCachePath,
-        size:Long,
-        timeoutMillis:Long,
-    )=timeoutCommand(
-        timeoutDuration(timeoutMillis),"copy-publish",original,canonical,stage.name,final,source.value,
-        parentId.device,parentId.inode,stage.identity.device,stage.identity.inode,
-        source.device,source.inode,size,
-    )
-    fun copyPublish(
-        original:String,
-        canonical:String,
-        stage:TransferStage,
-        final:String,
-        parentId:RootFileIdentity,
         source:RootTransferSource,
         timeoutMillis:Long,
     ):String{

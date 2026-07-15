@@ -92,6 +92,19 @@ class ISaverApplication : Application() {
         RootFileTransferRepository(
             fileSystem = rootFileSystem,
             nameResolver = TargetNameResolver(),
+            issueSource = { cached ->
+                incomingStreamRegistry.issue(cached).fold(
+                    onSuccess = { OperationResult.Success(it) },
+                    onFailure = {
+                        OperationResult.Failure(
+                            code = ErrorCode.SOURCE_UNREADABLE,
+                            userMessage = "无法读取分享文件",
+                            technicalMessage = "Incoming stream capability could not be issued",
+                        )
+                    },
+                )
+            },
+            revokeSource = incomingStreamRegistry::revoke,
             cleanupCache = incomingFileCache::cleanup,
         )
     }
