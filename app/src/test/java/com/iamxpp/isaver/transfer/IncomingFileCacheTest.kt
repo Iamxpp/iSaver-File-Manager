@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.OsConstants
 import androidx.test.core.app.ApplicationProvider
+import com.iamxpp.isaver.data.root.AppCachePath
 import com.iamxpp.isaver.share.IncomingShare
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -126,12 +127,23 @@ class IncomingFileCacheTest {
         val cached = (cache.cache(share(3)) {} as IncomingFileCacheResult.Success).file
 
         assertTrue(cache.validate(cached))
+        assertTrue(cache.validateNow(cached))
 
         cached.file.appendBytes(byteArrayOf(4))
         assertFalse(cache.validate(cached))
+        assertFalse(cache.validateNow(cached))
+
+        val replacement = (cache.cache(share(3)) {} as IncomingFileCacheResult.Success).file
+        val staleIdentity = AppCachePath.fromIncomingCacheFile(context.cacheDir, replacement.file) {
+            replacement.appCachePath.device + 1L to replacement.appCachePath.inode
+        }.getOrThrow()
+        val replaced = replacement.copy(appCachePath = staleIdentity)
+        assertFalse(cache.validate(replaced))
+        assertFalse(cache.validateNow(replaced))
 
         cached.file.delete()
         assertFalse(cache.validate(cached))
+        assertFalse(cache.validateNow(cached))
     }
 
     @Test fun `orphan cleanup removes only expired unowned UUID cache files`() = runTest {

@@ -88,28 +88,32 @@ class IncomingFileCache internal constructor(
         !candidate.exists() || candidate.delete()
     }
 
-    suspend fun validate(cached: CachedIncomingFile): Boolean = withContext(ioDispatcher) {
+    internal fun validateNow(cached: CachedIncomingFile): Boolean {
         val candidate = cached.file
         val incoming = try {
             incomingDir.canonicalFile
         } catch (_: IOException) {
-            return@withContext false
+            return false
         }
         val canonical = try {
             candidate.canonicalFile
         } catch (_: IOException) {
-            return@withContext false
+            return false
         }
-        if (canonical.parentFile != incoming || !candidate.exists()) return@withContext false
+        if (canonical.parentFile != incoming || !candidate.exists()) return false
         val identity = try {
             Os.lstat(candidate.path)
         } catch (_: Exception) {
-            return@withContext false
+            return false
         }
-        OsConstants.S_ISREG(identity.st_mode) &&
+        return OsConstants.S_ISREG(identity.st_mode) &&
             identity.st_dev == cached.appCachePath.device &&
             identity.st_ino == cached.appCachePath.inode &&
             identity.st_size == cached.sizeBytes
+    }
+
+    suspend fun validate(cached: CachedIncomingFile): Boolean = withContext(ioDispatcher) {
+        validateNow(cached)
     }
 
     suspend fun cleanupOrphans(
