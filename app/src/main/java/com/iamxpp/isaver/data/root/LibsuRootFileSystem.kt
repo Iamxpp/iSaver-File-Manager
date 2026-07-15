@@ -120,6 +120,37 @@ class LibsuRootFileSystem internal constructor(
         targetDirectory:RootPath,
         finalName:EntryName,
         expectedSizeBytes:Long,
+    ):OperationResult<DirectoryEntry> = transfer(
+        targetDirectory = targetDirectory,
+        finalName = finalName,
+        expectedSizeBytes = expectedSizeBytes,
+    ) { directory, stage ->
+        transferHelper.copyPublish(
+            directory.original.value,directory.canonical.value,stage,finalName.value,
+            directory.identity,source,expectedSizeBytes,timeoutMillis,
+        )
+    }
+
+    override suspend fun transferFromStream(
+        source: RootTransferSource,
+        targetDirectory: RootPath,
+        finalName: EntryName,
+    ): OperationResult<DirectoryEntry> = transfer(
+        targetDirectory = targetDirectory,
+        finalName = finalName,
+        expectedSizeBytes = source.expectedSizeBytes,
+    ) { directory, stage ->
+        transferHelper.copyPublish(
+            directory.original.value,directory.canonical.value,stage,finalName.value,
+            directory.identity,source,timeoutMillis,
+        )
+    }
+
+    private suspend fun transfer(
+        targetDirectory: RootPath,
+        finalName: EntryName,
+        expectedSizeBytes: Long,
+        copyCommand: (PreparedTransferDirectory, TransferStage) -> String,
     ):OperationResult<DirectoryEntry>{
         if(expectedSizeBytes<0)return failure(ErrorCode.SOURCE_UNREADABLE,"无法读取来源文件","Negative source size")
         val prepared=prepareWritableDirectory(targetDirectory)
@@ -138,10 +169,7 @@ class LibsuRootFileSystem internal constructor(
             throw cancelled
         }
 
-        val command=transferHelper.copyPublish(
-            directory.original.value,directory.canonical.value,stage,finalName.value,
-            directory.identity,source,expectedSizeBytes,timeoutMillis,
-        )
+        val command=copyCommand(directory,stage)
         val callerJob=currentCoroutineContext()[Job]
         val dispatch=awaitTransferExecution(command,callerJob)
         if(!dispatch.dispatched){

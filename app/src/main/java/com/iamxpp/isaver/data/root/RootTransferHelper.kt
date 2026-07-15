@@ -21,6 +21,25 @@ internal class RootTransferHelper(private val executable:String){
         parentId.device,parentId.inode,stage.identity.device,stage.identity.inode,
         source.device,source.inode,size,
     )
+    fun copyPublish(
+        original:String,
+        canonical:String,
+        stage:TransferStage,
+        final:String,
+        parentId:RootFileIdentity,
+        source:RootTransferSource,
+        timeoutMillis:Long,
+    ):String{
+        val contentCommand=listOf(
+            "/system/bin/content","read","--uri",source.contentUri,
+        ).joinToString(" "){RootCommandCodec.quote(it)}
+        val publishCommand=timeoutCommand(
+            timeoutDuration(timeoutMillis),"copy-publish-stdin",original,canonical,stage.name,final,
+            parentId.device,parentId.inode,stage.identity.device,stage.identity.inode,
+            source.expectedSizeBytes,
+        )
+        return "set -o pipefail\n$contentCommand | $publishCommand"
+    }
     fun removeStage(original:String,canonical:String,stage:TransferStage,parentId:RootFileIdentity)=command(
         "remove-stage",original,canonical,stage.name,parentId.device,parentId.inode,
         stage.identity.device,stage.identity.inode,

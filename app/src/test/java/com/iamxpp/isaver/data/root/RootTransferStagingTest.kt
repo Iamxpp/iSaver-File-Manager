@@ -26,16 +26,15 @@ class RootTransferStagingTest {
         val runner = StagingRunner()
         val fileSystem = fileSystem(runner)
 
-        val result = fileSystem.transferFromAppCache(
+        val result = fileSystem.transferFromStream(
             source = source(),
             targetDirectory = path("/target"),
             finalName = name("报告 final.txt"),
-            expectedSizeBytes = 4,
         )
 
         assertTrue(result.toString(), result is OperationResult.Success<*>)
-        assertEquals(listOf("prepare-stage", "copy-publish"), runner.helperCommands())
-        val copy = runner.commands.single { it.contains("'copy-publish'") }
+        assertEquals(listOf("prepare-stage", "copy-publish-stdin"), runner.helperCommands())
+        val copy = runner.commands.single { it.contains("'copy-publish-stdin'") }
         assertTrue(copy.contains("'/target' '/target'"))
         assertTrue(copy.contains("'.isaver-stage-123e4567-e89b-12d3-a456-426614174000'"))
         assertTrue(copy.contains("'报告 final.txt'"))
@@ -47,7 +46,7 @@ class RootTransferStagingTest {
         listOf(49 to ErrorCode.ALREADY_EXISTS, 50 to ErrorCode.NO_SPACE).forEach { (exit, expected) ->
             val runner = StagingRunner(copyExit = exit)
 
-            val result = fileSystem(runner).transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+            val result = fileSystem(runner).transferFromStream(source(), path("/target"), name("final.txt"))
 
             assertEquals(expected, (result as OperationResult.Failure).code)
             assertFalse(runner.finalExists)
@@ -58,7 +57,7 @@ class RootTransferStagingTest {
     fun `transfer maps changed source and invalid stage as typed failures`() = runTest {
         listOf(54 to ErrorCode.SOURCE_UNREADABLE,56 to ErrorCode.SOURCE_UNREADABLE, 53 to ErrorCode.COMMAND_FAILED).forEach { (exit, expected) ->
             val result = fileSystem(StagingRunner(copyExit = exit))
-                .transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+                .transferFromStream(source(), path("/target"), name("final.txt"))
 
             assertEquals(expected, (result as OperationResult.Failure).code)
         }
@@ -68,7 +67,7 @@ class RootTransferStagingTest {
     fun `toybox timeout exit is uncertain and reconciles stage only after final check`() = runTest {
         val runner=StagingRunner(copyExit=137)
 
-        val result=fileSystem(runner).transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+        val result=fileSystem(runner).transferFromStream(source(),path("/target"),name("final.txt"))
 
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN,(result as OperationResult.Failure).code)
         assertEquals(1,runner.commands.count{it.contains("'remove-stage'")})
@@ -78,7 +77,7 @@ class RootTransferStagingTest {
     fun `native uncertain outcome performs stage-only cleanup and stays uncertain`() = runTest {
         val runner = StagingRunner(copyExit = 55)
 
-        val result = fileSystem(runner).transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+        val result = fileSystem(runner).transferFromStream(source(), path("/target"), name("final.txt"))
 
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
         assertEquals(1, runner.commands.count { it.contains("'remove-stage'") })
@@ -89,7 +88,7 @@ class RootTransferStagingTest {
     fun `native uncertain outcome preserves stage when final exists`() = runTest {
         val runner = StagingRunner(copyExit = 55, finalOnFailure = true)
 
-        val result = fileSystem(runner).transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+        val result = fileSystem(runner).transferFromStream(source(), path("/target"), name("final.txt"))
 
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
         assertTrue(runner.finalExists)
@@ -100,7 +99,7 @@ class RootTransferStagingTest {
     fun `lost copy result cleans only the recorded stage and reports uncertain`() = runTest {
         val runner = StagingRunner(copyFailure = CopyFailure.EXCEPTION)
 
-        val result = fileSystem(runner).transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+        val result = fileSystem(runner).transferFromStream(source(), path("/target"), name("final.txt"))
 
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
         val cleanup = runner.commands.single { it.contains("'remove-stage'") }
@@ -113,7 +112,7 @@ class RootTransferStagingTest {
         val runner = StagingRunner(copyFailure = CopyFailure.TIMEOUT)
 
         val result = fileSystem(runner, timeoutMillis = 10)
-            .transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+            .transferFromStream(source(), path("/target"), name("final.txt"))
 
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
         assertEquals(1, runner.commands.count { it.contains("'remove-stage'") })
@@ -123,7 +122,7 @@ class RootTransferStagingTest {
     fun `copy cancellation after dispatch returns uncertain and cleans only when final is absent`() = runTest {
         val runner = StagingRunner(copyFailure = CopyFailure.CANCEL)
 
-        val result = fileSystem(runner).transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+        val result = fileSystem(runner).transferFromStream(source(), path("/target"), name("final.txt"))
 
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
         assertEquals(1, runner.commands.count { it.contains("'remove-stage'") })
@@ -135,7 +134,7 @@ class RootTransferStagingTest {
             val runner = StagingRunner(copyFailure = failure, finalOnFailure = true)
 
             val result = fileSystem(runner, timeoutMillis = 10)
-                .transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+                .transferFromStream(source(), path("/target"), name("final.txt"))
 
             assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
             assertEquals(0, runner.commands.count { it.contains("'remove-stage'") })
@@ -149,7 +148,7 @@ class RootTransferStagingTest {
         val runner=StagingRunner(copyFailure=CopyFailure.EXCEPTION,copyGate=gate)
         val transfer=async{
             fileSystem(runner,timeoutMillis=10,dispatcher=StandardTestDispatcher(testScheduler))
-                .transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+                .transferFromStream(source(),path("/target"),name("final.txt"))
         }
         runner.copyStarted.await()
 
@@ -175,7 +174,7 @@ class RootTransferStagingTest {
         )
         val transfer=async{
             fileSystem(runner,dispatcher=StandardTestDispatcher(testScheduler))
-                .transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+                .transferFromStream(source(),path("/target"),name("final.txt"))
         }
         runner.copyStarted.await()
 
@@ -196,7 +195,7 @@ class RootTransferStagingTest {
         val started=CompletableDeferred<Unit>()
         val runner=StagingRunner()
         val isolated=RootTransferCommandRunner{command->
-            if(command.contains("'copy-publish'")){started.complete(Unit);gate.await()}
+            if(command.contains("'copy-publish-stdin'")){started.complete(Unit);gate.await()}
             runner.run(command)
         }
         val fs=fileSystem(
@@ -205,7 +204,7 @@ class RootTransferStagingTest {
             dispatcher=StandardTestDispatcher(testScheduler),
             transferRunner=isolated,
         )
-        val transfer=async{fs.transferFromAppCache(source(),path("/target"),name("final.txt"),4)}
+        val transfer=async{fs.transferFromStream(source(),path("/target"),name("final.txt"))}
         started.await()
         testScheduler.advanceTimeBy(11)
 
@@ -225,7 +224,7 @@ class RootTransferStagingTest {
             fileSystem(
                 runner,timeoutMillis=10,dispatcher=StandardTestDispatcher(testScheduler),
                 transferTimeoutGraceMillis=5,
-            ).transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+            ).transferFromStream(source(),path("/target"),name("final.txt"))
         }
         runner.copyStarted.await()
 
@@ -240,14 +239,14 @@ class RootTransferStagingTest {
     @Test
     fun `root loss in prepare or copy maps root denied without replay`() = runTest {
         val prepareRunner=StagingRunner(prepareExit=43)
-        val prepareResult=fileSystem(prepareRunner).transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+        val prepareResult=fileSystem(prepareRunner).transferFromStream(source(),path("/target"),name("final.txt"))
         assertEquals(ErrorCode.ROOT_DENIED,(prepareResult as OperationResult.Failure).code)
-        assertEquals(0,prepareRunner.commands.count{it.contains("'copy-publish'")})
+        assertEquals(0,prepareRunner.commands.count{it.contains("'copy-publish-stdin'")})
 
         val copyRunner=StagingRunner(copyExit=43)
-        val copyResult=fileSystem(copyRunner).transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+        val copyResult=fileSystem(copyRunner).transferFromStream(source(),path("/target"),name("final.txt"))
         assertEquals(ErrorCode.ROOT_DENIED,(copyResult as OperationResult.Failure).code)
-        assertEquals(1,copyRunner.commands.count{it.contains("'copy-publish'")})
+        assertEquals(1,copyRunner.commands.count{it.contains("'copy-publish-stdin'")})
     }
 
     @Test
@@ -261,14 +260,14 @@ class RootTransferStagingTest {
             fileSystem(
                 prepareBase,dispatcher=StandardTestDispatcher(testScheduler),
                 transferRunner=prepareRunner,helperOperationTimeoutMillis=5,
-            ).transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+            ).transferFromStream(source(),path("/target"),name("final.txt"))
         }
         testScheduler.advanceTimeBy(6);testScheduler.runCurrent()
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN,(preparing.await() as OperationResult.Failure).code)
 
         val cleanupBase=StagingRunner()
         val cleanupRunner=RootTransferCommandRunner{command->when{
-            command.contains("'copy-publish'")->error("lost")
+            command.contains("'copy-publish-stdin'")->error("lost")
             command.contains("'remove-stage'")->kotlinx.coroutines.awaitCancellation()
             else->cleanupBase.run(command)
         }}
@@ -276,7 +275,7 @@ class RootTransferStagingTest {
             fileSystem(
                 cleanupBase,dispatcher=StandardTestDispatcher(testScheduler),
                 transferRunner=cleanupRunner,helperOperationTimeoutMillis=5,
-            ).transferFromAppCache(source(),path("/target"),name("final.txt"),4)
+            ).transferFromStream(source(),path("/target"),name("final.txt"))
         }
         testScheduler.advanceTimeBy(6);testScheduler.runCurrent()
         assertEquals(ErrorCode.OUTCOME_UNCERTAIN,(cleaning.await() as OperationResult.Failure).code)
@@ -286,7 +285,7 @@ class RootTransferStagingTest {
     fun `original symlink is rejected before a stage is prepared`() = runTest {
         val runner = StagingRunner(originalSymlink = true)
 
-        val result = fileSystem(runner).transferFromAppCache(source(), path("/target"), name("final.txt"), 4)
+        val result = fileSystem(runner).transferFromStream(source(), path("/target"), name("final.txt"))
 
         assertEquals(ErrorCode.COMMAND_FAILED, (result as OperationResult.Failure).code)
         assertTrue(runner.helperCommands().isEmpty())
@@ -310,13 +309,11 @@ class RootTransferStagingTest {
             helperOperationTimeoutMillis=helperOperationTimeoutMillis,
         )
 
-    private fun source(): AppCachePath {
-        val cache = java.nio.file.Files.createTempDirectory("isaver-transfer-source").toFile()
-        val file = File(cache, "incoming/123e4567-e89b-12d3-a456-426614174000.tmp")
-        requireNotNull(file.parentFile).mkdirs()
-        file.writeText("test")
-        return AppCachePath.fromIncomingCacheFile(cache, file) { 55L to 66L }.getOrThrow()
-    }
+    private fun source() = RootTransferSource(
+        contentUri = "content://com.iamxpp.isaver.incoming-stream/incoming/${"ab".repeat(32)}",
+        expectedSizeBytes = 4L,
+        token = "ab".repeat(32),
+    )
 
     private inner class StagingRunner(
         private val copyExit: Int = 0,
@@ -347,7 +344,7 @@ class RootTransferStagingTest {
                     RootCommandResult(0, listOf("77:88"), emptyList())
                 command.contains("stat -c '%d:%i'") -> RootCommandResult(0, listOf("11:22"), emptyList())
                 command.contains("'prepare-stage'") -> RootCommandResult(prepareExit, if(prepareExit==0)listOf("33:44")else emptyList(), emptyList())
-                command.contains("'copy-publish'") -> {
+                command.contains("'copy-publish-stdin'") -> {
                     copyStarted.complete(Unit)
                     try{copyGate?.await()}catch(cancelled:CancellationException){copyCancelled=true;throw cancelled}
                     when (copyFailure) {
@@ -366,7 +363,7 @@ class RootTransferStagingTest {
         }
 
         fun helperCommands(): List<String> = commands.mapNotNull { command ->
-            listOf("prepare-stage", "copy-publish", "remove-stage").singleOrNull { command.contains("'$it'") }
+            listOf("prepare-stage", "copy-publish-stdin", "remove-stage").singleOrNull { command.contains("'$it'") }
         }
     }
 

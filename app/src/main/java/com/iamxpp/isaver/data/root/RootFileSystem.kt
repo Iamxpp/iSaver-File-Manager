@@ -32,6 +32,12 @@ interface RootFileSystem {
         finalName:EntryName,
         expectedSizeBytes:Long,
     ):OperationResult<DirectoryEntry> = unsupportedTransfer()
+
+    suspend fun transferFromStream(
+        source: RootTransferSource,
+        targetDirectory: RootPath,
+        finalName: EntryName,
+    ): OperationResult<DirectoryEntry> = unsupportedTransfer()
 }
 
 private fun unsupportedDirectorySnapshot(): OperationResult.Failure = OperationResult.Failure(
