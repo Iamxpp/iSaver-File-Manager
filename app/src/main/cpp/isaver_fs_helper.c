@@ -586,13 +586,6 @@ static int write_errno(int error) {
     return X_IO;
 }
 
-static int source_errno(int error) {
-    if (error == ENOENT || error == EACCES || error == EPERM || error == ELOOP) {
-        return X_SOURCE_UNREADABLE;
-    }
-    return X_IO;
-}
-
 static int identity_matches(
     const struct stat *status,
     unsigned long long device,
@@ -733,19 +726,16 @@ static int prepare_stage(int argc, char **argv) {
     return 0;
 }
 
-static int copy_publish(int argc, char **argv) {
-    if (argc != 14 || !stage_name_ok(argv[4]) || !basename_ok(argv[5])) return X_USAGE;
+static int copy_publish_stdin(int argc, char **argv) {
+    if (argc != 11 || !stage_name_ok(argv[4]) || !basename_ok(argv[5])) return X_USAGE;
     unsigned long long parent_device;
     unsigned long long parent_inode;
     unsigned long long stage_device;
     unsigned long long stage_inode;
-    unsigned long long source_device;
-    unsigned long long source_inode;
     unsigned long long expected_size;
-    if (!parse_identity(argv, 7, &parent_device, &parent_inode) ||
-        !parse_identity(argv, 9, &stage_device, &stage_inode) ||
-        !parse_identity(argv, 11, &source_device, &source_inode) ||
-        !parse_u64(argv[13], &expected_size)) {
+    if (!parse_identity(argv, 6, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 8, &stage_device, &stage_inode) ||
+        !parse_u64(argv[10], &expected_size)) {
         return X_USAGE;
     }
 
@@ -757,23 +747,6 @@ static int copy_publish(int argc, char **argv) {
         return -stage_fd;
     }
 
-    int source_fd = open(argv[6], O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-    if (source_fd < 0) {
-        int result = source_errno(errno);
-        int cleanup = finish_stage(parent_fd, stage_fd, argv[4]);
-        close(parent_fd);
-        return cleanup == 0 ? result : X_OUTCOME_UNCERTAIN;
-    }
-    struct stat source_status;
-    if (fstat(source_fd, &source_status) != 0 || !S_ISREG(source_status.st_mode) ||
-        !identity_matches(&source_status, source_device, source_inode) ||
-        (unsigned long long) source_status.st_size != expected_size) {
-        close(source_fd);
-        int cleanup = finish_stage(parent_fd, stage_fd, argv[4]);
-        close(parent_fd);
-        return cleanup == 0 ? X_SOURCE_CHANGED : X_OUTCOME_UNCERTAIN;
-    }
-
     int payload_fd = openat(
         stage_fd,
         PAYLOAD_NAME,
@@ -782,7 +755,6 @@ static int copy_publish(int argc, char **argv) {
     );
     if (payload_fd < 0) {
         int result = write_errno(errno);
-        close(source_fd);
         int cleanup = finish_stage(parent_fd, stage_fd, argv[4]);
         close(parent_fd);
         return cleanup == 0 ? result : X_OUTCOME_UNCERTAIN;
@@ -790,7 +762,6 @@ static int copy_publish(int argc, char **argv) {
     struct stat payload_status;
     if (fstat(payload_fd, &payload_status) != 0) {
         close(payload_fd);
-        close(source_fd);
         unlinkat(stage_fd, PAYLOAD_NAME, 0);
         finish_stage(parent_fd, stage_fd, argv[4]);
         close(parent_fd);
@@ -799,7 +770,6 @@ static int copy_publish(int argc, char **argv) {
     if (!S_ISREG(payload_status.st_mode) || payload_status.st_uid != 0 ||
         (payload_status.st_mode & 07777) != 0600) {
         close(payload_fd);
-        close(source_fd);
         int cleanup = remove_known_payload(stage_fd, &payload_status);
         int stage_cleanup = finish_stage(parent_fd, stage_fd, argv[4]);
         close(parent_fd);
@@ -810,21 +780,30 @@ static int copy_publish(int argc, char **argv) {
     unsigned char buffer[65536];
     unsigned long long copied = 0;
     int result = 0;
-    for (;;) {
+    while (copied < expected_size) {
+        unsigned long long remaining = expected_size - copied;
+        size_t wanted = remaining < sizeof(buffer) ? (size_t) remaining : sizeof(buffer);
         ssize_t read_count;
         do {
-            read_count = read(source_fd, buffer, sizeof(buffer));
+            read_count = read(STDIN_FILENO, buffer, wanted);
         } while (read_count < 0 && errno == EINTR);
         if (read_count < 0) {
-            result = source_errno(errno);
+            result = X_SOURCE_UNREADABLE;
             break;
         }
-        if (read_count == 0) break;
-        ssize_t offset = 0;
-        while (offset < read_count) {
+        if (read_count == 0) {
+            result = X_SOURCE_CHANGED;
+            break;
+        }
+        size_t offset = 0U;
+        while (offset < (size_t) read_count) {
             ssize_t write_count;
             do {
-                write_count = write(payload_fd, buffer + offset, (size_t) (read_count - offset));
+                write_count = write(
+                    payload_fd,
+                    buffer + offset,
+                    (size_t) read_count - offset
+                );
             } while (write_count < 0 && errno == EINTR);
             if (write_count < 0) {
                 result = write_errno(errno);
@@ -834,12 +813,23 @@ static int copy_publish(int argc, char **argv) {
                 result = X_IO;
                 break;
             }
-            offset += write_count;
+            offset += (size_t) write_count;
             copied += (unsigned long long) write_count;
         }
         if (result != 0) break;
     }
-    if (result == 0 && copied != expected_size) result = X_SOURCE_CHANGED;
+    if (result == 0) {
+        unsigned char extra;
+        ssize_t read_count;
+        do {
+            read_count = read(STDIN_FILENO, &extra, 1U);
+        } while (read_count < 0 && errno == EINTR);
+        if (read_count < 0) {
+            result = X_SOURCE_UNREADABLE;
+        } else if (read_count != 0) {
+            result = X_SOURCE_CHANGED;
+        }
+    }
     if (result == 0) {
         int synced;
         do {
@@ -848,18 +838,20 @@ static int copy_publish(int argc, char **argv) {
         if (synced != 0) result = write_errno(errno);
     }
     if (result == 0) {
-        struct stat current_source;
-        if (fstat(source_fd, &current_source) != 0 ||
-            !identity_matches(&current_source, source_device, source_inode) ||
-            (unsigned long long) current_source.st_size != expected_size ||
-            current_source.st_mtim.tv_sec != source_status.st_mtim.tv_sec ||
-            current_source.st_mtim.tv_nsec != source_status.st_mtim.tv_nsec ||
-            current_source.st_ctim.tv_sec != source_status.st_ctim.tv_sec ||
-            current_source.st_ctim.tv_nsec != source_status.st_ctim.tv_nsec) {
-            result = X_SOURCE_CHANGED;
+        struct stat verified_payload;
+        if (fstat(payload_fd, &verified_payload) != 0) {
+            result = X_IO;
+        } else if (!S_ISREG(verified_payload.st_mode) || verified_payload.st_uid != 0 ||
+            (verified_payload.st_mode & 07777) != 0600 || verified_payload.st_nlink != 1 ||
+            verified_payload.st_dev != payload_status.st_dev ||
+            verified_payload.st_ino != payload_status.st_ino) {
+            result = X_STAGE_INVALID;
+        } else if ((unsigned long long) verified_payload.st_size != expected_size) {
+            result = X_IO;
+        } else {
+            payload_status = verified_payload;
         }
     }
-    close(source_fd);
 
     if (result == 0) {
         long renamed = syscall(
@@ -949,7 +941,7 @@ int main(int argc, char **argv) {
     if (argc < 2) return X_USAGE;
     if (strcmp(argv[1], "list-dir") == 0) return list_directory(argc, argv);
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
-    if (strcmp(argv[1], "copy-publish") == 0) return copy_publish(argc, argv);
+    if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);
     return X_USAGE;
 }

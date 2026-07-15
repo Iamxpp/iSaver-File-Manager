@@ -1,5 +1,6 @@
 package com.iamxpp.isaver.data.root
 
+import java.io.File
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -49,6 +50,20 @@ class RootTransferHelperTest {
             ),
             Regex("'([^']*)'").findAll(command).map{it.groupValues[1]}.toList(),
         )
+    }
+
+    @Test
+    fun `native helper allowlists only stdin publication`() {
+        val sourceFile = listOf(
+            File("app/src/main/cpp/isaver_fs_helper.c"),
+            File("src/main/cpp/isaver_fs_helper.c"),
+        ).first(File::isFile)
+        val main = sourceFile.readText()
+            .substringAfter("int main(int argc")
+            .substringBeforeLast("}")
+
+        assertTrue(main.contains("copy-publish-stdin"))
+        assertFalse(main.contains("strcmp(argv[1], \"copy-publish\")"))
     }
 
     private fun source() = RootTransferSource(
