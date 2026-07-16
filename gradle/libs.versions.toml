@@ -14,6 +14,9 @@ robolectric = "4.14.1"
 hilt = "2.52"
 androidxTestCore = "1.5.0"
 androidxTestExtJunit = "1.2.1"
+commonsCompress = "1.27.1"
+junrar = "7.5.5"
+xz = "1.9"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -41,6 +44,9 @@ androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTes
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
+junrar = { module = "com.github.junrar:junrar", version.ref = "junrar" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

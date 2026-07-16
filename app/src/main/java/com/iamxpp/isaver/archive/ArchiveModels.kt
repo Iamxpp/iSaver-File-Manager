@@ -1,5 +1,7 @@
 package com.iamxpp.isaver.archive
 
+import java.io.File
+
 enum class ArchiveFormat {
     ZIP,
     TAR,
@@ -37,3 +39,26 @@ data class ArchiveEntry(
     val sizeBytes: Long?,
     val compressedSizeBytes: Long? = null,
 )
+
+data class LocalArchiveSource(
+    val relativePath: String,
+    val file: File,
+    val symbolicLink: Boolean = false,
+)
+
+data class ArchiveListing(
+    val format: ArchiveFormat,
+    val entries: List<ArchiveEntry>,
+)
+
+data class ArchiveOperationSummary(
+    val format: ArchiveFormat,
+    val entryCount: Long,
+    val expandedBytes: Long,
+)
+
+sealed interface ArchiveProgress {
+    data object Preparing : ArchiveProgress
+    data class Entry(val path: String, val completedBytes: Long, val totalBytes: Long?) : ArchiveProgress
+    data class Publishing(val completedEntries: Long, val totalEntries: Long?) : ArchiveProgress
+}
