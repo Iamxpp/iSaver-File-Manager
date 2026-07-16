@@ -311,14 +311,19 @@ class LocalArchiveEngine(
         if (lower.endsWith(".7z")) return ArchiveFormat.SEVEN_Z
         if (lower.endsWith(".rar")) return ArchiveFormat.RAR
         if (lower.endsWith(".zip")) return ArchiveFormat.ZIP
-        val header = archive.inputStream().use { it.readNBytes(8) }
+        val header = archive.inputStream().use { it.readNBytes(512) }
         return when {
             header.size >= 4 && header[0] == 'P'.code.toByte() && header[1] == 'K'.code.toByte() -> ArchiveFormat.ZIP
-            header.contentEquals(byteArrayOf(0x37, 0x7a.toByte(), 0xbc.toByte(), 0xaf.toByte(), 0x27, 0x1c)) -> ArchiveFormat.SEVEN_Z
+            header.startsWith(byteArrayOf(0x37, 0x7a.toByte(), 0xbc.toByte(), 0xaf.toByte(), 0x27, 0x1c)) -> ArchiveFormat.SEVEN_Z
             header.size >= 7 && header.copyOf(7).contentEquals(byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00)) -> ArchiveFormat.RAR
+            header.size >= 2 && header[0] == 0x1f.toByte() && header[1] == 0x8b.toByte() -> ArchiveFormat.TAR_GZ
+            header.size >= 262 && header.copyOfRange(257, 262).decodeToString() == "ustar" -> ArchiveFormat.TAR
             else -> throw IllegalArgumentException("unsupported archive format")
         }
     }
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
+        size >= prefix.size && indices.take(prefix.size).all { this[it] == prefix[it] }
 
     private fun isZipSymlink(entry: ZipArchiveEntry): Boolean =
         (entry.unixMode and 0xf000) == 0xa000

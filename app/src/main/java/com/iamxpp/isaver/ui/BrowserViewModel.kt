@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
+import com.iamxpp.isaver.archive.ArchiveRepository
+import com.iamxpp.isaver.archive.ArchiveState
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
@@ -14,6 +16,7 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
+import com.iamxpp.isaver.transfer.OutputNameDraft
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
@@ -21,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -28,6 +32,7 @@ class BrowserViewModel(
     private val rootFileSystem: RootFileSystem,
     private val ioDispatcher: CoroutineDispatcher,
     private val preferencesStore: BrowserPreferencesStore,
+    private val archiveRepository: ArchiveRepository? = null,
     private val snapshotCache: DirectorySnapshotCache = DirectorySnapshotCache(),
     private val sorter: (List<DirectoryEntry>, SortSpec) -> List<DirectoryEntry> = FileEntrySorter::sort,
 ) : ViewModel() {
@@ -63,6 +68,55 @@ class BrowserViewModel(
         stack.addLast(mutableState.value.currentPath)
         load(entry.path)
         return true
+    }
+
+    fun toggleSelection(entry: DirectoryEntry) {
+        if (entry.type != EntryType.FILE) return
+        val selected = mutableState.value.selectedEntries.toMutableSet()
+        if (!selected.add(entry)) selected.remove(entry)
+        mutableState.value = mutableState.value.copy(selectedEntries = selected)
+    }
+
+    fun compress(outputName: String) {
+        val repository = archiveRepository ?: return
+        val current = mutableState.value
+        if (current.selectedEntries.isEmpty() || current.compressing) return
+        val draft = OutputNameDraft.fromDisplayName(outputName)
+        mutableState.value = current.copy(compressing = true, compressionMessage = null)
+        viewModelScope.launch {
+            try {
+                repository.createZip(
+                    sources = current.selectedEntries.toList(),
+                    targetDirectory = current.currentPath,
+                    outputName = draft,
+                ).collect { state ->
+                    when (state) {
+                        is ArchiveState.Success -> mutableState.value = mutableState.value.copy(
+                            compressing = false,
+                            compressionMessage = "压缩完成",
+                            selectedEntries = emptySet(),
+                        )
+                        is ArchiveState.Failure -> mutableState.value = mutableState.value.copy(
+                            compressing = false,
+                            compressionMessage = state.message,
+                        )
+                        else -> Unit
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                mutableState.value = mutableState.value.copy(compressing = false)
+                throw cancelled
+            } catch (_: Exception) {
+                mutableState.value = mutableState.value.copy(
+                    compressing = false,
+                    compressionMessage = "压缩失败",
+                )
+            }
+        }
+    }
+
+    fun clearCompressionMessage() {
+        mutableState.value = mutableState.value.copy(compressionMessage = null)
     }
 
     fun openRoot(path: RootPath, title: String) {
@@ -183,6 +237,8 @@ class BrowserViewModel(
             displayMode = mutableState.value.displayMode,
             sortSpec = mutableState.value.sortSpec,
             searchQuery = mutableState.value.searchQuery,
+            selectedEntries = emptySet(),
+            compressionMessage = null,
         )
         val cachedPresentationJob = if (cachedSnapshot != null && cachedEntries.isEmpty()) {
             refreshPresentation()

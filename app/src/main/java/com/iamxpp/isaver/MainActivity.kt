@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
     }
     private val browserViewModel by viewModels<BrowserViewModel> {
         val app = application as ISaverApplication
-        BrowserViewModelFactory(app.rootFileSystem, app.browserPreferencesStore)
+        BrowserViewModelFactory(app.rootFileSystem, app.browserPreferencesStore, app.archiveRepository)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -142,6 +142,9 @@ class MainActivity : ComponentActivity() {
                         onDisplayModeChange = browserViewModel::setDisplayMode,
                         onSortChange = browserViewModel::setSort,
                         onCreateDirectory = browserViewModel::createDirectory,
+                        onToggleSelection = browserViewModel::toggleSelection,
+                        onCompress = browserViewModel::compress,
+                        onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
                         transferState = transferState,
                         onSave = transferViewModel::save,
                         onStemChange = transferViewModel::setStem,
@@ -176,12 +179,13 @@ class MainActivity : ComponentActivity() {
 internal class BrowserViewModelFactory(
     private val fileSystem: RootFileSystem,
     private val preferencesStore: BrowserPreferencesStore,
+    private val archiveRepository: com.iamxpp.isaver.archive.ArchiveRepository? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
         @Suppress("UNCHECKED_CAST")
-        return BrowserViewModel(fileSystem, ioDispatcher, preferencesStore) as T
+        return BrowserViewModel(fileSystem, ioDispatcher, preferencesStore, archiveRepository) as T
     }
 }
 

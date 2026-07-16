@@ -59,14 +59,17 @@ fun BrowserScreen(
     onDisplayModeChange: (DisplayMode) -> Unit = {},
     onSortChange: (SortSpec) -> Unit = {},
     onCreateDirectory: (String) -> Unit = {},
+    onToggleSelection: (DirectoryEntry) -> Unit = {},
+    onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
-    onCompress: (() -> Unit)? = null,
+    onCompress: ((String) -> Unit)? = null,
     onConnectServer: (() -> Unit)? = null,
     saveAction: FilesSaveAction? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var createDialogVisible by remember { mutableStateOf(false) }
+    var compressDialogVisible by remember { mutableStateOf(false) }
     var unavailableFeature by remember { mutableStateOf<String?>(null) }
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
@@ -111,14 +114,16 @@ fun BrowserScreen(
                     },
                     onCompress = {
                         menuExpanded = false
-                        onCompress?.invoke() ?: run { unavailableFeature = "压缩文件将在后续阶段提供" }
+                        if (onCompress != null) compressDialogVisible = true
                     },
                     onConnectServer = {
                         menuExpanded = false
                         onConnectServer?.invoke() ?: run { unavailableFeature = "连接服务器将在后续阶段提供" }
                     },
                     canCreateFolder = state.canCreateDirectory && !state.creatingDirectory,
-                    canCompress = true,
+                    canCompress = onCompress != null &&
+                        state.selectedEntries.isNotEmpty() &&
+                        !state.compressing,
                     canConnectServer = true,
                 )
             },
@@ -128,6 +133,7 @@ fun BrowserScreen(
             onEnterDirectory = onEnterDirectory,
             onRetry = onRetry,
             onLoadMore = onLoadMore,
+            onToggleSelection = onToggleSelection,
             modifier = Modifier.weight(1f),
         )
     }
@@ -141,11 +147,23 @@ fun BrowserScreen(
             },
         )
     }
+    if (compressDialogVisible) {
+        CompressDialog(
+            onDismiss = { compressDialogVisible = false },
+            onConfirm = { name ->
+                compressDialogVisible = false
+                onCompress?.invoke(name)
+            },
+        )
+    }
     state.createDirectoryError?.let {
         MessageDialog(it.userMessage, "关闭", onDismissCreateError)
     }
     state.presentationError?.let {
         MessageDialog(it, "关闭", onDismissPresentationError)
+    }
+    state.compressionMessage?.let {
+        MessageDialog(it, "关闭", onDismissCompressionMessage)
     }
     unavailableFeature?.let { message ->
         MessageDialog(message, "知道了") { unavailableFeature = null }
@@ -158,6 +176,7 @@ internal fun BrowserContent(
     onEnterDirectory: (DirectoryEntry) -> Unit,
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
+    onToggleSelection: (DirectoryEntry) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize().background(ISaverCard)) {
@@ -176,8 +195,12 @@ internal fun BrowserContent(
                     entry = entry,
                     displayName = entry.name,
                     metadata = metadata(entry),
-                    enabled = entry.type == EntryType.DIRECTORY && entry.readable && !entry.symbolicLink,
-                    onClick = { onEnterDirectory(entry) },
+                    enabled = entry.type != EntryType.DIRECTORY || (entry.readable && !entry.symbolicLink),
+                    selected = entry in state.selectedEntries,
+                    onClick = {
+                        if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
+                        else onToggleSelection(entry)
+                    },
                     modifier = targetModifier(state, entry),
                 )
             }
@@ -187,8 +210,12 @@ internal fun BrowserContent(
                         entry = entry,
                         displayName = entry.name,
                         metadata = metadata(entry),
-                        enabled = entry.type == EntryType.DIRECTORY && entry.readable && !entry.symbolicLink,
-                        onClick = { onEnterDirectory(entry) },
+                        enabled = entry.type != EntryType.DIRECTORY || (entry.readable && !entry.symbolicLink),
+                        selected = entry in state.selectedEntries,
+                        onClick = {
+                            if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
+                            else onToggleSelection(entry)
+                        },
                         modifier = targetModifier(state, entry),
                     )
                 }
@@ -250,6 +277,27 @@ private fun MessageDialog(message: String, button: String, onDismiss: () -> Unit
         onDismissRequest = onDismiss,
         text = { Text(message) },
         confirmButton = { TextButton(onClick = onDismiss) { Text(button) } },
+    )
+}
+
+@Composable
+private fun CompressDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf("archive.zip") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("压缩文件") },
+        text = {
+            TextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("压缩文件名称") },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("确定") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 

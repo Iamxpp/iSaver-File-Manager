@@ -256,13 +256,16 @@ fun FileListRow(
     metadata: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    selected: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .background(if (selected) ISaverBlue.copy(alpha = .10f) else ISaverCard)
             .semantics(mergeDescendants = true) {
                 contentDescription = "列表项：$displayName"
+                this.selected = selected
             }
             .clickable(enabled = enabled, onClick = onClick),
     ) {
@@ -316,13 +319,16 @@ fun FileGridCell(
     metadata: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    selected: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .heightIn(min = 150.dp)
+            .background(if (selected) ISaverBlue.copy(alpha = .10f) else ISaverCard, RoundedCornerShape(12.dp))
             .semantics(mergeDescendants = true) {
                 contentDescription = "网格项：$displayName"
+                this.selected = selected
             }
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 10.dp),

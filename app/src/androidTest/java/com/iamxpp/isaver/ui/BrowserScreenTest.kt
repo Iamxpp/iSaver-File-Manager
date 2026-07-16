@@ -261,12 +261,32 @@ class BrowserScreenTest {
         }
         compose.onNodeWithContentDescription("列表项：说明.txt").assertIsDisplayed()
         compose.onNodeWithContentDescription("更多操作").performClick()
-        compose.onNodeWithText("压缩文件").performClick()
-        compose.onNodeWithText("压缩文件将在后续阶段提供").assertIsDisplayed()
-        compose.onNodeWithText("知道了").performClick()
+        compose.onNodeWithText("压缩文件").assertIsNotEnabled()
         compose.onNodeWithContentDescription("更多操作").performClick()
         compose.onNodeWithText("连接服务器").performClick()
         compose.onNodeWithText("连接服务器将在后续阶段提供").assertIsDisplayed()
+    }
+
+    @Test fun selectedFileEnablesZipDialogAndReturnsExplicitName() {
+        val file = entry("说明.txt", EntryType.FILE)
+        var output: String? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(
+                    entries = listOf(file),
+                    allEntries = listOf(file),
+                    selectedEntries = setOf(file),
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onCompress = { output = it },
+            )
+        }
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("压缩文件").assertIsEnabled().performClick()
+        compose.onNodeWithText("压缩文件名称").assertIsDisplayed()
+        compose.onNodeWithText("archive.zip").assertIsDisplayed()
+        compose.onNodeWithText("确定").performClick()
+        assertEquals("archive.zip", output)
     }
 
     @Test fun listGridEntriesProgressAndLocationTargetAreVisible() {
@@ -356,6 +376,7 @@ class BrowserScreenTest {
         errorMessage: String? = null,
         canGoBack: Boolean = true,
         hasMore: Boolean = false,
+        selectedEntries: Set<DirectoryEntry> = emptySet(),
     ) = BrowserUiState(
         currentPath = RootPath.parse("/").getOrThrow(), rootTitle = rootTitle, title = title,
         entries = entries, allEntries = allEntries, totalCount = entries.size,
@@ -364,6 +385,7 @@ class BrowserScreenTest {
         canCreateDirectory = canCreateDirectory, creatingDirectory = creatingDirectory,
         createDirectoryError = createDirectoryError, presentationError = presentationError,
         locationTarget = locationTarget, searchQuery = searchQuery,
+        selectedEntries = selectedEntries,
     )
 
     private fun entry(name: String, type: EntryType) = DirectoryEntry(

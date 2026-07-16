@@ -28,6 +28,9 @@ data class BrowserUiState(
     val sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     val searchQuery: String = "",
     val presentationError: String? = null,
+    val selectedEntries: Set<DirectoryEntry> = emptySet(),
+    val compressing: Boolean = false,
+    val compressionMessage: String? = null,
 ) {
     val empty: Boolean get() = !loading && !refreshing && errorMessage == null && totalCount == 0
 }
