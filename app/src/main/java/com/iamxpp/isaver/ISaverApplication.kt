@@ -28,6 +28,8 @@ import com.iamxpp.isaver.transfer.IncomingStreamRegistry
 import com.iamxpp.isaver.transfer.RootFileTransferRepository
 import com.iamxpp.isaver.transfer.TargetNameResolver
 import com.iamxpp.isaver.transfer.TransferDependencies
+import com.iamxpp.isaver.archive.ArchiveRepository
+import com.iamxpp.isaver.archive.LocalArchiveEngine
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import kotlinx.coroutines.CoroutineScope
@@ -106,6 +108,16 @@ class ISaverApplication : Application() {
             },
             revokeSource = incomingStreamRegistry::revoke,
             cleanupCache = incomingFileCache::cleanup,
+        )
+    }
+    internal val archiveRepository: ArchiveRepository by lazy {
+        ArchiveRepository(
+            rootFileSystem = rootFileSystem,
+            localEngine = LocalArchiveEngine(),
+            cacheDir = cacheDir,
+            publish = { cached, outputName, target ->
+                transferRepository.transfer(cached, outputName, target)
+            },
         )
     }
     internal val transferDependencies: TransferDependencies by lazy {

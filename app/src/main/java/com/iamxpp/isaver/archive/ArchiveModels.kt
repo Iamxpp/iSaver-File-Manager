@@ -62,3 +62,11 @@ sealed interface ArchiveProgress {
     data class Entry(val path: String, val completedBytes: Long, val totalBytes: Long?) : ArchiveProgress
     data class Publishing(val completedEntries: Long, val totalEntries: Long?) : ArchiveProgress
 }
+
+sealed interface ArchiveState {
+    data object Preparing : ArchiveState
+    data class Running(val progress: ArchiveProgress) : ArchiveState
+    data class Publishing(val path: String) : ArchiveState
+    data class Success(val format: ArchiveFormat, val entryCount: Long, val expandedBytes: Long) : ArchiveState
+    data class Failure(val code: com.iamxpp.isaver.domain.ErrorCode, val message: String) : ArchiveState
+}

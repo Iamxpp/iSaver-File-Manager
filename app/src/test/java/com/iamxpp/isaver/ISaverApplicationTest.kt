@@ -28,6 +28,7 @@ class ISaverApplicationTest {
         assertSame(application.incomingFileCache, application.incomingFileCache)
         assertSame(application.incomingStreamRegistry, application.incomingStreamRegistry)
         assertSame(application.transferRepository, application.transferRepository)
+        assertSame(application.archiveRepository, application.archiveRepository)
         assertSame(application.transferDependencies, application.transferDependencies)
     }
 
