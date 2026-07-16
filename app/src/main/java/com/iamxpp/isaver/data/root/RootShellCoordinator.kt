@@ -42,8 +42,10 @@ internal object IsolatedLibsuRootTransferCommandRunner:RootTransferCommandRunner
         val shell=Shell.Builder.create().build()
         try{
             if(!shell.isRoot)return@runInterruptible RootCommandResult(43,emptyList(),emptyList())
-            val result=shell.newJob().add(command).exec()
-            RootCommandResult(result.code,result.out.toList(),result.err.toList())
+            val stdout=mutableListOf<String>()
+            val stderr=mutableListOf<String>()
+            val result=shell.newJob().to(stdout,stderr).add(command).exec()
+            RootCommandResult(result.code,stdout,stderr)
         }finally{
             runCatching{shell.close()}
         }

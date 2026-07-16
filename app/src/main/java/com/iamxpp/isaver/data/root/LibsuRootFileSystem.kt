@@ -230,14 +230,7 @@ class LibsuRootFileSystem internal constructor(
         if(result.exitCode!=0)return mapExitCode(result.exitCode,result.stderr.isNotEmpty(),"无法准备目标目录")
         return RootFileIdentity.parse(result.stdout).fold(
             onSuccess={OperationResult.Success(TransferStage(stageName,it))},
-            onFailure={
-                val shape=result.stdout.joinToString(",") { line ->
-                    "${line.length}/${line.count { it == ':' }}/${line.all { it.isDigit() || it == ':' }}"
-                }
-                uncertainTransfer(
-                    "Malformed prepare-stage identity (stdout=${result.stdout.size}[$shape], stderr=${result.stderr.size})",
-                )
-            },
+            onFailure={uncertainTransfer("Malformed prepare-stage identity")},
         )
     }
 
