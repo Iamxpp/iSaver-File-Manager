@@ -1,5 +1,7 @@
 # iOS-style Share Save Picker Implementation Plan
 
+> **Superseded UI note (2026-07-15):** 本计划记录的独立全屏 Picker 与隐藏三标签方案已被 `2026-07-15-inline-save-mode-design.md` 和 `2026-07-15-inline-save-mode.md` 取代。Intent 解析、缓存、publish、排队与不确定结果状态机仍有效；产品界面现改为三标签主页内嵌 `InlineSaveBar`，不得重新实现 `ShareSavePickerScreen`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox syntax.
 
 **Goal:** Make single-file ACTION_SEND and content ACTION_VIEW open a full-screen iOS-style save picker with early private caching, Root-safe destination selection, and independently editable stem/extension fields.
