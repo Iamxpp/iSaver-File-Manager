@@ -17,6 +17,8 @@ androidxTestExtJunit = "1.2.1"
 commonsCompress = "1.27.1"
 junrar = "7.5.5"
 xz = "1.9"
+commonsNet = "3.11.1"
+jsch = "0.2.20"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -47,6 +49,8 @@ hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hil
 commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
 junrar = { module = "com.github.junrar:junrar", version.ref = "junrar" }
 xz = { module = "org.tukaani:xz", version.ref = "xz" }
+commons-net = { module = "commons-net:commons-net", version.ref = "commonsNet" }
+jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
