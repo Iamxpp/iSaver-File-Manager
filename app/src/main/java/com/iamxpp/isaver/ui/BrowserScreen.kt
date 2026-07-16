@@ -3,6 +3,7 @@ package com.iamxpp.isaver.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,9 +30,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
+import com.iamxpp.isaver.remote.RemoteConnectionDraft
+import com.iamxpp.isaver.remote.RemoteConnectionUiState
+import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FileGridCell
 import com.iamxpp.isaver.ui.files.FileListRow
@@ -64,13 +70,15 @@ fun BrowserScreen(
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
     onCompress: ((String) -> Unit)? = null,
-    onConnectServer: (() -> Unit)? = null,
+    onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
+    remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
+    onDismissRemoteMessage: () -> Unit = {},
     saveAction: FilesSaveAction? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var createDialogVisible by remember { mutableStateOf(false) }
     var compressDialogVisible by remember { mutableStateOf(false) }
-    var unavailableFeature by remember { mutableStateOf<String?>(null) }
+    var serverDialogVisible by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
         FilesPageHeader(
@@ -118,13 +126,13 @@ fun BrowserScreen(
                     },
                     onConnectServer = {
                         menuExpanded = false
-                        onConnectServer?.invoke() ?: run { unavailableFeature = "连接服务器将在后续阶段提供" }
+                        if (onConnectServer != null) serverDialogVisible = true
                     },
                     canCreateFolder = state.canCreateDirectory && !state.creatingDirectory,
                     canCompress = onCompress != null &&
                         state.selectedEntries.isNotEmpty() &&
                         !state.compressing,
-                    canConnectServer = true,
+                    canConnectServer = onConnectServer != null,
                 )
             },
         )
@@ -156,6 +164,15 @@ fun BrowserScreen(
             },
         )
     }
+    if (serverDialogVisible) {
+        ServerConnectionDialog(
+            onDismiss = { serverDialogVisible = false },
+            onConfirm = { draft ->
+                serverDialogVisible = false
+                onConnectServer?.invoke(draft)
+            },
+        )
+    }
     state.createDirectoryError?.let {
         MessageDialog(it.userMessage, "关闭", onDismissCreateError)
     }
@@ -165,8 +182,19 @@ fun BrowserScreen(
     state.compressionMessage?.let {
         MessageDialog(it, "关闭", onDismissCompressionMessage)
     }
-    unavailableFeature?.let { message ->
-        MessageDialog(message, "知道了") { unavailableFeature = null }
+    when (remoteConnectionState) {
+        is RemoteConnectionUiState.Connected -> MessageDialog(
+            "已连接 ${remoteConnectionState.host}",
+            "关闭",
+            onDismissRemoteMessage,
+        )
+        is RemoteConnectionUiState.Error -> MessageDialog(
+            remoteConnectionState.message,
+            "关闭",
+            onDismissRemoteMessage,
+        )
+        RemoteConnectionUiState.Connecting,
+        RemoteConnectionUiState.Idle -> Unit
     }
 }
 
@@ -296,6 +324,100 @@ private fun CompressDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("确定") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun ServerConnectionDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (RemoteConnectionDraft) -> Unit,
+) {
+    var protocol by remember { mutableStateOf(RemoteProtocol.SFTP) }
+    var host by remember { mutableStateOf("") }
+    var port by remember { mutableStateOf(protocol.defaultPort.toString()) }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var fingerprint by remember { mutableStateOf("") }
+    var allowPlaintext by remember { mutableStateOf(false) }
+    val secure = protocol != RemoteProtocol.FTP
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("连接服务器") },
+        text = {
+            Column {
+                Row {
+                    RemoteProtocol.entries.forEach { option ->
+                        TextButton(onClick = {
+                            protocol = option
+                            port = option.defaultPort.toString()
+                        }) { Text(option.name) }
+                    }
+                }
+                TextField(
+                    value = host,
+                    onValueChange = { host = it },
+                    label = { Text("服务器地址") },
+                    singleLine = true,
+                    modifier = Modifier.semantics { contentDescription = "服务器地址" },
+                )
+                TextField(
+                    value = port,
+                    onValueChange = { port = it.filter(Char::isDigit) },
+                    label = { Text("端口") },
+                    singleLine = true,
+                )
+                TextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("用户名") },
+                    singleLine = true,
+                    modifier = Modifier.semantics { contentDescription = "用户名" },
+                )
+                TextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.semantics { contentDescription = "密码" },
+                )
+                if (secure) {
+                    TextField(
+                        value = fingerprint,
+                        onValueChange = { fingerprint = it },
+                        label = { Text(if (protocol == RemoteProtocol.SFTP) "主机密钥指纹" else "证书指纹") },
+                        singleLine = true,
+                        modifier = Modifier.semantics { contentDescription = "安全指纹" },
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = allowPlaintext, onCheckedChange = { allowPlaintext = it })
+                        Text("我了解普通 FTP 可能明文传输")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = host.isNotBlank() && username.isNotBlank() && password.isNotEmpty() &&
+                    (port.toIntOrNull() ?: 0) in 1..65_535 &&
+                    (secure && fingerprint.isNotBlank() || !secure && allowPlaintext),
+                onClick = {
+                    onConfirm(
+                        RemoteConnectionDraft(
+                            protocol = protocol,
+                            host = host,
+                            port = port.toIntOrNull() ?: protocol.defaultPort,
+                            username = username,
+                            password = password,
+                            fingerprint = fingerprint,
+                            allowPlaintext = allowPlaintext,
+                        ),
+                    )
+                },
+            ) { Text("连接") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )

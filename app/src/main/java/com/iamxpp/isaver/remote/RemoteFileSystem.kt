@@ -7,6 +7,10 @@ interface RemoteFileSystem {
     suspend fun connect(profile: RemoteProfile): Result<RemoteSession>
 }
 
+fun interface RemoteConnector {
+    suspend fun connect(profile: RemoteProfile): Result<RemoteSession>
+}
+
 interface RemoteSession : Closeable {
     suspend fun list(path: RemotePath): Result<List<RemoteEntry>>
     suspend fun createDirectory(path: RemotePath): Result<Unit>

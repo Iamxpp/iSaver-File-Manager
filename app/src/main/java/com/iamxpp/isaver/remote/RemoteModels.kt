@@ -33,6 +33,32 @@ data class RemoteProfile(
     val allowPlaintext: Boolean = false,
 )
 
+data class RemoteConnectionDraft(
+    val protocol: RemoteProtocol = RemoteProtocol.SFTP,
+    val host: String = "",
+    val port: Int = protocol.defaultPort,
+    val username: String = "",
+    val password: String = "",
+    val fingerprint: String = "",
+    val remoteRoot: String = "/",
+    val allowPlaintext: Boolean = false,
+) {
+    fun toProfile(id: String, secretRef: String): Result<RemoteProfile> = runCatching {
+        RemoteProfile(
+            id = id,
+            protocol = protocol,
+            host = host,
+            port = port,
+            username = username,
+            secretRef = secretRef,
+            remoteRoot = RemotePath.parse(remoteRoot).getOrThrow(),
+            hostKeyFingerprint = fingerprint.takeIf { protocol == RemoteProtocol.SFTP },
+            certificateFingerprint = fingerprint.takeIf { protocol == RemoteProtocol.FTPS },
+            allowPlaintext = allowPlaintext,
+        ).also { RemoteSecurityPolicy.validate(it).getOrThrow() }
+    }
+}
+
 data class RemoteEntry(
     val path: RemotePath,
     val name: String,

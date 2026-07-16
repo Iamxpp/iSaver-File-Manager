@@ -311,7 +311,11 @@ class LocalArchiveEngine(
         if (lower.endsWith(".7z")) return ArchiveFormat.SEVEN_Z
         if (lower.endsWith(".rar")) return ArchiveFormat.RAR
         if (lower.endsWith(".zip")) return ArchiveFormat.ZIP
-        val header = archive.inputStream().use { it.readNBytes(512) }
+        val header = archive.inputStream().use { input ->
+            val buffer = ByteArray(512)
+            val count = input.read(buffer)
+            if (count <= 0) ByteArray(0) else buffer.copyOf(count)
+        }
         return when {
             header.size >= 4 && header[0] == 'P'.code.toByte() && header[1] == 'K'.code.toByte() -> ArchiveFormat.ZIP
             header.startsWith(byteArrayOf(0x37, 0x7a.toByte(), 0xbc.toByte(), 0xaf.toByte(), 0x27, 0x1c)) -> ArchiveFormat.SEVEN_Z

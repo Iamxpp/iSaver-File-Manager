@@ -30,6 +30,8 @@ import com.iamxpp.isaver.transfer.TargetNameResolver
 import com.iamxpp.isaver.transfer.TransferDependencies
 import com.iamxpp.isaver.archive.ArchiveRepository
 import com.iamxpp.isaver.archive.LocalArchiveEngine
+import com.iamxpp.isaver.remote.KeystoreCredentialStore
+import com.iamxpp.isaver.remote.RemoteFileSystemFactory
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import kotlinx.coroutines.CoroutineScope
@@ -120,6 +122,8 @@ class ISaverApplication : Application() {
             },
         )
     }
+    internal val remoteCredentialStore by lazy { KeystoreCredentialStore(this) }
+    internal val remoteFileSystemFactory by lazy { RemoteFileSystemFactory(remoteCredentialStore) }
     internal val transferDependencies: TransferDependencies by lazy {
         TransferDependencies(
             parseShare = shareIntentParser::parseAsync,

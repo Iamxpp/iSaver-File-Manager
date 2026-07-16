@@ -18,6 +18,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesSaveAction
 import com.iamxpp.isaver.ui.files.SortDirection
@@ -263,8 +264,7 @@ class BrowserScreenTest {
         compose.onNodeWithContentDescription("更多操作").performClick()
         compose.onNodeWithText("压缩文件").assertIsNotEnabled()
         compose.onNodeWithContentDescription("更多操作").performClick()
-        compose.onNodeWithText("连接服务器").performClick()
-        compose.onNodeWithText("连接服务器将在后续阶段提供").assertIsDisplayed()
+        compose.onNodeWithText("连接服务器").assertIsNotEnabled()
     }
 
     @Test fun selectedFileEnablesZipDialogAndReturnsExplicitName() {
@@ -287,6 +287,27 @@ class BrowserScreenTest {
         compose.onNodeWithText("archive.zip").assertIsDisplayed()
         compose.onNodeWithText("确定").performClick()
         assertEquals("archive.zip", output)
+    }
+
+    @Test fun serverMenuOpensSecureSftpDraftDialog() {
+        var draft: com.iamxpp.isaver.remote.RemoteConnectionDraft? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onConnectServer = { draft = it },
+            )
+        }
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("连接服务器").performClick()
+        compose.onNodeWithText("SFTP").assertIsDisplayed()
+        compose.onNodeWithContentDescription("服务器地址").performTextInput("example.test")
+        compose.onNodeWithContentDescription("用户名").performTextInput("user")
+        compose.onNodeWithContentDescription("密码").performTextInput("secret")
+        compose.onNodeWithContentDescription("安全指纹").performTextInput("SHA256:key")
+        compose.onNodeWithText("连接").performClick()
+        assertEquals(RemoteProtocol.SFTP, draft?.protocol)
+        assertEquals("example.test", draft?.host)
     }
 
     @Test fun listGridEntriesProgressAndLocationTargetAreVisible() {

@@ -30,6 +30,7 @@ import com.iamxpp.isaver.ui.files.HomeTab
 import com.iamxpp.isaver.ui.theme.ISaverTheme
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.transfer.TransferViewModel
+import com.iamxpp.isaver.remote.RemoteConnectionViewModel
 import kotlinx.coroutines.Dispatchers
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -49,6 +50,10 @@ class MainActivity : ComponentActivity() {
     private val browserViewModel by viewModels<BrowserViewModel> {
         val app = application as ISaverApplication
         BrowserViewModelFactory(app.rootFileSystem, app.browserPreferencesStore, app.archiveRepository)
+    }
+    private val remoteConnectionViewModel by viewModels<RemoteConnectionViewModel> {
+        val app = application as ISaverApplication
+        RemoteConnectionViewModelFactory(app.remoteCredentialStore, app.remoteFileSystemFactory)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,6 +82,7 @@ class MainActivity : ComponentActivity() {
                     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
                     val locationState by locationHomeViewModel.state.collectAsStateWithLifecycle()
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
+                    val remoteConnectionState by remoteConnectionViewModel.state.collectAsStateWithLifecycle()
                     val destination = homeState.destination
                     val pickerActive = transferState != TransferUiState.Idle
 
@@ -145,6 +151,9 @@ class MainActivity : ComponentActivity() {
                         onToggleSelection = browserViewModel::toggleSelection,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
+                        onConnectServer = remoteConnectionViewModel::connect,
+                        remoteConnectionState = remoteConnectionState,
+                        onDismissRemoteMessage = remoteConnectionViewModel::clearMessage,
                         transferState = transferState,
                         onSave = transferViewModel::save,
                         onStemChange = transferViewModel::setStem,
@@ -186,6 +195,18 @@ internal class BrowserViewModelFactory(
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
         @Suppress("UNCHECKED_CAST")
         return BrowserViewModel(fileSystem, ioDispatcher, preferencesStore, archiveRepository) as T
+    }
+}
+
+internal class RemoteConnectionViewModelFactory(
+    private val credentialStore: com.iamxpp.isaver.remote.CredentialStore,
+    private val connector: com.iamxpp.isaver.remote.RemoteConnector,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(RemoteConnectionViewModel::class.java))
+        @Suppress("UNCHECKED_CAST")
+        return RemoteConnectionViewModel(credentialStore, connector, ioDispatcher) as T
     }
 }
 

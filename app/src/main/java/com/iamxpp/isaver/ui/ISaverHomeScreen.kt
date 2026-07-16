@@ -13,6 +13,8 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.transfer.TransferUiState
+import com.iamxpp.isaver.remote.RemoteConnectionDraft
+import com.iamxpp.isaver.remote.RemoteConnectionUiState
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesBottomBar
 import com.iamxpp.isaver.ui.files.FilesSaveAction
@@ -48,6 +50,9 @@ fun ISaverHomeScreen(
     onToggleSelection: (DirectoryEntry) -> Unit = {},
     onCompress: (String) -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
+    onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
+    remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
+    onDismissRemoteMessage: () -> Unit = {},
     transferState: TransferUiState = TransferUiState.Idle,
     onSave: () -> Unit = {},
     onStemChange: (String) -> Unit = {},
@@ -102,6 +107,9 @@ fun ISaverHomeScreen(
                 onToggleSelection = onToggleSelection,
                 onCompress = onCompress,
                 onDismissCompressionMessage = onDismissCompressionMessage,
+                onConnectServer = onConnectServer,
+                remoteConnectionState = remoteConnectionState,
+                onDismissRemoteMessage = onDismissRemoteMessage,
                 saveAction = saveAction,
                 modifier = Modifier.weight(1f),
             )
