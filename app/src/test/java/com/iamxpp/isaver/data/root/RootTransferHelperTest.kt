@@ -66,6 +66,14 @@ class RootTransferHelperTest {
         assertFalse(main.contains("strcmp(argv[1], \"copy-publish\")"))
     }
 
+    @Test
+    fun `read file command uses fixed base64 stdout helper`() {
+        val command = helper.readFile("/data/user/0/com.iamxpp.isaver/files/report with space.bin")
+        assertTrue(command.contains("'read-file-stdout' '/data/user/0/com.iamxpp.isaver/files/report with space.bin'"))
+        assertFalse(command.contains("'cat'"))
+        assertFalse(command.contains("sh -c"))
+    }
+
     private fun source() = RootTransferSource(
         contentUri = "content://com.iamxpp.isaver.incoming-stream/incoming/${"ab".repeat(32)}",
         expectedSizeBytes = 5L,

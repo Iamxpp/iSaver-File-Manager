@@ -6,6 +6,7 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.ErrorCode
+import java.io.OutputStream
 
 interface RootFileSystem {
     suspend fun readDirectory(path: RootPath): OperationResult<DirectorySnapshot> =
@@ -26,6 +27,11 @@ interface RootFileSystem {
      * the original cancellation; they do not clean up or claim a definite outcome.
      */
     suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>
+    suspend fun copyToOutput(
+        source: RootPath,
+        output: OutputStream,
+    ): OperationResult<Long> = unsupportedTransfer()
+
     suspend fun transferFromStream(
         source: RootTransferSource,
         targetDirectory: RootPath,

@@ -40,6 +40,8 @@ enum {
 
 static const size_t LIST_MAX_FIELD_BYTES = 1048576U;
 static const size_t LIST_MAX_PROTOCOL_BYTES = 67108864U;
+static const unsigned long long READ_FILE_MAX_BYTES = 268435456ULL;
+static const size_t READ_FILE_CHUNK_BYTES = 49152U;
 
 struct output_buffer {
     char *data;
@@ -387,6 +389,86 @@ static int write_stdout(const char *bytes, size_t byte_count) {
         offset += (size_t) written;
     }
     return 0;
+}
+
+static int write_base64_line(const unsigned char *bytes, size_t byte_count) {
+    struct output_buffer output = {0};
+    int result = buffer_append_base64(&output, bytes, byte_count);
+    if (result == 0) result = buffer_append_character(&output, '\n');
+    if (result == 0) result = write_stdout(output.data, output.length);
+    free(output.data);
+    return result;
+}
+
+static int read_file_stdout(int argc, char **argv) {
+    if (argc != 3 || argv[2] == NULL || argv[2][0] != '/') return X_USAGE;
+    const char *open_path;
+    char *owned_open_path;
+    int result = nofollow_open_path(argv[2], &open_path, &owned_open_path);
+    if (result != 0) return result;
+
+    int source_fd;
+    do {
+        source_fd = open(open_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    } while (source_fd < 0 && errno == EINTR);
+    free(owned_open_path);
+    if (source_fd < 0) return X_SOURCE_UNREADABLE;
+
+    struct stat initial;
+    if (retry_fstat(source_fd, &initial) != 0 || !S_ISREG(initial.st_mode) || initial.st_size < 0) {
+        close(source_fd);
+        return X_SOURCE_UNREADABLE;
+    }
+    if ((unsigned long long) initial.st_size > READ_FILE_MAX_BYTES) {
+        close(source_fd);
+        return X_OUTPUT_LIMIT;
+    }
+
+    char header[96];
+    int header_length = snprintf(
+        header,
+        sizeof(header),
+        "ISAVER_FILE_V1\t%llu\n",
+        (unsigned long long) initial.st_size
+    );
+    if (header_length < 0 || (size_t) header_length >= sizeof(header)) {
+        close(source_fd);
+        return X_IO;
+    }
+    result = write_stdout(header, (size_t) header_length);
+    unsigned char buffer[49152];
+    unsigned long long copied = 0ULL;
+    while (result == 0) {
+        ssize_t read_count;
+        do {
+            read_count = read(source_fd, buffer, READ_FILE_CHUNK_BYTES);
+        } while (read_count < 0 && errno == EINTR);
+        if (read_count < 0) {
+            result = X_SOURCE_UNREADABLE;
+            break;
+        }
+        if (read_count == 0) break;
+        copied += (unsigned long long) read_count;
+        if (copied > (unsigned long long) initial.st_size) {
+            result = X_SOURCE_CHANGED;
+            break;
+        }
+        result = write_base64_line(buffer, (size_t) read_count);
+    }
+
+    struct stat final_status;
+    if (result == 0 &&
+        (retry_fstat(source_fd, &final_status) != 0 ||
+         final_status.st_dev != initial.st_dev || final_status.st_ino != initial.st_ino ||
+         final_status.st_size != initial.st_size || copied != (unsigned long long) initial.st_size ||
+         final_status.st_mtim.tv_sec != initial.st_mtim.tv_sec ||
+         final_status.st_mtim.tv_nsec != initial.st_mtim.tv_nsec ||
+         final_status.st_ctim.tv_sec != initial.st_ctim.tv_sec ||
+         final_status.st_ctim.tv_nsec != initial.st_ctim.tv_nsec)) {
+        result = X_SOURCE_CHANGED;
+    }
+    close(source_fd);
+    return result;
 }
 
 static int list_directory(int argc, char **argv) {
@@ -940,6 +1022,7 @@ static int remove_stage(int argc, char **argv) {
 int main(int argc, char **argv) {
     if (argc < 2) return X_USAGE;
     if (strcmp(argv[1], "list-dir") == 0) return list_directory(argc, argv);
+    if (strcmp(argv[1], "read-file-stdout") == 0) return read_file_stdout(argc, argv);
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);

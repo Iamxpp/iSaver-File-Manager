@@ -4,6 +4,7 @@ internal data class TransferStage(val name:String,val identity:RootFileIdentity)
 
 internal class RootTransferHelper(private val executable:String){
     fun listDirectory(path:String)=command("list-dir",path)
+    fun readFile(path:String)=command("read-file-stdout",path)
     fun prepare(original:String,canonical:String,stage:String,parentId:RootFileIdentity)=command(
         "prepare-stage",original,canonical,stage,parentId.device,parentId.inode,
     )

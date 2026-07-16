@@ -23,6 +23,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.ByteBuffer
+import java.io.OutputStream
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
@@ -128,6 +129,35 @@ class LibsuRootFileSystem internal constructor(
             directory.original.value,directory.canonical.value,stage,finalName.value,
             directory.identity,source,timeoutMillis,
         )
+    }
+
+    override suspend fun copyToOutput(
+        source: RootPath,
+        output: OutputStream,
+    ): OperationResult<Long> {
+        val sourceEntry = stat(source)
+        if (sourceEntry !is OperationResult.Success) return sourceEntry as OperationResult.Failure
+        if (sourceEntry.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            sourceEntry.value.symbolicLink ||
+            !sourceEntry.value.readable
+        ) {
+            return failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Root archive source was not a readable regular file")
+        }
+        val expectedSize = sourceEntry.value.sizeBytes
+            ?: return failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Root archive source size was unavailable")
+        if (expectedSize > MAX_ROOT_CACHE_BYTES) {
+            return failure(ErrorCode.COMMAND_FAILED, "文件过大，无法缓存", "Root archive source exceeded private cache limit")
+        }
+        val result = runHelperBounded(
+            transferHelper.readFile(source.value),
+            maxOf(helperOperationTimeoutMillis, timeoutMillis),
+        ).getOrElse {
+            return failure(ErrorCode.COMMAND_FAILED, "无法读取来源文件", "Root archive read exceeded deadline")
+        }
+        if (result.exitCode != 0) {
+            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法读取来源文件")
+        }
+        return RootFileReadProtocol.decode(result.stdout, output, expectedSize)
     }
 
     private suspend fun transfer(
@@ -425,6 +455,7 @@ class LibsuRootFileSystem internal constructor(
         const val EXIT_NATIVE_IO = 51
         const val EXIT_OUTPUT_LIMIT = 57
         const val EXIT_USAGE = 64
+        const val MAX_ROOT_CACHE_BYTES = 256L * 1024L * 1024L
         val STAGE_NAME=Regex("\\.isaver-stage-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
     }
 }
