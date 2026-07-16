@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -73,6 +74,8 @@ fun BrowserScreen(
     onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
     remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
     onDismissRemoteMessage: () -> Unit = {},
+    onRefreshRemote: () -> Unit = {},
+    onCreateRemoteDirectory: (String) -> Unit = {},
     saveAction: FilesSaveAction? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -183,10 +186,11 @@ fun BrowserScreen(
         MessageDialog(it, "关闭", onDismissCompressionMessage)
     }
     when (remoteConnectionState) {
-        is RemoteConnectionUiState.Connected -> MessageDialog(
-            "已连接 ${remoteConnectionState.host}",
-            "关闭",
-            onDismissRemoteMessage,
+        is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
+            state = remoteConnectionState,
+            onRefresh = onRefreshRemote,
+            onCreateDirectory = onCreateRemoteDirectory,
+            onDismiss = onDismissRemoteMessage,
         )
         is RemoteConnectionUiState.Error -> MessageDialog(
             remoteConnectionState.message,
@@ -326,6 +330,51 @@ private fun CompressDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
             TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("确定") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun RemoteBrowserDialog(
+    state: RemoteConnectionUiState.Connected,
+    onRefresh: () -> Unit,
+    onCreateDirectory: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var folderName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("远程：${state.host}") },
+        text = {
+            Column {
+                Text("路径：${state.path.value}", color = ISaverSecondaryText)
+                LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                    items(state.entries, key = { it.path.value }) { entry ->
+                        Text(
+                            text = if (entry.directory) "📁 ${entry.name}" else entry.name,
+                            color = com.iamxpp.isaver.ui.theme.ISaverPrimaryText,
+                            modifier = Modifier.padding(vertical = 6.dp),
+                        )
+                    }
+                }
+                TextField(
+                    value = folderName,
+                    onValueChange = { folderName = it },
+                    label = { Text("新建远程文件夹") },
+                    singleLine = true,
+                )
+                TextButton(onClick = onRefresh) { Text("刷新") }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = folderName.isNotBlank(),
+                onClick = {
+                    onCreateDirectory(folderName)
+                    folderName = ""
+                },
+            ) { Text("新建") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
     )
 }
 

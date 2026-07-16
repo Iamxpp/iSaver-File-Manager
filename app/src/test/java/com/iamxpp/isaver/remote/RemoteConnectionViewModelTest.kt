@@ -42,7 +42,9 @@ class RemoteConnectionViewModelTest {
         )
         testScheduler.advanceUntilIdle()
 
-        assertEquals(RemoteConnectionUiState.Connected("example.test"), viewModel.state.value)
+        val connected = viewModel.state.value as RemoteConnectionUiState.Connected
+        assertEquals("example.test", connected.host)
+        assertEquals("远程.txt", connected.entries.single().name)
         val ref = connectedProfile!!.secretRef
         assertEquals("secret", credentials.get(ref))
         assertEquals(false, ref.contains("secret"))
@@ -50,7 +52,17 @@ class RemoteConnectionViewModelTest {
 }
 
 private class FakeRemoteSession : RemoteSession {
-    override suspend fun list(path: RemotePath) = Result.success(emptyList<RemoteEntry>())
+    override suspend fun list(path: RemotePath) = Result.success(
+        listOf(
+            RemoteEntry(
+                path = RemotePath.parse("/远程.txt").getOrThrow(),
+                name = "远程.txt",
+                directory = false,
+                sizeBytes = 7,
+                modifiedAtEpochMillis = null,
+            ),
+        ),
+    )
     override suspend fun createDirectory(path: RemotePath) = Result.success(Unit)
     override fun upload(request: RemoteTransferRequest): Flow<TransferProgress> = emptyFlow()
     override fun download(request: RemoteDownloadRequest): Flow<TransferProgress> = emptyFlow()

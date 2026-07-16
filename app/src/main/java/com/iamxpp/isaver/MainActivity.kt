@@ -154,6 +154,8 @@ class MainActivity : ComponentActivity() {
                         onConnectServer = remoteConnectionViewModel::connect,
                         remoteConnectionState = remoteConnectionState,
                         onDismissRemoteMessage = remoteConnectionViewModel::clearMessage,
+                        onRefreshRemote = remoteConnectionViewModel::refreshRemote,
+                        onCreateRemoteDirectory = remoteConnectionViewModel::createRemoteDirectory,
                         transferState = transferState,
                         onSave = transferViewModel::save,
                         onStemChange = transferViewModel::setStem,

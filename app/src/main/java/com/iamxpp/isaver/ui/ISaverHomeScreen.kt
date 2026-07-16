@@ -53,6 +53,8 @@ fun ISaverHomeScreen(
     onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
     remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
     onDismissRemoteMessage: () -> Unit = {},
+    onRefreshRemote: () -> Unit = {},
+    onCreateRemoteDirectory: (String) -> Unit = {},
     transferState: TransferUiState = TransferUiState.Idle,
     onSave: () -> Unit = {},
     onStemChange: (String) -> Unit = {},
@@ -110,6 +112,8 @@ fun ISaverHomeScreen(
                 onConnectServer = onConnectServer,
                 remoteConnectionState = remoteConnectionState,
                 onDismissRemoteMessage = onDismissRemoteMessage,
+                onRefreshRemote = onRefreshRemote,
+                onCreateRemoteDirectory = onCreateRemoteDirectory,
                 saveAction = saveAction,
                 modifier = Modifier.weight(1f),
             )
