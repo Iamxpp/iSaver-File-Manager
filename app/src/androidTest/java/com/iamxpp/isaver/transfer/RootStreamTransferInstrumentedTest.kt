@@ -149,6 +149,58 @@ class RootStreamTransferInstrumentedTest {
         }
     }
 
+    @Test
+    fun sharedStoragePublishAcceptsEmulatedPermissionsWithoutLeavingStage() = runBlocking {
+        val app = app()
+        assertDeviceHasRoot(app)
+        root(app, "rm -rf -- ${quote(SHARED_TARGET)}; mkdir -p -- ${quote(SHARED_TARGET)}")
+        val cached = fixture(app, "shared-storage".toByteArray())
+        try {
+            val source = app.incomingStreamRegistry.issue(cached).getOrThrow()
+            val result = try {
+                app.rootFileSystem.transferFromStream(
+                    source = source,
+                    targetDirectory = path(SHARED_TARGET),
+                    finalName = EntryName.parse("shared.txt").getOrThrow(),
+                )
+            } finally {
+                app.incomingStreamRegistry.revoke(source)
+            }
+
+            assertTrue("Shared storage publish failed: $result", result is OperationResult.Success)
+            assertEquals("shared-storage", root(app, "cat -- ${quote("$SHARED_TARGET/shared.txt")}"))
+            assertTrue(
+                root(app, "find ${quote(SHARED_TARGET)} -mindepth 1 -maxdepth 1 -name '.isaver-*' -print").isBlank(),
+            )
+        } finally {
+            cached.file.delete()
+            root(app, "rm -rf -- ${quote(SHARED_TARGET)}")
+        }
+    }
+
+    @Test
+    fun sharedStorageCollisionKeepsOriginalAndPublishesNumberedCopy() = runBlocking {
+        val app = app()
+        assertDeviceHasRoot(app)
+        root(app, "rm -rf -- ${quote(SHARED_TARGET)}; mkdir -p -- ${quote(SHARED_TARGET)}")
+        root(app, "printf %s original > ${quote("$SHARED_TARGET/shared.txt")}")
+        val cached = fixture(app, "replacement".toByteArray())
+        try {
+            val terminal = app.transferRepository.transfer(
+                cached = cached,
+                outputName = OutputNameDraft("shared", "txt"),
+                targetDirectory = path(SHARED_TARGET),
+            ).last()
+
+            assertEquals("shared (1).txt", (terminal as TransferState.Success).name.value)
+            assertEquals("original", root(app, "cat -- ${quote("$SHARED_TARGET/shared.txt")}"))
+            assertEquals("replacement", root(app, "cat -- ${quote("$SHARED_TARGET/shared (1).txt")}"))
+        } finally {
+            cached.file.delete()
+            root(app, "rm -rf -- ${quote(SHARED_TARGET)}")
+        }
+    }
+
     private fun app() = ApplicationProvider.getApplicationContext<ISaverApplication>()
 
     private suspend fun assertDeviceHasRoot(app: ISaverApplication) {
@@ -209,5 +261,6 @@ class RootStreamTransferInstrumentedTest {
 
     private companion object {
         const val TARGET = "/data/local/tmp/isaver-stream-test"
+        const val SHARED_TARGET = "/storage/emulated/0/Download/.isaver-stream-test"
     }
 }

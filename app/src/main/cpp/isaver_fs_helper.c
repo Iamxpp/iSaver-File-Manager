@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -33,6 +34,12 @@ enum {
 };
 
 static const char PAYLOAD_NAME[] = "payload";
+
+#ifndef FUSE_SUPER_MAGIC
+#define FUSE_SUPER_MAGIC 0x65735546
+#endif
+
+#define SDCARDFS_SUPER_MAGIC 0x5dca2df5
 
 enum {
     LIST_MAX_ITEMS = 100000,
@@ -677,6 +684,27 @@ static int identity_matches(
         (unsigned long long) status->st_ino == inode;
 }
 
+static int is_emulated_storage_fd(int fd) {
+    struct statfs file_system;
+    if (fstatfs(fd, &file_system) != 0) return 0;
+    return (unsigned long) file_system.f_type == (unsigned long) FUSE_SUPER_MAGIC ||
+        (unsigned long) file_system.f_type == (unsigned long) SDCARDFS_SUPER_MAGIC;
+}
+
+static int stage_security_valid(int parent_fd, const struct stat *status) {
+    if (!S_ISDIR(status->st_mode) || status->st_uid != 0) return 0;
+    mode_t permissions = status->st_mode & 07777;
+    if (permissions == 0700) return 1;
+    return permissions == 0770 && is_emulated_storage_fd(parent_fd);
+}
+
+static int payload_security_valid(int parent_fd, const struct stat *status) {
+    if (!S_ISREG(status->st_mode) || status->st_uid != 0 || status->st_nlink != 1) return 0;
+    mode_t permissions = status->st_mode & 07777;
+    if (permissions == 0600) return 1;
+    return permissions == 0660 && is_emulated_storage_fd(parent_fd);
+}
+
 static int open_parent(
     const char *original,
     const char *canonical,
@@ -720,9 +748,9 @@ static int open_stage(
     int stage_fd = openat(parent_fd, stage_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (stage_fd < 0) return -X_STAGE_INVALID;
     struct stat status;
-    if (fstat(stage_fd, &status) != 0 || !S_ISDIR(status.st_mode) ||
-        !identity_matches(&status, device, inode) || status.st_uid != 0 ||
-        (status.st_mode & 07777) != 0700) {
+    if (fstat(stage_fd, &status) != 0 ||
+        !identity_matches(&status, device, inode) ||
+        !stage_security_valid(parent_fd, &status)) {
         close(stage_fd);
         return -X_STAGE_INVALID;
     }
@@ -734,11 +762,121 @@ static int remove_known_payload(int stage_fd, const struct stat *expected) {
     if (fstatat(stage_fd, PAYLOAD_NAME, &current, AT_SYMLINK_NOFOLLOW) != 0) {
         return errno == ENOENT ? 0 : X_STAGE_INVALID;
     }
-    if (!S_ISREG(current.st_mode) || current.st_dev != expected->st_dev ||
-        current.st_ino != expected->st_ino) {
+    int identity_matches_expected = current.st_dev == expected->st_dev &&
+        current.st_ino == expected->st_ino;
+    int emulated_equivalent = is_emulated_storage_fd(stage_fd) &&
+        payload_security_valid(stage_fd, &current) &&
+        current.st_size == expected->st_size;
+    if (!S_ISREG(current.st_mode) || (!identity_matches_expected && !emulated_equivalent)) {
         return X_STAGE_INVALID;
     }
     return unlinkat(stage_fd, PAYLOAD_NAME, 0) == 0 || errno == ENOENT ? 0 : X_STAGE_INVALID;
+}
+
+static int remove_known_final(int parent_fd, const char *name, const struct stat *expected) {
+    struct stat current;
+    if (fstatat(parent_fd, name, &current, AT_SYMLINK_NOFOLLOW) != 0) {
+        return errno == ENOENT ? 0 : X_OUTCOME_UNCERTAIN;
+    }
+    if (!S_ISREG(current.st_mode) || current.st_dev != expected->st_dev ||
+        current.st_ino != expected->st_ino) {
+        return X_OUTCOME_UNCERTAIN;
+    }
+    return unlinkat(parent_fd, name, 0) == 0 || errno == ENOENT ? 0 : X_OUTCOME_UNCERTAIN;
+}
+
+static int publish_emulated_no_replace(
+    int parent_fd,
+    int stage_fd,
+    const char *final_name,
+    unsigned long long expected_size,
+    const struct stat *payload_status,
+    struct stat *published_status
+) {
+    int source_fd = openat(stage_fd, PAYLOAD_NAME, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (source_fd < 0) return X_IO;
+    struct stat source_status;
+    if (fstat(source_fd, &source_status) != 0 ||
+        source_status.st_dev != payload_status->st_dev ||
+        source_status.st_ino != payload_status->st_ino ||
+        (unsigned long long) source_status.st_size != expected_size) {
+        close(source_fd);
+        return X_STAGE_INVALID;
+    }
+
+    int final_fd = openat(
+        parent_fd,
+        final_name,
+        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+        0600
+    );
+    if (final_fd < 0) {
+        int result = write_errno(errno);
+        close(source_fd);
+        return result;
+    }
+    struct stat reserved;
+    int reserved_valid = fstat(final_fd, &reserved) == 0;
+    if (!reserved_valid || !payload_security_valid(parent_fd, &reserved)) {
+        close(source_fd);
+        close(final_fd);
+        if (reserved_valid) remove_known_final(parent_fd, final_name, &reserved);
+        return X_OUTCOME_UNCERTAIN;
+    }
+
+    unsigned char buffer[65536];
+    unsigned long long copied = 0;
+    int result = 0;
+    while (copied < expected_size) {
+        size_t wanted = expected_size - copied < sizeof(buffer)
+            ? (size_t) (expected_size - copied)
+            : sizeof(buffer);
+        ssize_t read_count;
+        do {
+            read_count = read(source_fd, buffer, wanted);
+        } while (read_count < 0 && errno == EINTR);
+        if (read_count <= 0) {
+            result = X_IO;
+            break;
+        }
+        size_t offset = 0;
+        while (offset < (size_t) read_count) {
+            ssize_t write_count;
+            do {
+                write_count = write(final_fd, buffer + offset, (size_t) read_count - offset);
+            } while (write_count < 0 && errno == EINTR);
+            if (write_count <= 0) {
+                result = write_errno(errno);
+                break;
+            }
+            offset += (size_t) write_count;
+            copied += (unsigned long long) write_count;
+        }
+        if (result != 0) break;
+    }
+    if (result == 0 && fsync(final_fd) != 0 && errno != EINVAL) result = write_errno(errno);
+    if (result == 0) {
+        struct stat verified;
+        if (fstat(final_fd, &verified) != 0 ||
+            !payload_security_valid(parent_fd, &verified) ||
+            verified.st_dev != reserved.st_dev || verified.st_ino != reserved.st_ino ||
+            (unsigned long long) verified.st_size != expected_size) {
+            result = X_OUTCOME_UNCERTAIN;
+        } else {
+            *published_status = verified;
+        }
+    }
+    close(source_fd);
+    close(final_fd);
+    if (result != 0) {
+        int cleanup = remove_known_final(parent_fd, final_name, &reserved);
+        return cleanup == 0 ? result : X_OUTCOME_UNCERTAIN;
+    }
+    int payload_cleanup = remove_known_payload(stage_fd, payload_status);
+    if (payload_cleanup != 0) {
+        return X_OUTCOME_UNCERTAIN;
+    }
+    return 0;
 }
 
 static int remove_stage_path(
@@ -752,8 +890,7 @@ static int remove_stage_path(
     if (fstatat(parent_fd, stage_name, &current, AT_SYMLINK_NOFOLLOW) != 0 ||
         !S_ISDIR(current.st_mode) || current.st_dev != held->st_dev ||
         current.st_ino != held->st_ino ||
-        (require_secure_mode &&
-         (current.st_uid != 0 || (current.st_mode & 07777) != 0700))) {
+        (require_secure_mode && !stage_security_valid(parent_fd, &current))) {
         close(stage_fd);
         return X_OUTCOME_UNCERTAIN;
     }
@@ -764,8 +901,7 @@ static int remove_stage_path(
 
 static int finish_stage(int parent_fd, int stage_fd, const char *stage_name) {
     struct stat held;
-    if (fstat(stage_fd, &held) != 0 || !S_ISDIR(held.st_mode) || held.st_uid != 0 ||
-        (held.st_mode & 07777) != 0700) {
+    if (fstat(stage_fd, &held) != 0 || !stage_security_valid(parent_fd, &held)) {
         close(stage_fd);
         return X_OUTCOME_UNCERTAIN;
     }
@@ -796,8 +932,7 @@ static int prepare_stage(int argc, char **argv) {
         close(parent_fd);
         return X_OUTCOME_UNCERTAIN;
     }
-    if (!S_ISDIR(status.st_mode) || status.st_uid != 0 ||
-        (status.st_mode & 07777) != 0700) {
+    if (!stage_security_valid(parent_fd, &status)) {
         int cleanup = remove_stage_path(parent_fd, stage_fd, argv[4], &status, 0);
         close(parent_fd);
         return cleanup == 0 ? X_STAGE_INVALID : X_OUTCOME_UNCERTAIN;
@@ -849,8 +984,7 @@ static int copy_publish_stdin(int argc, char **argv) {
         close(parent_fd);
         return X_OUTCOME_UNCERTAIN;
     }
-    if (!S_ISREG(payload_status.st_mode) || payload_status.st_uid != 0 ||
-        (payload_status.st_mode & 07777) != 0600) {
+    if (!payload_security_valid(parent_fd, &payload_status)) {
         close(payload_fd);
         int cleanup = remove_known_payload(stage_fd, &payload_status);
         int stage_cleanup = finish_stage(parent_fd, stage_fd, argv[4]);
@@ -923,8 +1057,7 @@ static int copy_publish_stdin(int argc, char **argv) {
         struct stat verified_payload;
         if (fstat(payload_fd, &verified_payload) != 0) {
             result = X_IO;
-        } else if (!S_ISREG(verified_payload.st_mode) || verified_payload.st_uid != 0 ||
-            (verified_payload.st_mode & 07777) != 0600 || verified_payload.st_nlink != 1 ||
+        } else if (!payload_security_valid(parent_fd, &verified_payload) ||
             verified_payload.st_dev != payload_status.st_dev ||
             verified_payload.st_ino != payload_status.st_ino) {
             result = X_STAGE_INVALID;
@@ -944,7 +1077,22 @@ static int copy_publish_stdin(int argc, char **argv) {
             argv[5],
             RENAME_NOREPLACE
         );
-        if (renamed != 0) result = write_errno(errno);
+        if (renamed != 0) {
+            int rename_error = errno;
+            if ((rename_error == EINVAL || rename_error == ENOTSUP || rename_error == EOPNOTSUPP) &&
+                is_emulated_storage_fd(parent_fd)) {
+                result = publish_emulated_no_replace(
+                    parent_fd,
+                    stage_fd,
+                    argv[5],
+                    expected_size,
+                    &payload_status,
+                    &payload_status
+                );
+            } else {
+                result = write_errno(rename_error);
+            }
+        }
     }
 
     if (result != 0) {
@@ -998,8 +1146,7 @@ static int remove_stage(int argc, char **argv) {
 
     struct stat payload;
     if (fstatat(stage_fd, PAYLOAD_NAME, &payload, AT_SYMLINK_NOFOLLOW) == 0) {
-        if (!S_ISREG(payload.st_mode) || payload.st_uid != 0 ||
-            (payload.st_mode & 07777) != 0600 || payload.st_nlink != 1) {
+        if (!payload_security_valid(parent_fd, &payload)) {
             close(stage_fd);
             close(parent_fd);
             return X_STAGE_INVALID;
