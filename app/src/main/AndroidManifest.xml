@@ -3,7 +3,9 @@
     <application
         android:name=".ISaverApplication"
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="iSaver"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.ISaver">
         <provider

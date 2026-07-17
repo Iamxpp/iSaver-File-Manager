@@ -19,14 +19,14 @@
 - `mipmap-anydpi-v26/ic_launcher_round.xml`：圆形启动器入口，复用相同图层。
 - `drawable/ic_launcher_background.xml`：冷白到浅蓝背景。
 - `drawable/ic_launcher_foreground.xml`：蓝色双层文件夹矢量前景。
-- `mipmap-hdpi` 至 `mipmap-xxxhdpi`：由同一设计生成的兼容 PNG，供不支持 adaptive icon 或厂商回退路径使用。
+- `mipmap-anydpi/ic_launcher*.xml`：基于同一矢量图层的兼容资源；项目最低 API 29，无需维护重复 PNG。
 - `AndroidManifest.xml`：显式声明 `android:icon` 和 `android:roundIcon`。
 
 ## 视觉约束
 
 - 文件夹主体保持居中，视觉中心可略向下，保留顶部文件夹标签的呼吸空间。
 - 前景安全区至少覆盖标准 adaptive icon 66×66dp 安全区域，不把关键边缘放在遮罩裁切带。
-- 兼容 PNG 不使用透明外轮廓，避免 MIUI 对透明图标额外套白底后产生双重边框。
+- 兼容资源不使用透明外轮廓，避免 MIUI 对透明图标额外套白底后产生双重边框。
 - 图标在浅色、深色桌面壁纸以及 MIUI 默认圆角方形遮罩下均保持清晰。
 
 ## 验证
