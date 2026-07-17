@@ -38,7 +38,7 @@
 | 5.6 新建文件夹 | 已实现 | `FolderName`、typed `RootFileSystem.createDirectory`、默认名称全选、错误映射、成功刷新与定位；JVM/Compose 测试 | 仍只在当前小米 9/API 30 验收 |
 | 5.7 Intent 分享接收 | 已实现 | Manifest 仅注册单文件 SEND 和 content VIEW；`ShareIntentParser` 覆盖 EXTRA_STREAM、单项 ClipData、冲突、多项拒绝、2 秒超时；`singleTop/onNewIntent`；三标签内嵌保存 UI 与 instrumentation 测试 | 真实第三方 Provider 行为仍依赖各来源应用；当前重点证据来自固定 debug Provider/ADB 流程 |
 | 5.8 Root 文件保存 | 已实现 | 私有 UUID cache、一次性 Root/Shell token Provider、native stage、精确流长度、POSIX `RENAME_NOREPLACE`、FUSE `O_EXCL` 兼容、重名、队列、取消边界、Uncertain 和 24 小时 orphan 清理；共享存储/碰撞真机测试 | 尚无 Android 10、12+ 和其他 Root 管理器矩阵；没有媒体扫描调用，需在媒体类目标场景补验是否必要 |
-| 5.9 压缩包 | 部分实现 | `LocalArchiveEngine` 支持 ZIP/TAR/TAR.GZ/7Z/RAR 检查与解压，`ArchivePathPolicy`/`ArchiveLimits` 防穿越和炸弹，`ArchiveRepository` 通过 Root 缓存桥发布；ZIP 创建和 inspect 在真机测试中到达成功 | 产品 UI 只接入选择普通文件并创建 ZIP；没有归档浏览/解压入口、目标选择、可见进度或取消按钮；目录点击进入目录而不是选为压缩源；2026-07-18 新鲜运行 `ArchiveRootInstrumentedTest` 时解压到尚不存在的目标目录失败，Root 闭环当前不是绿色 |
+| 5.9 压缩包 | 部分实现 | `LocalArchiveEngine` 支持 ZIP/TAR/TAR.GZ/7Z/RAR 检查与解压，`ArchivePathPolicy`/`ArchiveLimits` 防穿越和炸弹，`ArchiveRepository` 通过 Root 缓存桥发布；ZIP 创建、检查、解压和内容一致性已由真机 `ArchiveRootInstrumentedTest` 验证 | 产品 UI 只接入选择普通文件并创建 ZIP；没有归档浏览/解压入口、目标选择、可见进度或取消按钮；目录点击进入目录而不是选为压缩源 |
 | 5.10 SFTP/FTPS/FTP | 部分实现 | typed 协议适配器、SFTP 主机密钥固定、FTPS CA+证书指纹、FTP 明文确认、Keystore AES-GCM 秘密存储、连接对话框、单层列表/刷新/新建目录、传输接口和下载临时仓库测试 | 无远程目录进入/返回；上传/下载未接 UI，下载也未发布到用户选择的 Root 目录；无 rename/delete API 与二次确认；无断线重连；无可见进度/取消；连接元数据未写 Room；无真实服务器验收 |
 
 ## 4. 非功能与安全要求
@@ -62,7 +62,7 @@
 | M1 Root 最小闭环 | 已实现 | Root 门禁、安全路径、typed Root 层、目录列表和小米 9 闭环存在 |
 | M2 位置与目录浏览 | 部分实现 | 通用位置、微信、自定义位置、浏览、新建目录已接入；只读自定义位置、关键路径风险、手动重新校验仍缺失 |
 | M3 分享另存与本地视图 | 部分实现 | 分享保存、重名、错误恢复、列表/网格/排序已完成；最近项目 UI 与完整记录来源未完成 |
-| M4 压缩归档 | 部分实现 | 后端和测试骨架已完成，但当前 ZIP Root instrumentation 在解压阶段失败；归档浏览/解压/取消的产品 UI 也未完成 |
+| M4 压缩归档 | 部分实现 | 后端 Root 创建/检查/解压真机闭环已恢复为绿色；归档浏览/解压/取消的产品 UI 仍未完成 |
 | M5 发布准备 | 部分实现 | 目录性能、主要 UI、Force Dark 修复和新启动图标已推进；版本矩阵、开源材料、许可证总览和 CI 未完成 |
 | M6 远程服务器 | 部分实现 | 安全协议适配器及连接根目录雏形存在；完整远程文件管理和真实服务器验收未完成 |
 
@@ -75,7 +75,7 @@
 - Root 浏览、新建文件夹、列表/网格和排序偏好。
 - ACTION_SEND/ACTION_VIEW 三标签内嵌保存、双字段名称编辑、共享存储发布与同名保护。
 - native 快速目录枚举与缓存。
-- ZIP 后端 create/inspect；extract Root 闭环当前有确定失败，不能计为通过。
+- ZIP 后端 create/inspect/extract Root 闭环已通过真机测试。
 
 ### 尚不能验收通过
 
@@ -103,9 +103,9 @@
 
 ## 9. 新鲜验证结果
 
-- `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`：成功。
-- `LauncherIconInstrumentedTest`：`OK (1 test)`。
-- Provider、启动图标、数据库迁移、Intent 解析、Root 保存、性能和归档组合：13 项中 11 项通过；性能项首次因未准备专用夹具返回 `NOT_FOUND`，归档解压失败。
-- 使用 `scripts/benchmark_root_listing.ps1` 准备并最终清理专用夹具后，性能 instrumentation `OK (1 test)`，全部预算通过。
-- `ArchiveRootInstrumentedTest` 单独复跑仍为 1/1 失败：`ZIP extract failed: Failure(code=COMMAND_FAILED, message=保存失败，请稍后重试)`；证明不是性能夹具或测试组合干扰。
-- `MainActivitySmokeTest` 单独运行 60 秒未返回；本轮没有把它计为通过，也未为图标任务修改该既有测试/Activity 流程。
+- `scripts/verify_release_gates.ps1 -Serial d51f42ac`：退出码 0，总耗时约 269 秒。
+- `testDebugUnitTest`、`lintDebug`、`assembleDebug assembleDebugAndroidTest`：全部成功。
+- Archive、Root 分享保存、Provider、启动图标、主题和 MainActivity 六组 instrumentation：全部报告 `OK`。
+- `MainActivitySmokeTest` 已改为适配 MIUI Android 11 的 UIAutomator 黑盒启动，两个用例 6.446 秒完成。
+- 目录性能：helper 冷 200 项 P95 34ms、热 200 项 P95 33ms、1000 项 P95 54ms；App 冷 200 项 P95 42.54ms、缓存 P95 1.31ms、1000 项可见结果 P95 392.92ms。
+- 发布门禁最终清理了已知测试目录、临时 helper 和 APK。

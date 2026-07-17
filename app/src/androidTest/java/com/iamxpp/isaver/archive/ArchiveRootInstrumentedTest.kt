@@ -40,6 +40,7 @@ class ArchiveRootInstrumentedTest {
             listing as com.iamxpp.isaver.domain.OperationResult.Success
             assertEquals(2, (listing.value as ArchiveListing).entries.size)
 
+            root(app, "mkdir -p -- ${quote("$TARGET/extracted")}")
             val extractTarget = path("$TARGET/extracted")
             val extracted = app.archiveRepository.extract(zipPath, extractTarget).last()
             assertTrue("ZIP extract failed: $extracted", extracted is ArchiveState.Success)

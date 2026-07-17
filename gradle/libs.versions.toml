@@ -14,11 +14,15 @@ robolectric = "4.14.1"
 hilt = "2.52"
 androidxTestCore = "1.5.0"
 androidxTestExtJunit = "1.2.1"
+androidxTestRunner = "1.6.2"
+espresso = "3.6.1"
+uiautomator = "2.3.0"
 commonsCompress = "1.27.1"
 junrar = "7.5.5"
 xz = "1.9"
 commonsNet = "3.11.1"
 jsch = "0.2.20"
+tracing = "1.1.0"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -36,6 +40,9 @@ libsu-core = { module = "com.github.topjohnwu.libsu:core", version.ref = "libsu"
 junit = { module = "junit:junit", version.ref = "junit" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExtJunit" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
+espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
+uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
 compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
@@ -51,6 +58,7 @@ junrar = { module = "com.github.junrar:junrar", version.ref = "junrar" }
 xz = { module = "org.tukaani:xz", version.ref = "xz" }
 commons-net = { module = "commons-net:commons-net", version.ref = "commonsNet" }
 jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
+androidx-tracing = { module = "androidx.tracing:tracing", version.ref = "tracing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

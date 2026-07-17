@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.xz)
     implementation(libs.commons.net)
     implementation(libs.jsch)
+    implementation(libs.androidx.tracing)
     ksp(libs.room.compiler)
     ksp(libs.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)
@@ -62,6 +63,9 @@ dependencies {
     testImplementation(libs.robolectric)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.espresso.core)
+    androidTestImplementation(libs.uiautomator)
     androidTestImplementation(libs.compose.ui.test.junit4)
     androidTestImplementation(libs.room.testing)
 }

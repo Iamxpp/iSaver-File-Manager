@@ -1,61 +1,62 @@
 package com.iamxpp.isaver
 
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.junit.Rule
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
 
+@RunWith(AndroidJUnit4::class)
 class MainActivitySmokeTest {
-    @get:Rule
-    val compose = createAndroidComposeRule<MainActivity>()
+    private lateinit var device: UiDevice
+
+    @Before
+    fun prepareDevice() {
+        device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        device.pressHome()
+    }
 
     @Test
     fun grantedRootStartsInViewsHome() {
-        compose.waitUntil(timeoutMillis = 20_000) {
-            compose.onAllNodes(hasText("视图")).fetchSemanticsNodes().isNotEmpty()
-        }
+        launch("-a android.intent.action.MAIN -c android.intent.category.LAUNCHER")
 
-        compose.onNode(
-            hasText("视图") and
-                SemanticsMatcher.expectValue(SemanticsProperties.Selected, true),
-        ).assertIsSelected()
-        compose.onNodeWithText("最近项目").assertIsDisplayed()
-        compose.onNodeWithText("浏览").assertIsDisplayed()
-        compose.onNodeWithText("应用位置").assertIsDisplayed()
+        assertTrue(device.wait(Until.hasObject(By.text("视图")), TIMEOUT_MILLIS))
+        assertTrue(device.hasObject(By.text("最近项目")))
+        assertTrue(device.hasObject(By.text("浏览")))
+        assertTrue(device.hasObject(By.text("应用位置")))
     }
 
     @Test
     fun contentViewKeepsThreeTabHomeAndShowsInlineSaveBar() {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setClass(compose.activity, MainActivity::class.java)
-            setDataAndType(
-                Uri.parse("content://com.iamxpp.isaver.debug-share/report.pdf"),
-                "application/pdf",
-            )
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
+        launch(
+            "-a android.intent.action.VIEW " +
+                "-d content://com.iamxpp.isaver.debug-share/report.pdf " +
+                "-t application/pdf -f 1",
+        )
 
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        instrumentation.runOnMainSync {
-            instrumentation.callActivityOnNewIntent(compose.activity, intent)
-        }
+        assertTrue(device.wait(Until.hasObject(By.text("测试 报告")), TIMEOUT_MILLIS))
+        assertTrue(device.hasObject(By.text("最近项目")))
+        assertTrue(device.hasObject(By.text("浏览")))
+        assertTrue(device.hasObject(By.text("应用位置")))
+        assertTrue(device.hasObject(By.desc("文件名")))
+        assertTrue(device.hasObject(By.desc("扩展名")))
+        assertTrue(device.hasObject(By.text("存储")))
+        assertFalse(device.hasObject(By.desc("更多操作")))
+    }
 
-        compose.waitUntil(timeoutMillis = 20_000) {
-            compose.onAllNodes(hasText("测试 报告")).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("最近项目").assertIsDisplayed()
-        compose.onNodeWithText("浏览").assertIsDisplayed()
-        compose.onNodeWithText("应用位置").assertIsDisplayed()
-        compose.onNodeWithTag("inline-save-bar").assertIsDisplayed()
-        compose.onNodeWithTag("files-top-bar-overflow").assertDoesNotExist()
+    private fun launch(arguments: String) {
+        val result = device.executeShellCommand(
+            "am start -W $arguments -n com.iamxpp.isaver/.MainActivity",
+        )
+        assertTrue("Activity launch failed: $result", result.contains("Status: ok"))
+    }
+
+    private companion object {
+        const val TIMEOUT_MILLIS = 20_000L
     }
 }
