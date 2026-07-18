@@ -586,6 +586,27 @@ class LocationHomeScreenTest {
     }
 
     @Test
+    fun protectedReadonlyLocationShowsWarningAndSupportsSingleRevalidation() {
+        val custom = direct("custom.system", "系统目录", "/system/etc", StorageLocation.Source.CUSTOM)
+        var revalidated: LocationId? = null
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(
+                    loading = false,
+                    customLocations = listOf(CustomLocationState(custom, LocationAvailability.Available(true, false))),
+                ),
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { _, _ -> }, onAdd = { _, _ -> }, onEdit = { _, _, _ -> },
+                onRemove = {}, onRetry = {}, onRevalidate = { revalidated = it },
+            )
+        }
+
+        compose.onNodeWithText("系统保护区域 · 只读").assertIsDisplayed()
+        compose.onNodeWithContentDescription("重新校验视图：系统目录").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(custom.id, revalidated) }
+    }
+
+    @Test
     fun blankRemarkDoesNotSubmit() {
         var added: Pair<String, String>? = null
         compose.setContent {

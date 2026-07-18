@@ -79,11 +79,28 @@ class LocationHomeViewModelTest {
         assertEquals(0,vm.state.value.saveSuccessVersion)
     }
 
-    @Test fun `add maps invalid path unwritable and duplicate without leaking path`()=runTest{
+    @Test fun `add maps invalid path and duplicate while allowing readonly directory`()=runTest{
         val store=FakeStore();val fs=FakeFs();val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle()
         vm.addCustomLocation("x"," relative");advanceUntilIdle();assertEquals("路径格式无效",vm.state.value.addError)
-        fs.stats["/x"]=entry("/x",EntryType.DIRECTORY,true,false);vm.addCustomLocation("x","/x");advanceUntilIdle();assertEquals("目录不可写",vm.state.value.addError)
+        fs.stats["/x"]=entry("/x",EntryType.DIRECTORY,true,false);vm.addCustomLocation("x","/x");advanceUntilIdle();assertNull(vm.state.value.addError);assertEquals("/x",store.addedPath?.value)
         fs.stats["/x"]=entry("/x",EntryType.DIRECTORY,true,true);store.addResult=CustomLocationResult.DuplicatePath;vm.addCustomLocation("x","/x");advanceUntilIdle();assertEquals("该路径已存在",vm.state.value.addError)
+    }
+
+    @Test fun `single custom location revalidation probes only requested row`()=runTest{
+        val first=StorageLocation.Direct(LocationId.of("custom.first"),"first",root("/first"),StorageLocation.Source.CUSTOM)
+        val second=StorageLocation.Direct(LocationId.of("custom.second"),"second",root("/second"),StorageLocation.Source.CUSTOM)
+        val store=FakeStore().apply{flow.value=listOf(first,second)}
+        val fs=FakeFs().apply{stats["/first"]=entry("/first",EntryType.DIRECTORY,true,true);stats["/second"]=entry("/second",EntryType.DIRECTORY,true,false)}
+        val vm=LocationHomeViewModel(LocationHomeAppResolver{ResolvedAppLocation(it.id,it.displayName,emptyList(),0)},store,fs,StandardTestDispatcher(testScheduler));advanceUntilIdle()
+        val initialCalls=fs.statCalls
+        fs.stats.remove("/first")
+
+        vm.revalidateCustomLocation(first.id)
+        advanceUntilIdle()
+
+        assertEquals(initialCalls+1,fs.statCalls)
+        assertTrue(vm.state.value.customLocations.first().availability is LocationAvailability.Unavailable)
+        assertTrue(vm.state.value.customLocations.last().availability is LocationAvailability.Available)
     }
     @Test fun `edit validates and updates exact id name and raw path`()=runTest{
         val store=FakeStore();val fs=FakeFs();val raw="/edited \n";fs.stats[raw]=entry(raw,EntryType.DIRECTORY,true,true)

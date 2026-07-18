@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.ResolvedAppLocation
 import com.iamxpp.isaver.locations.StorageLocation
@@ -59,6 +60,7 @@ fun LocationHomeScreen(
     onEdit: (LocationId, String, String) -> Unit,
     onRemove: (LocationId) -> Unit,
     onRetry: () -> Unit,
+    onRevalidate: (LocationId) -> Unit = {},
     onClearAddError: () -> Unit = {},
     sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     onDisplayModeChange: (DisplayMode) -> Unit = {},
@@ -107,6 +109,7 @@ fun LocationHomeScreen(
                 onOpenLocation = onOpenLocation,
                 onEdit = { onClearAddError(); editor = it },
                 onRemove = { removal = it },
+                onRevalidate = onRevalidate,
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -116,6 +119,7 @@ fun LocationHomeScreen(
                 onOpenLocation = onOpenLocation,
                 onEdit = { onClearAddError(); editor = it },
                 onRemove = { removal = it },
+                onRevalidate = onRevalidate,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -243,6 +247,7 @@ private fun LocationList(
     onOpenLocation: (RootPath, String) -> Unit,
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
+    onRevalidate: (LocationId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier) {
@@ -288,10 +293,16 @@ private fun LocationList(
                 LocationSection.CUSTOM -> {
                     item(key = "section-custom") { SectionTitle("自定义位置") }
                     items(content.custom, key = { it.location.id.value }) { item ->
-                        LocationRow(item.location, item.availability.label, item.availability) {
+                        LocationRow(item.location, item.availability.label(item.location.path), item.availability) {
                             onOpenLocation(item.location.path, item.location.displayName)
                         }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                            TextButton(
+                                onClick = { onRevalidate(item.location.id) },
+                                modifier = Modifier.semantics {
+                                    contentDescription = "重新校验视图：${item.location.displayName}"
+                                },
+                            ) { Text("重新校验") }
                             TextButton(
                                 onClick = { onEdit(item.location) },
                                 modifier = Modifier.semantics {
@@ -331,6 +342,7 @@ private fun LocationHomeGrid(
     onOpenLocation: (RootPath, String) -> Unit,
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
+    onRevalidate: (LocationId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyVerticalGrid(
@@ -364,6 +376,7 @@ private fun LocationHomeGrid(
                                 onOpenLocation = onOpenLocation,
                                 onEdit = onEdit,
                                 onRemove = onRemove,
+                                onRevalidate = onRevalidate,
                             )
                         }
                     }
@@ -382,6 +395,7 @@ private fun LocationHomeGrid(
                             onOpenLocation,
                             onEdit,
                             onRemove,
+                            onRevalidate,
                         )
                     }
                 }
@@ -395,12 +409,13 @@ private fun LocationHomeGrid(
                     } else {
                         locationItems(
                             content.custom.map {
-                                PresentedLocation(it.location, it.availability.label, it.availability)
+                                PresentedLocation(it.location, it.availability.label(it.location.path), it.availability)
                             },
                             "grid-custom",
                             onOpenLocation,
                             onEdit,
                             onRemove,
+                            onRevalidate,
                         )
                     }
                 }
@@ -422,6 +437,7 @@ private fun LazyGridScope.locationItems(
     onOpenLocation: (RootPath, String) -> Unit,
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
+    onRevalidate: (LocationId) -> Unit,
 ) {
     gridItems(entries, key = { it.location.id.value }) { item ->
         Column(Modifier.testTag(testTag)) {
@@ -434,6 +450,12 @@ private fun LazyGridScope.locationItems(
             )
             if (item.location.source == StorageLocation.Source.CUSTOM) {
                 Row {
+                    TextButton(
+                        onClick = { onRevalidate(item.location.id) },
+                        modifier = Modifier.semantics {
+                            contentDescription = "重新校验视图：${item.location.displayName}"
+                        },
+                    ) { Text("校验") }
                     TextButton(
                         onClick = { onEdit(item.location) },
                         modifier = Modifier.semantics { contentDescription = "编辑视图：${item.location.displayName}" },
@@ -535,12 +557,14 @@ private data class PresentedLocation(
     val availability: LocationAvailability? = null,
 )
 
-private val LocationAvailability.label: String
-    get() = when (this) {
+private fun LocationAvailability.label(path: RootPath): String {
+    if (RootPathRiskPolicy.isProtected(path)) return "系统保护区域 · 只读"
+    return when (this) {
         LocationAvailability.Checking -> "正在检查…"
         is LocationAvailability.Available -> if (writable) "可读写" else "只读"
         is LocationAvailability.Unavailable -> reason
     }
+}
 
 private val LocationAvailability?.isOpenable: Boolean
     get() = this == null || this is LocationAvailability.Available && readable

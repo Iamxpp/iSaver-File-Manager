@@ -10,6 +10,7 @@ import com.iamxpp.isaver.data.local.ISaverDatabase
 import com.iamxpp.isaver.data.root.LibsuRootSession
 import com.iamxpp.isaver.data.root.RootSession
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
@@ -155,6 +156,9 @@ class ISaverApplication : Application() {
     }
 
     private suspend fun validateTransferTarget(path: RootPath): OperationResult<RootPath> {
+        if (RootPathRiskPolicy.isProtected(path)) {
+            return OperationResult.Failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览")
+        }
         val original = rootFileSystem.stat(path)
         if (original !is OperationResult.Success ||
             original.value.type != EntryType.DIRECTORY ||

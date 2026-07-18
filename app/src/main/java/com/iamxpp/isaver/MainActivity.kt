@@ -140,6 +140,7 @@ class MainActivity : ComponentActivity() {
                         onRemoveCustomLocation = locationHomeViewModel::removeCustomLocation,
                         onRetryLocations = locationHomeViewModel::refresh,
                         onClearLocationError = locationHomeViewModel::clearAddError,
+                        onRevalidateCustomLocation = locationHomeViewModel::revalidateCustomLocation,
                         onEnterDirectory = { browserViewModel.enterDirectory(it) },
                         onBrowserBack = ::handleBrowserBack,
                         onRetryBrowser = browserViewModel::retry,
