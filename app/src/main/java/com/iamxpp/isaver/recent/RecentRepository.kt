@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.map
 
 enum class RecentItemType { DIRECTORY, FILE, ARCHIVE }
 
-enum class RecentActivity { ACCESSED, SAVED }
+enum class RecentActivity { ACCESSED, SAVED, COMPRESSED, EXTRACTED }
 
 data class RecentItem(
     val path: RootPath,
@@ -46,6 +46,14 @@ class RecentRepository(
         type: RecentItemType,
     ) {
         record(canonicalPath, displayName, note, type, RecentActivity.SAVED)
+    }
+
+    suspend fun recordCompressed(canonicalPath: RootPath, displayName: String) {
+        record(canonicalPath, displayName, null, RecentItemType.ARCHIVE, RecentActivity.COMPRESSED)
+    }
+
+    suspend fun recordExtracted(canonicalPath: RootPath, displayName: String) {
+        record(canonicalPath, displayName, null, RecentItemType.DIRECTORY, RecentActivity.EXTRACTED)
     }
 
     suspend fun markAvailability(canonicalPath: RootPath, available: Boolean): Boolean =

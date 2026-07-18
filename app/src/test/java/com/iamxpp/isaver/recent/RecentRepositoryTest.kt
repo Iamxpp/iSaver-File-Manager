@@ -102,6 +102,30 @@ class RecentRepositoryTest {
     }
 
     @Test
+    fun `record compressed stores archive activity`() = runTest {
+        val dao = FakeRecentItemDao()
+        val repository = RecentRepository(dao = dao, clock = { 11L })
+
+        repository.recordCompressed(root("/archives/output.zip"), "output.zip")
+
+        val item = repository.observeRecent().first().single()
+        assertEquals(RecentActivity.COMPRESSED, item.activity)
+        assertEquals(RecentItemType.ARCHIVE, item.type)
+    }
+
+    @Test
+    fun `record extracted stores destination directory activity`() = runTest {
+        val dao = FakeRecentItemDao()
+        val repository = RecentRepository(dao = dao, clock = { 12L })
+
+        repository.recordExtracted(root("/extract/output"), "output")
+
+        val item = repository.observeRecent().first().single()
+        assertEquals(RecentActivity.EXTRACTED, item.activity)
+        assertEquals(RecentItemType.DIRECTORY, item.type)
+    }
+
+    @Test
     fun `corrupt rows are skipped without hiding valid recent items`() = runTest {
         val dao = FakeRecentItemDao()
         dao.seed(
