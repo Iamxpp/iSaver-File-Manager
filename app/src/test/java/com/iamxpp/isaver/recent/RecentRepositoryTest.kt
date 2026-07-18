@@ -126,6 +126,22 @@ class RecentRepositoryTest {
     }
 
     @Test
+    fun `plain access does not downgrade a meaningful operation activity`() = runTest {
+        val dao = FakeRecentItemDao()
+        var now = 12L
+        val repository = RecentRepository(dao = dao, clock = { now })
+        val output = root("/extract/output")
+        repository.recordExtracted(output, "output")
+
+        now = 13L
+        repository.recordAccess(output, "output", null, RecentItemType.DIRECTORY)
+
+        val item = repository.observeRecent().first().single()
+        assertEquals(RecentActivity.EXTRACTED, item.activity)
+        assertEquals(13L, item.lastActivityAt)
+    }
+
+    @Test
     fun `corrupt rows are skipped without hiding valid recent items`() = runTest {
         val dao = FakeRecentItemDao()
         dao.seed(
@@ -156,6 +172,8 @@ class RecentRepositoryTest {
         override suspend fun upsert(entity: RecentItemEntity) {
             rows[entity.absolutePath] = entity
         }
+
+        override suspend fun findByPath(path: String): RecentItemEntity? = rows[path]
 
         override suspend fun deleteBeyondLimit(limit: Int) {
             val kept = rows.values

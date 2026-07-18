@@ -54,6 +54,7 @@ class MainActivitySmokeTest {
             "am start -W $arguments -n com.iamxpp.isaver/.MainActivity",
         )
         assertTrue("Activity launch failed: $result", result.contains("Status: ok"))
+        device.waitForIdle()
     }
 
     private companion object {

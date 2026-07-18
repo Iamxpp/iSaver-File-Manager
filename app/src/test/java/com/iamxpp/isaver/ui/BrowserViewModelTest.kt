@@ -1077,12 +1077,52 @@ class BrowserViewModelTest {
         assertEquals(450, vm.state.value.allEntries.size)
     }
 
+    @Test fun `successful directory load records canonical access and failure does not`() = runTest {
+        val recorded = mutableListOf<Pair<RootPath, String>>()
+        val canonical = RootPath.parse("/canonical/location").getOrThrow()
+        val fileSystem = FakeFileSystem(
+            canonicalBlock = { OperationResult.Success(canonical) },
+            listBlock = { OperationResult.Success(emptyList()) },
+        )
+        val vm = BrowserViewModel(
+            fileSystem,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            recordDirectoryAccess = { path, title -> recorded += path to title },
+        )
+
+        vm.openRoot(RootPath.parse("/alias/location").getOrThrow(), "我的位置")
+        advanceUntilIdle()
+
+        assertEquals(listOf(canonical to "我的位置"), recorded)
+    }
+
+    @Test fun `automatic post extraction root load does not overwrite extracted activity`() = runTest {
+        val recorded = mutableListOf<Pair<RootPath, String>>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            recordDirectoryAccess = { path, title -> recorded += path to title },
+        )
+
+        vm.openRoot(
+            RootPath.parse("/data/local/tmp/isaver-test/ui-flow/sample").getOrThrow(),
+            "sample",
+            recordAccess = false,
+        )
+        advanceUntilIdle()
+
+        assertTrue(recorded.isEmpty())
+    }
+
     private class FakeFileSystem(
         val statBlock: suspend (RootPath) -> OperationResult<DirectoryEntry> = { path ->
             OperationResult.Success(DirectoryEntry(path, "current", EntryType.DIRECTORY, 0, 0, true, true, false))
         },
         val createBlock: suspend (RootPath, FolderName) -> OperationResult<DirectoryEntry> = { _, _ -> error("unused") },
         val snapshotBlock: (suspend (RootPath) -> OperationResult<DirectorySnapshot>)? = null,
+        val canonicalBlock: suspend (RootPath) -> OperationResult<RootPath> = { OperationResult.Success(it) },
         val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>,
     ) : RootFileSystem {
         val listed = mutableListOf<String>()
@@ -1105,7 +1145,7 @@ class BrowserViewModelTest {
         }
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> { listed += path.value; return listBlock(path) }
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = statBlock(path)
-        override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = error("unused")
+        override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = canonicalBlock(path)
         override suspend fun createDirectory(parent: RootPath, name: FolderName): OperationResult<DirectoryEntry> = createBlock(parent, name)
     }
 

@@ -8,6 +8,7 @@ data class RecentUiState(
     val items: List<RecentUiItem> = emptyList(),
     val refreshing: Boolean = false,
     val errorMessage: String? = null,
+    val fileInfo: DirectoryEntry? = null,
 )
 
 data class RecentUiItem(

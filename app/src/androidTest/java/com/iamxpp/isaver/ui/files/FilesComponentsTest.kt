@@ -27,6 +27,24 @@ import org.junit.Rule
 import org.junit.Test
 
 class FilesComponentsTest {
+    @Test
+    fun primaryActionUsesContextLabel() {
+        compose.setContent {
+            FilesTopBar(
+                title = "目标",
+                onOverflow = {},
+                saveAction = FilesSaveAction(
+                    label = "解压到此处",
+                    enabled = true,
+                    onSave = {},
+                ),
+            )
+        }
+
+        compose.onNodeWithText("解压到此处").assertIsDisplayed()
+        compose.onNodeWithText("存储").assertDoesNotExist()
+    }
+
     @get:Rule
     val compose = createComposeRule()
 

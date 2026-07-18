@@ -93,7 +93,7 @@ fun RecentScreen(
 }
 
 private fun RecentUiItem.metadata(): String = when (availability) {
-    RecentAvailability.Checking -> status
+    RecentAvailability.Checking -> "${item.activity.label()} · $status"
     is RecentAvailability.Unavailable -> status
     is RecentAvailability.Available -> item.activity.label()
 }

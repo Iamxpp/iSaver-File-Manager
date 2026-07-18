@@ -19,6 +19,9 @@ abstract class RecentItemDao {
     @Upsert
     abstract suspend fun upsert(entity: RecentItemEntity)
 
+    @Query("SELECT * FROM recent_items WHERE absolutePath = :path LIMIT 1")
+    abstract suspend fun findByPath(path: String): RecentItemEntity?
+
     @Query(
         """
         DELETE FROM recent_items
@@ -38,6 +41,23 @@ abstract class RecentItemDao {
     open suspend fun upsertAndTrim(entity: RecentItemEntity, limit: Int) {
         require(limit > 0)
         upsert(entity)
+        deleteBeyondLimit(limit)
+    }
+
+    @Transaction
+    open suspend fun upsertAccessAndTrim(
+        entity: RecentItemEntity,
+        limit: Int,
+        accessActivity: String,
+    ) {
+        require(limit > 0)
+        val existing = findByPath(entity.absolutePath)
+        val merged = if (existing != null && existing.activity != accessActivity) {
+            entity.copy(activity = existing.activity)
+        } else {
+            entity
+        }
+        upsert(merged)
         deleteBeyondLimit(limit)
     }
 }

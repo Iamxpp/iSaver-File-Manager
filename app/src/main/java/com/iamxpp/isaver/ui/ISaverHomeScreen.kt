@@ -70,6 +70,7 @@ fun ISaverHomeScreen(
     recentState: RecentUiState = RecentUiState(),
     onOpenRecent: (RecentUiItem) -> Unit = {},
     onRefreshRecent: () -> Unit = {},
+    onDismissRecentFileInfo: () -> Unit = {},
     archiveState: ArchiveUiState = ArchiveUiState(),
     onArchiveBack: () -> Unit = {},
     onEnterArchiveDirectory: (com.iamxpp.isaver.archive.ArchiveNode) -> Unit = {},
@@ -79,6 +80,7 @@ fun ISaverHomeScreen(
     onRetryArchive: () -> Unit = {},
     onCancelExtraction: () -> Unit = {},
     onDismissArchiveOperation: () -> Unit = {},
+    onExtractHere: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val saveMode = transferState != TransferUiState.Idle
@@ -90,6 +92,14 @@ fun ISaverHomeScreen(
         )
     } else {
         null
+    }
+    val extractionDestination = homeState.destination as? HomeDestination.ExtractionTarget
+    val extractionAction = extractionDestination?.let {
+        FilesSaveAction(
+            enabled = it.targetBrowser != null && browserState.canCreateDirectory,
+            onSave = onExtractHere,
+            label = "解压到此处",
+        )
     }
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
@@ -157,21 +167,47 @@ fun ISaverHomeScreen(
                 onDismissOperation = onDismissArchiveOperation,
                 modifier = Modifier.weight(1f),
             )
-            is HomeDestination.ExtractionTarget -> LocationHomeScreen(
-                state = locationState,
-                displayMode = displayMode,
-                onOpenLocation = onOpenLocation,
-                onAdd = onAddCustomLocation,
-                onEdit = onEditCustomLocation,
-                onRemove = onRemoveCustomLocation,
-                onRetry = onRetryLocations,
-                onClearAddError = onClearLocationError,
-                onRevalidate = onRevalidateCustomLocation,
-                sortSpec = sortSpec,
-                onDisplayModeChange = onDisplayModeChange,
-                onSortChange = onSortChange,
-                modifier = Modifier.weight(1f),
-            )
+            is HomeDestination.ExtractionTarget -> if (
+                homeState.selectedTab == HomeTab.BROWSE && extractionDestination?.targetBrowser != null
+            ) {
+                BrowserScreen(
+                    state = browserState,
+                    onEnterDirectory = onEnterDirectory,
+                    onBack = onBrowserBack,
+                    onRetry = onRetryBrowser,
+                    onLoadMore = onLoadMore,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onDisplayModeChange = onDisplayModeChange,
+                    onSortChange = onSortChange,
+                    saveAction = extractionAction,
+                    modifier = Modifier.weight(1f),
+                )
+            } else if (homeState.selectedTab == HomeTab.RECENT) {
+                RecentScreen(
+                    state = recentState,
+                    displayMode = displayMode,
+                    onOpen = onOpenRecent,
+                    onRefresh = onRefreshRecent,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                LocationHomeScreen(
+                    state = locationState,
+                    displayMode = displayMode,
+                    onOpenLocation = onOpenLocation,
+                    onAdd = onAddCustomLocation,
+                    onEdit = onEditCustomLocation,
+                    onRemove = onRemoveCustomLocation,
+                    onRetry = onRetryLocations,
+                    onClearAddError = onClearLocationError,
+                    onRevalidate = onRevalidateCustomLocation,
+                    sortSpec = sortSpec,
+                    onDisplayModeChange = onDisplayModeChange,
+                    onSortChange = onSortChange,
+                    saveAction = extractionAction,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         if (saveMode) {
             InlineSaveBar(
@@ -199,6 +235,7 @@ fun ISaverHomeScreen(
             modifier = Modifier.testTag("files-bottom-bar"),
         )
     }
+    recentState.fileInfo?.let { FileInfoDialog(it, onDismissRecentFileInfo) }
 }
 
 private fun LocationHomeUiState.visibleLocationCount(): Int =

@@ -43,6 +43,46 @@ class ISaverHomeViewModelTest {
     }
 
     @Test
+    fun `extraction target keeps archive identity while tabs and target browser change`() {
+        val viewModel = ISaverHomeViewModel(SavedStateHandle())
+        val source = RootPath.parse("/archives/a.zip").getOrThrow()
+        val target = RootPath.parse("/data/local/tmp/output").getOrThrow()
+        viewModel.openArchive(source, "a.zip", HomeTab.RECENT)
+        viewModel.chooseExtractionTarget()
+
+        viewModel.selectTab(HomeTab.BROWSE)
+        assertTrue((viewModel.state.value.destination as HomeDestination.ExtractionTarget).targetBrowser != null)
+        viewModel.selectTab(HomeTab.VIEWS)
+        viewModel.openLocation(target, "输出", HomeTab.VIEWS)
+
+        val choosing = viewModel.state.value.destination as HomeDestination.ExtractionTarget
+        assertEquals(source, choosing.source)
+        assertEquals(HomeDestination.Browser(target, "输出", HomeTab.VIEWS), choosing.targetBrowser)
+        viewModel.returnToArchive()
+        assertEquals(HomeDestination.Archive(source, "a.zip", HomeTab.RECENT), viewModel.state.value.destination)
+    }
+
+    @Test
+    fun `extraction target recent and views tabs keep no hidden browser target`() {
+        val viewModel = ISaverHomeViewModel(SavedStateHandle())
+        val source = RootPath.parse("/archives/a.zip").getOrThrow()
+        viewModel.openArchive(source, "a.zip", HomeTab.BROWSE)
+        viewModel.chooseExtractionTarget()
+        viewModel.selectTab(HomeTab.BROWSE)
+
+        viewModel.selectTab(HomeTab.RECENT)
+        val recent = viewModel.state.value.destination as HomeDestination.ExtractionTarget
+        assertEquals(HomeTab.RECENT, viewModel.state.value.selectedTab)
+        assertEquals(null, recent.targetBrowser)
+
+        viewModel.selectTab(HomeTab.VIEWS)
+        val views = viewModel.state.value.destination as HomeDestination.ExtractionTarget
+        assertEquals(HomeTab.VIEWS, viewModel.state.value.selectedTab)
+        assertEquals(null, views.targetBrowser)
+        assertEquals(source, views.source)
+    }
+
+    @Test
     fun `restores a custom browser destination from saved primitive state`() {
         val handle = SavedStateHandle()
         val path = RootPath.parse("/data/local/tmp/custom").getOrThrow()
@@ -138,14 +178,23 @@ class ISaverHomeViewModelTest {
     }
 
     @Test
-    fun `browse source rejects any destination other than canonical root browser`() {
-        assertThrows(IllegalArgumentException::class.java) {
-            HomeDestination.Browser(
-                RootPath.parse("/not-root").getOrThrow(),
-                "错误标题",
-                HomeTab.BROWSE,
-            )
-        }
+    fun `browse source preserves and restores an extracted output directory`() {
+        val handle = SavedStateHandle()
+        val output = RootPath.parse("/data/local/tmp/isaver-test/ui-flow/sample").getOrThrow()
+        ISaverHomeViewModel(handle).openLocation(
+            output,
+            "sample",
+            HomeTab.BROWSE,
+            recordAccess = false,
+        )
+
+        val restored = ISaverHomeViewModel(handle)
+
+        assertEquals(HomeTab.BROWSE, restored.state.value.selectedTab)
+        assertEquals(
+            HomeDestination.Browser(output, "sample", HomeTab.BROWSE, recordAccess = false),
+            restored.state.value.destination,
+        )
     }
 
     @Test

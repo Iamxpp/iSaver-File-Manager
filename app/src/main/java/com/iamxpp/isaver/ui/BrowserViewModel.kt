@@ -34,6 +34,8 @@ class BrowserViewModel(
     private val ioDispatcher: CoroutineDispatcher,
     private val preferencesStore: BrowserPreferencesStore,
     private val archiveRepository: ArchiveRepository? = null,
+    private val recordDirectoryAccess: suspend (RootPath, String) -> Unit = { _, _ -> },
+    private val recordFileAccess: suspend (RootPath, String) -> Unit = { _, _ -> },
     private val snapshotCache: DirectorySnapshotCache = DirectorySnapshotCache(),
     private val sorter: (List<DirectoryEntry>, SortSpec) -> List<DirectoryEntry> = FileEntrySorter::sort,
 ) : ViewModel() {
@@ -82,8 +84,12 @@ class BrowserViewModel(
                 mutableState.value = mutableState.value.copy(archiveToOpen = entry, fileInfo = null)
             } else {
                 mutableState.value = mutableState.value.copy(fileInfo = entry, archiveToOpen = null)
+                recordSuccessfulFileAccess(entry)
             }
-            EntryType.OTHER -> mutableState.value = mutableState.value.copy(fileInfo = entry, archiveToOpen = null)
+            EntryType.OTHER -> {
+                mutableState.value = mutableState.value.copy(fileInfo = entry, archiveToOpen = null)
+                recordSuccessfulFileAccess(entry)
+            }
         }
     }
 
@@ -150,11 +156,11 @@ class BrowserViewModel(
         mutableState.value = mutableState.value.copy(compressionMessage = null)
     }
 
-    fun openRoot(path: RootPath, title: String) {
+    fun openRoot(path: RootPath, title: String, recordAccess: Boolean = true) {
         stack.clear()
         selectedRootPath = path
         mutableState.value = mutableState.value.copy(rootTitle = title)
-        load(path)
+        load(path, recordAccess = recordAccess)
     }
 
     fun back(): BrowserBackResult {
@@ -238,7 +244,11 @@ class BrowserViewModel(
         )
     }
 
-    private fun load(path: RootPath, locationTarget: RootPath? = null) {
+    private fun load(
+        path: RootPath,
+        locationTarget: RootPath? = null,
+        recordAccess: Boolean = true,
+    ) {
         val request = ++generation
         loadJob?.cancel()
         resetPresentationWindow()
@@ -305,7 +315,7 @@ class BrowserViewModel(
                             }
                         }
                     }
-                    is OperationResult.Success -> publishSnapshot(path, result.value, request)
+                    is OperationResult.Success -> publishSnapshot(path, result.value, request, recordAccess)
                 }
             } catch (cancelled: CancellationException) {
                 if (request == generation) {
@@ -337,6 +347,7 @@ class BrowserViewModel(
         path: RootPath,
         snapshot: DirectorySnapshot,
         request: Long,
+        recordAccess: Boolean,
     ) {
         while (request == generation) {
             val presentationState = mutableState.value
@@ -366,7 +377,40 @@ class BrowserViewModel(
                 canCreateDirectory = snapshot.parentWritable && !RootPathRiskPolicy.isProtected(path),
                 hasMore = visibleCount < derived.size,
             )
+            if (recordAccess) {
+                recordSuccessfulDirectoryAccess(path, mutableState.value.title)
+            }
             return
+        }
+    }
+
+    private fun recordSuccessfulDirectoryAccess(path: RootPath, title: String) {
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val canonical = rootFileSystem.canonicalize(path)
+                if (canonical is OperationResult.Success) {
+                    recordDirectoryAccess(canonical.value, title)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                Unit
+            }
+        }
+    }
+
+    private fun recordSuccessfulFileAccess(entry: DirectoryEntry) {
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val canonical = rootFileSystem.canonicalize(entry.path)
+                if (canonical is OperationResult.Success) {
+                    recordFileAccess(canonical.value, entry.name)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                Unit
+            }
         }
     }
 

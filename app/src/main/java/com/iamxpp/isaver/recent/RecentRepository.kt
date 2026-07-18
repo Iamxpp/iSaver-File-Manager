@@ -35,7 +35,14 @@ class RecentRepository(
         note: String?,
         type: RecentItemType,
     ) {
-        record(canonicalPath, displayName, note, type, RecentActivity.ACCESSED)
+        record(
+            canonicalPath,
+            displayName,
+            note,
+            type,
+            RecentActivity.ACCESSED,
+            preserveMeaningfulActivity = true,
+        )
     }
 
     /** Records only a confirmed successful save/transfer to the canonical local Root path. */
@@ -65,19 +72,22 @@ class RecentRepository(
         note: String?,
         type: RecentItemType,
         activity: RecentActivity,
+        preserveMeaningfulActivity: Boolean = false,
     ) {
-        dao.upsertAndTrim(
-            RecentItemEntity(
-                absolutePath = canonicalPath.value,
-                displayName = displayName.trim(),
-                note = note?.trim()?.takeIf(String::isNotEmpty),
-                itemType = type.name,
-                activity = activity.name,
-                lastActivityAt = clock(),
-                available = true,
-            ),
-            MAX_RECENT_ITEMS,
+        val entity = RecentItemEntity(
+            absolutePath = canonicalPath.value,
+            displayName = displayName.trim(),
+            note = note?.trim()?.takeIf(String::isNotEmpty),
+            itemType = type.name,
+            activity = activity.name,
+            lastActivityAt = clock(),
+            available = true,
         )
+        if (preserveMeaningfulActivity) {
+            dao.upsertAccessAndTrim(entity, MAX_RECENT_ITEMS, RecentActivity.ACCESSED.name)
+        } else {
+            dao.upsertAndTrim(entity, MAX_RECENT_ITEMS)
+        }
     }
 
     private fun toRecentItem(entity: RecentItemEntity): RecentItem = RecentItem(

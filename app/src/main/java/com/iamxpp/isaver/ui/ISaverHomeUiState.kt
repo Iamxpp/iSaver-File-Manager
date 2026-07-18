@@ -14,13 +14,8 @@ sealed interface HomeDestination {
         val path: RootPath,
         val title: String,
         val source: HomeTab,
-    ) : HomeDestination {
-        init {
-            require(source != HomeTab.BROWSE || path.value == "/" && title == "浏览") {
-                "Browse must use the canonical root browser destination"
-            }
-        }
-    }
+        val recordAccess: Boolean = true,
+    ) : HomeDestination
 
     data class Archive(
         val source: RootPath,

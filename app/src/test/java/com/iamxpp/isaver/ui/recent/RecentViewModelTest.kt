@@ -86,6 +86,24 @@ class RecentViewModelTest {
         assertTrue(viewModel.state.value.items.single().available)
     }
 
+    @Test
+    fun `available ordinary file keeps recent page and exposes information`() = runTest {
+        val dao = FakeRecentItemDao()
+        dao.seed(RecentItemEntity("/report.pdf", "report.pdf", null, "FILE", "ACCESSED", 1, true))
+        val fileSystem = FakeRootFileSystem()
+        val entry = entry("/report.pdf", EntryType.FILE)
+        fileSystem.statResult = OperationResult.Success(entry)
+        val viewModel = RecentViewModel(
+            RecentRepository(dao) { 2L }, fileSystem, StandardTestDispatcher(testScheduler),
+        )
+        advanceUntilIdle()
+
+        assertEquals(RecentOpenTarget.File(entry), viewModel.open(viewModel.state.value.items.single()))
+        assertEquals(entry, viewModel.state.value.fileInfo)
+        viewModel.dismissFileInfo()
+        assertNull(viewModel.state.value.fileInfo)
+    }
+
     private class FakeRecentItemDao : RecentItemDao() {
         private val flow = MutableStateFlow<List<RecentItemEntity>>(emptyList())
         private val rows = linkedMapOf<String, RecentItemEntity>()
@@ -98,6 +116,7 @@ class RecentViewModelTest {
 
         override fun observeRecent(): Flow<List<RecentItemEntity>> = flow
         override suspend fun upsert(entity: RecentItemEntity) { rows[entity.absolutePath] = entity }
+        override suspend fun findByPath(path: String): RecentItemEntity? = rows[path]
         override suspend fun deleteBeyondLimit(limit: Int) = Unit
         override suspend fun markAvailability(path: String, available: Boolean): Int {
             val row = rows[path] ?: return 0

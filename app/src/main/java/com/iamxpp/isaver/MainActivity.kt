@@ -28,6 +28,10 @@ import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import com.iamxpp.isaver.ui.LocationHomeViewModel
 import com.iamxpp.isaver.ui.files.HomeTab
 import com.iamxpp.isaver.ui.theme.ISaverTheme
+import com.iamxpp.isaver.ui.archive.ArchiveBackResult
+import com.iamxpp.isaver.ui.archive.ArchiveViewModel
+import com.iamxpp.isaver.ui.recent.RecentOpenTarget
+import com.iamxpp.isaver.ui.recent.RecentViewModel
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.transfer.TransferViewModel
 import com.iamxpp.isaver.remote.RemoteConnectionViewModel
@@ -49,7 +53,20 @@ class MainActivity : ComponentActivity() {
     }
     private val browserViewModel by viewModels<BrowserViewModel> {
         val app = application as ISaverApplication
-        BrowserViewModelFactory(app.rootFileSystem, app.browserPreferencesStore, app.archiveRepository)
+        BrowserViewModelFactory(
+            app.rootFileSystem,
+            app.browserPreferencesStore,
+            app.archiveRepository,
+            app.recentRepository,
+        )
+    }
+    private val recentViewModel by viewModels<RecentViewModel> {
+        val app = application as ISaverApplication
+        RecentViewModelFactory(app.recentRepository, app.rootFileSystem)
+    }
+    private val archiveViewModel by viewModels<ArchiveViewModel> {
+        val app = application as ISaverApplication
+        ArchiveViewModelFactory(app.archiveRepository, app.recentRepository)
     }
     private val remoteConnectionViewModel by viewModels<RemoteConnectionViewModel> {
         val app = application as ISaverApplication
@@ -82,6 +99,8 @@ class MainActivity : ComponentActivity() {
                     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
                     val locationState by locationHomeViewModel.state.collectAsStateWithLifecycle()
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
+                    val recentState by recentViewModel.state.collectAsStateWithLifecycle()
+                    val archiveState by archiveViewModel.state.collectAsStateWithLifecycle()
                     val remoteConnectionState by remoteConnectionViewModel.state.collectAsStateWithLifecycle()
                     val destination = homeState.destination
                     val pickerActive = transferState != TransferUiState.Idle
@@ -91,9 +110,55 @@ class MainActivity : ComponentActivity() {
                     }
 
                     LaunchedEffect(destination) {
-                        if (destination is HomeDestination.Browser) {
-                            browserViewModel.openRoot(destination.path, destination.title)
+                        when (destination) {
+                            is HomeDestination.Browser -> browserViewModel.openRoot(
+                                destination.path,
+                                destination.title,
+                                destination.recordAccess,
+                            )
+                            is HomeDestination.Archive -> if (
+                                archiveState.source != destination.source || archiveState.listing == null
+                            ) {
+                                archiveViewModel.open(
+                                    destination.source,
+                                    destination.sourceName,
+                                    destination.sourceTab,
+                                )
+                            }
+                            is HomeDestination.ExtractionTarget -> {
+                                if (archiveState.source != destination.source || archiveState.listing == null) {
+                                    archiveViewModel.open(
+                                        destination.source,
+                                        destination.sourceName,
+                                        destination.sourceTab,
+                                    )
+                                }
+                                destination.targetBrowser?.let { browser ->
+                                    browserViewModel.openRoot(browser.path, browser.title, browser.recordAccess)
+                                }
+                            }
+                            is HomeDestination.Tab -> Unit
                         }
+                    }
+
+                    LaunchedEffect(browserState.archiveToOpen) {
+                        val archive = browserState.archiveToOpen ?: return@LaunchedEffect
+                        val sourceTab = (destination as? HomeDestination.Browser)?.source
+                            ?: homeState.selectedTab
+                        homeViewModel.openArchive(archive.path, archive.name, sourceTab)
+                        browserViewModel.consumeArchiveOpen()
+                    }
+
+                    LaunchedEffect(archiveState.operation) {
+                        val success = archiveState.operation as? com.iamxpp.isaver.archive.ArchiveState.Success
+                            ?: return@LaunchedEffect
+                        archiveViewModel.dismissOperation()
+                        homeViewModel.openLocation(
+                            success.output.path,
+                            success.output.name,
+                            archiveState.sourceTab,
+                            recordAccess = false,
+                        )
                     }
 
                     LaunchedEffect(pickerActive, destination, browserState.currentPath) {
@@ -126,8 +191,39 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    BackHandler(enabled = pickerActive || destination is HomeDestination.Browser) {
-                        if (destination is HomeDestination.Browser) handleBrowserBack() else cancelPicker()
+                    fun handleArchiveBack() {
+                        if (archiveViewModel.back() == ArchiveBackResult.CLOSE_ARCHIVE) {
+                            homeViewModel.closeArchive()
+                        }
+                    }
+
+                    fun handleRecentOpen(item: com.iamxpp.isaver.ui.recent.RecentUiItem) {
+                        when (val target = recentViewModel.open(item)) {
+                            is RecentOpenTarget.Directory -> homeViewModel.openLocation(
+                                target.path,
+                                target.title,
+                                HomeTab.RECENT,
+                            )
+                            is RecentOpenTarget.Archive -> homeViewModel.openArchive(
+                                target.path,
+                                target.title,
+                                HomeTab.RECENT,
+                            )
+                            is RecentOpenTarget.File, null -> Unit
+                        }
+                    }
+
+                    BackHandler(
+                        enabled = pickerActive || destination !is HomeDestination.Tab,
+                    ) {
+                        when {
+                            pickerActive && destination !is HomeDestination.Browser -> cancelPicker()
+                            destination is HomeDestination.Browser -> handleBrowserBack()
+                            destination is HomeDestination.Archive -> handleArchiveBack()
+                            destination is HomeDestination.ExtractionTarget && destination.targetBrowser != null ->
+                                handleBrowserBack()
+                            destination is HomeDestination.ExtractionTarget -> homeViewModel.returnToArchive()
+                        }
                     }
                     ISaverHomeScreen(
                         homeState = homeState,
@@ -169,6 +265,27 @@ class MainActivity : ComponentActivity() {
                         onRetryTransfer = transferViewModel::retry,
                         onAcknowledgeUncertain = transferViewModel::acknowledgeUncertain,
                         onContinueQueued = transferViewModel::continueWithQueued,
+                        recentState = recentState,
+                        onOpenRecent = ::handleRecentOpen,
+                        onRefreshRecent = recentViewModel::refresh,
+                        onDismissRecentFileInfo = recentViewModel::dismissFileInfo,
+                        archiveState = archiveState,
+                        onArchiveBack = ::handleArchiveBack,
+                        onEnterArchiveDirectory = archiveViewModel::enter,
+                        onArchiveQueryChange = archiveViewModel::setSearchQuery,
+                        onArchiveDisplayModeChange = archiveViewModel::setDisplayMode,
+                        onChooseExtractionTarget = homeViewModel::chooseExtractionTarget,
+                        onRetryArchive = archiveViewModel::retry,
+                        onCancelExtraction = archiveViewModel::cancelExtraction,
+                        onDismissArchiveOperation = archiveViewModel::dismissOperation,
+                        onExtractHere = {
+                            val extraction = homeState.destination as? HomeDestination.ExtractionTarget
+                            if (extraction?.targetBrowser != null && browserState.canCreateDirectory) {
+                                val target = browserState.currentPath
+                                homeViewModel.returnToArchive()
+                                archiveViewModel.extractTo(target)
+                            }
+                        },
                     )
                 } else {
                     RootGateScreen(
@@ -197,12 +314,70 @@ internal class BrowserViewModelFactory(
     private val fileSystem: RootFileSystem,
     private val preferencesStore: BrowserPreferencesStore,
     private val archiveRepository: com.iamxpp.isaver.archive.ArchiveRepository? = null,
+    private val recentRepository: com.iamxpp.isaver.recent.RecentRepository? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
         @Suppress("UNCHECKED_CAST")
-        return BrowserViewModel(fileSystem, ioDispatcher, preferencesStore, archiveRepository) as T
+        return BrowserViewModel(
+            fileSystem,
+            ioDispatcher,
+            preferencesStore,
+            archiveRepository,
+            recordDirectoryAccess = { path, title ->
+                recentRepository?.recordAccess(
+                    path,
+                    title,
+                    null,
+                    com.iamxpp.isaver.recent.RecentItemType.DIRECTORY,
+                )
+            },
+            recordFileAccess = { path, title ->
+                recentRepository?.recordAccess(
+                    path,
+                    title,
+                    null,
+                    com.iamxpp.isaver.recent.RecentItemType.FILE,
+                )
+            },
+        ) as T
+    }
+}
+
+internal class RecentViewModelFactory(
+    private val repository: com.iamxpp.isaver.recent.RecentRepository,
+    private val fileSystem: RootFileSystem,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(RecentViewModel::class.java))
+        @Suppress("UNCHECKED_CAST")
+        return RecentViewModel(repository, fileSystem, ioDispatcher) as T
+    }
+}
+
+internal class ArchiveViewModelFactory(
+    private val repository: com.iamxpp.isaver.archive.ArchiveRepository,
+    private val recentRepository: com.iamxpp.isaver.recent.RecentRepository,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(ArchiveViewModel::class.java))
+        @Suppress("UNCHECKED_CAST")
+        return ArchiveViewModel(
+            inspectArchive = repository::inspect,
+            extractArchive = repository::extract,
+            recordAccess = { path, title ->
+                recentRepository.recordAccess(
+                    path,
+                    title,
+                    null,
+                    com.iamxpp.isaver.recent.RecentItemType.ARCHIVE,
+                )
+            },
+            ioDispatcher = ioDispatcher,
+        ) as T
     }
 }
 

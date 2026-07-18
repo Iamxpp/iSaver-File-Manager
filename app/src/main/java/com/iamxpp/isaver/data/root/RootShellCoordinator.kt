@@ -1,9 +1,13 @@
 package com.iamxpp.isaver.data.root
 
 import com.topjohnwu.superuser.Shell
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 internal interface RootShellCoordinator {
     suspend fun execute(command: String): RootCommandResult
@@ -19,11 +23,21 @@ internal interface RootShellBackend {
 
 internal class MutexRootShellCoordinator(
     private val backend: RootShellBackend,
+    private val commandTimeoutMillis: Long = 15_000L,
 ) : RootShellCoordinator {
     private val mutex = Mutex()
 
     override suspend fun execute(command: String): RootCommandResult =
-        mutex.withLock { backend.execute(command) }
+        mutex.withLock {
+            withContext(NonCancellable) {
+                try {
+                    withTimeout(commandTimeoutMillis) { backend.execute(command) }
+                } catch (_: TimeoutCancellationException) {
+                    backend.closeCachedShell()
+                    RootCommandResult(124, emptyList(), listOf("Root command timed out"))
+                }
+            }
+        }
 
     override suspend fun invalidate() {
         mutex.withLock { backend.closeCachedShell() }

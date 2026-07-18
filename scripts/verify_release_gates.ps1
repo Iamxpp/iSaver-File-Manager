@@ -110,6 +110,11 @@ try {
         Assert-Instrumentation -ClassName $group
     }
 
+    & (Join-Path $PSScriptRoot "verify_local_file_workflow.ps1") -Serial $Serial
+    if ($LASTEXITCODE -ne 0) {
+        throw "Local file workflow gate failed with exit $LASTEXITCODE"
+    }
+
     if (-not $SkipPerformance) {
         & (Join-Path $PSScriptRoot "benchmark_root_listing.ps1") -Serial $Serial -AppApk $appApk -TestApk $testApk
         if ($LASTEXITCODE -ne 0) {

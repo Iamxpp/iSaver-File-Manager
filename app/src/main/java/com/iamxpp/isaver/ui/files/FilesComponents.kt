@@ -63,6 +63,7 @@ import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 data class FilesSaveAction(
     val enabled: Boolean,
     val onSave: () -> Unit,
+    val label: String = "存储",
 )
 
 @Composable
@@ -110,6 +111,7 @@ fun FilesTopBar(
     modifier: Modifier = Modifier,
     overflowMenuContent: @Composable BoxScope.() -> Unit = {},
 ) {
+    val actionWidth = if (saveAction?.label == null || saveAction.label.length <= 2) 48.dp else 96.dp
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -119,7 +121,7 @@ fun FilesTopBar(
             .testTag(testTag),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(actionWidth).height(48.dp), contentAlignment = Alignment.Center) {
             if (onBack != null) {
                 HeaderAction(
                     contentDescription = "返回",
@@ -144,7 +146,7 @@ fun FilesTopBar(
                     .semantics { contentDescription = "页面标题：$title" },
             )
         }
-        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(actionWidth).height(48.dp), contentAlignment = Alignment.Center) {
             if (saveAction == null) {
                 HeaderAction(
                     contentDescription = "更多操作",
@@ -158,11 +160,12 @@ fun FilesTopBar(
                     enabled = saveAction.enabled,
                     contentPadding = PaddingValues(0.dp),
                     modifier = Modifier
-                        .size(48.dp)
+                        .width(actionWidth)
+                        .height(48.dp)
                         .testTag("files-top-bar-save"),
                 ) {
                     Text(
-                        text = "存储",
+                        text = saveAction.label,
                         color = if (saveAction.enabled) ISaverBlue else ISaverSecondaryText,
                         fontWeight = FontWeight.SemiBold,
                     )
