@@ -37,6 +37,29 @@ interface RootFileSystem {
         targetDirectory: RootPath,
         finalName: EntryName,
     ): OperationResult<DirectoryEntry> = unsupportedTransfer()
+
+    suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> =
+        unsupportedExtraction()
+
+    suspend fun createExtractionDirectory(
+        stage: ExtractionStage,
+        relativePath: String,
+    ): OperationResult<Unit> = unsupportedExtraction()
+
+    suspend fun transferIntoExtractionStage(
+        stage: ExtractionStage,
+        relativeParent: String,
+        source: RootTransferSource,
+        finalName: EntryName,
+    ): OperationResult<Unit> = unsupportedExtraction()
+
+    suspend fun commitExtractionStage(
+        stage: ExtractionStage,
+        finalName: FolderName,
+    ): OperationResult<DirectoryEntry> = unsupportedExtraction()
+
+    suspend fun cleanupExtractionStage(stage: ExtractionStage): OperationResult<Unit> =
+        unsupportedExtraction()
 }
 
 private fun unsupportedDirectorySnapshot(): OperationResult.Failure = OperationResult.Failure(
@@ -46,3 +69,9 @@ private fun unsupportedDirectorySnapshot(): OperationResult.Failure = OperationR
 )
 
 private fun <T> unsupportedTransfer():OperationResult<T> = OperationResult.Failure(ErrorCode.COMMAND_FAILED,"不支持文件传输","Transfer primitive unsupported")
+
+private fun <T> unsupportedExtraction(): OperationResult<T> = OperationResult.Failure(
+    ErrorCode.COMMAND_FAILED,
+    "不支持安全解压",
+    "Extraction staging primitive unsupported",
+)

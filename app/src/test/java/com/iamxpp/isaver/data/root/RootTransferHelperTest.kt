@@ -74,6 +74,34 @@ class RootTransferHelperTest {
         assertFalse(command.contains("sh -c"))
     }
 
+    @Test
+    fun `extraction commands keep parent and stage identity in fixed argv`() {
+        val stage = ExtractionStage.create(
+            com.iamxpp.isaver.domain.RootPath.parse("/original").getOrThrow(),
+            com.iamxpp.isaver.domain.RootPath.parse("/canonical").getOrThrow(),
+            RootFileIdentity(1L, 2L),
+            ".isaver-extract-123e4567-e89b-12d3-a456-426614174000",
+            RootFileIdentity(3L, 4L),
+        ).getOrThrow()
+
+        val prepare = helper.prepareExtraction(stage.originalParent.value, stage.canonicalParent.value, stage.name, stage.parentIdentity)
+        val mkdir = helper.createExtractionDirectory(stage, "目录 one/子目录")
+        val copy = helper.copyIntoExtraction(stage, "目录 one", source(), com.iamxpp.isaver.domain.EntryName.parse("报告.txt").getOrThrow(), 5_000)
+        val commit = helper.commitExtraction(stage, com.iamxpp.isaver.domain.FolderName.parse("backup").getOrThrow())
+        val remove = helper.removeExtraction(stage)
+
+        assertTrue(prepare.contains("'prepare-extract-stage' '/original' '/canonical'"))
+        assertTrue(mkdir.contains("'mkdir-extract' '/original' '/canonical' '${stage.name}' '目录 one/子目录' '1' '2' '3' '4'"))
+        assertTrue(copy.contains("'copy-extract-stdin' '/original' '/canonical' '${stage.name}' '目录 one' '报告.txt' '1' '2' '3' '4' '5'"))
+        assertTrue(copy.startsWith("set -o pipefail\n'/system/bin/content' 'read' '--uri'"))
+        assertTrue(commit.contains("'commit-extract-stage' '/original' '/canonical' '${stage.name}' 'backup' '1' '2' '3' '4'"))
+        assertTrue(remove.contains("'remove-extract-stage' '/original' '/canonical' '${stage.name}' '1' '2' '3' '4'"))
+        listOf(prepare, mkdir, copy, commit, remove).forEach {
+            assertFalse(it.contains("/data/user/0"))
+            assertFalse(it.contains(" rm "))
+        }
+    }
+
     private fun source() = RootTransferSource(
         contentUri = "content://com.iamxpp.isaver.incoming-stream/incoming/${"ab".repeat(32)}",
         expectedSizeBytes = 5L,

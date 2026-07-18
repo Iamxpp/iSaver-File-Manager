@@ -46,6 +46,7 @@ class LibsuRootFileSystem internal constructor(
     private val timeoutMillis: Long,
     helperExecutable:String="/data/local/tmp/isaver_fs_helper",
     private val stageNameFactory:()->String={ ".isaver-stage-${UUID.randomUUID()}" },
+    private val extractionStageNameFactory:()->String={ ".isaver-extract-${UUID.randomUUID()}" },
     private val transferCommandRunner:RootTransferCommandRunner=IsolatedLibsuRootTransferCommandRunner,
     private val transferTimeoutGraceMillis:Long=2_000,
     private val helperOperationTimeoutMillis:Long=3_000,
@@ -63,10 +64,11 @@ class LibsuRootFileSystem internal constructor(
         ioDispatcher: CoroutineDispatcher,
         timeoutMillis: Long,
         stageNameFactory:()->String={ ".isaver-stage-${UUID.randomUUID()}" },
+        extractionStageNameFactory:()->String={ ".isaver-extract-${UUID.randomUUID()}" },
         transferCommandRunner:RootTransferCommandRunner=RootTransferCommandRunner{commandRunner.run(it)},
         transferTimeoutGraceMillis:Long=2_000,
         helperOperationTimeoutMillis:Long=3_000,
-    ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis, stageNameFactory=stageNameFactory,transferCommandRunner=transferCommandRunner,transferTimeoutGraceMillis=transferTimeoutGraceMillis,helperOperationTimeoutMillis=helperOperationTimeoutMillis)
+    ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis, stageNameFactory=stageNameFactory,extractionStageNameFactory=extractionStageNameFactory,transferCommandRunner=transferCommandRunner,transferTimeoutGraceMillis=transferTimeoutGraceMillis,helperOperationTimeoutMillis=helperOperationTimeoutMillis)
 
     override suspend fun readDirectory(path: RootPath): OperationResult<DirectorySnapshot> =
         executeDirectoryListing(transferHelper.listDirectory(path.value)).flatMap { lines ->
@@ -158,6 +160,156 @@ class LibsuRootFileSystem internal constructor(
             return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法读取来源文件")
         }
         return RootFileReadProtocol.decode(result.stdout, output, expectedSize)
+    }
+
+    override suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> {
+        val prepared = prepareWritableDirectory(parent)
+        if (prepared !is OperationResult.Success) return prepared as OperationResult.Failure
+        val directory = prepared.value
+        val stageName = extractionStageNameFactory()
+        if (!EXTRACTION_STAGE_NAME.matches(stageName)) {
+            return failure(ErrorCode.COMMAND_FAILED, "无法准备解压目录", "Invalid generated extraction stage name")
+        }
+        val result = runHelperBounded(
+            transferHelper.prepareExtraction(
+                directory.original.value,
+                directory.canonical.value,
+                stageName,
+                directory.identity,
+            ),
+            helperOperationTimeoutMillis,
+        ).getOrElse {
+            return uncertainExtraction("Prepare extraction stage result was lost")
+        }
+        if (result.exitCode != 0) {
+            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法准备解压目录")
+        }
+        val identity = RootFileIdentity.parse(result.stdout).getOrElse {
+            return uncertainExtraction("Malformed extraction stage identity")
+        }
+        return ExtractionStage.create(
+            directory.original,
+            directory.canonical,
+            directory.identity,
+            stageName,
+            identity,
+        ).fold(
+            onSuccess = { OperationResult.Success(it) },
+            onFailure = { uncertainExtraction("Rejected extraction stage identity") },
+        )
+    }
+
+    override suspend fun createExtractionDirectory(
+        stage: ExtractionStage,
+        relativePath: String,
+    ): OperationResult<Unit> {
+        val safePath = ExtractionRelativePath.directory(relativePath).getOrElse {
+            return failure(ErrorCode.COMMAND_FAILED, "解压目录名称无效", "Unsafe extraction directory path")
+        }
+        val result = runHelperBounded(
+            transferHelper.createExtractionDirectory(stage, safePath.value),
+            helperOperationTimeoutMillis,
+        ).getOrElse {
+            return uncertainExtraction("Create extraction directory result was lost")
+        }
+        if (result.exitCode != 0) {
+            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法创建解压目录")
+        }
+        return OperationResult.Success(Unit)
+    }
+
+    override suspend fun transferIntoExtractionStage(
+        stage: ExtractionStage,
+        relativeParent: String,
+        source: RootTransferSource,
+        finalName: EntryName,
+    ): OperationResult<Unit> {
+        val safeParent = ExtractionRelativePath.parent(relativeParent).getOrElse {
+            return failure(ErrorCode.COMMAND_FAILED, "解压目录名称无效", "Unsafe extraction parent path")
+        }
+        if (source.expectedSizeBytes < 0L) {
+            return failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Negative extraction source size")
+        }
+        val command = transferHelper.copyIntoExtraction(
+            stage,
+            safeParent.value,
+            source,
+            finalName,
+            timeoutMillis,
+        )
+        val callerJob = currentCoroutineContext()[Job]
+        val dispatch = awaitTransferExecution(command, callerJob)
+        if (!dispatch.dispatched) throw CancellationException("Extraction transfer cancelled before dispatch")
+        return withContext(NonCancellable) {
+            val execution = dispatch.result.getOrElse {
+                return@withContext uncertainExtraction("Extraction stage transfer result was lost")
+            }
+            if (execution.exitCode != 0) {
+                return@withContext mapExitCode(
+                    execution.exitCode,
+                    execution.stderr.isNotEmpty(),
+                    "无法写入解压文件",
+                )
+            }
+            val identity = parsePublishedIdentity(execution.stdout)
+            if (identity !is OperationResult.Success || identity.value.sizeBytes != source.expectedSizeBytes) {
+                return@withContext uncertainExtraction("Malformed extraction file identity")
+            }
+            OperationResult.Success(Unit)
+        }
+    }
+
+    override suspend fun commitExtractionStage(
+        stage: ExtractionStage,
+        finalName: FolderName,
+    ): OperationResult<DirectoryEntry> {
+        val command = transferHelper.commitExtraction(stage, finalName)
+        val callerJob = currentCoroutineContext()[Job]
+        val dispatch = awaitTransferExecution(command, callerJob)
+        if (!dispatch.dispatched) throw CancellationException("Extraction commit cancelled before dispatch")
+        return withContext(NonCancellable) {
+            val execution = dispatch.result.getOrElse {
+                return@withContext uncertainExtraction("Extraction commit result was lost")
+            }
+            if (execution.exitCode != 0) {
+                return@withContext mapExitCode(
+                    execution.exitCode,
+                    execution.stderr.isNotEmpty(),
+                    "无法完成解压",
+                )
+            }
+            val committedIdentity = RootFileIdentity.parse(execution.stdout).getOrElse {
+                return@withContext uncertainExtraction("Malformed committed directory identity")
+            }
+            val finalPath = FolderName.join(stage.canonicalParent, finalName)
+            val entry = stat(finalPath)
+            if (entry !is OperationResult.Success ||
+                entry.value.type != com.iamxpp.isaver.domain.EntryType.DIRECTORY ||
+                entry.value.symbolicLink
+            ) {
+                return@withContext uncertainExtraction("Committed extraction directory could not be verified")
+            }
+            val identity = readIdentity(finalPath)
+            if (identity !is OperationResult.Success || identity.value != committedIdentity ||
+                identity.value != stage.stageIdentity
+            ) {
+                return@withContext uncertainExtraction("Committed extraction directory identity changed")
+            }
+            entry
+        }
+    }
+
+    override suspend fun cleanupExtractionStage(stage: ExtractionStage): OperationResult<Unit> {
+        val result = runHelperBounded(
+            transferHelper.removeExtraction(stage),
+            helperOperationTimeoutMillis,
+        ).getOrElse {
+            return uncertainExtraction("Extraction stage cleanup result was lost")
+        }
+        if (result.exitCode != 0) {
+            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法清理解压临时目录")
+        }
+        return OperationResult.Success(Unit)
     }
 
     private suspend fun transfer(
@@ -529,6 +681,7 @@ private fun malformedCanonicalOutput() = failure(
 )
 private fun uncertain(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"文件夹可能已创建，请刷新确认",technical)
 private fun uncertainTransfer(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"保存结果不确定，请刷新确认",technical)
+private fun uncertainExtraction(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"解压结果不确定，请刷新目标目录核对",technical)
 
 private fun failure(code: ErrorCode, userMessage: String, technicalMessage: String) =
     OperationResult.Failure(code, userMessage, technicalMessage)

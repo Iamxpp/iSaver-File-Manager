@@ -660,6 +660,41 @@ static int stage_name_ok(const char *name) {
     return 1;
 }
 
+static int extraction_stage_name_ok(const char *name) {
+    static const char prefix[] = ".isaver-extract-";
+    if (name == NULL || strncmp(name, prefix, sizeof(prefix) - 1) != 0) return 0;
+    const char *uuid = name + sizeof(prefix) - 1;
+    if (strlen(uuid) != 36) return 0;
+    for (size_t i = 0; i < 36; ++i) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (uuid[i] != '-') return 0;
+        } else if (!((uuid[i] >= '0' && uuid[i] <= '9') ||
+                     (uuid[i] >= 'a' && uuid[i] <= 'f') ||
+                     (uuid[i] >= 'A' && uuid[i] <= 'F'))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int relative_path_ok(const char *path, int allow_empty) {
+    if (path == NULL) return 0;
+    size_t length = strlen(path);
+    if (length == 0U) return allow_empty;
+    if (path[0] == '/' || path[length - 1U] == '/') return 0;
+    size_t component_start = 0U;
+    for (size_t index = 0U; index <= length; ++index) {
+        if (index != length && path[index] != '/') continue;
+        size_t component_length = index - component_start;
+        if (component_length == 0U || component_length > 255U) return 0;
+        if (component_length == 1U && path[component_start] == '.') return 0;
+        if (component_length == 2U && path[component_start] == '.' &&
+            path[component_start + 1U] == '.') return 0;
+        component_start = index + 1U;
+    }
+    return 1;
+}
+
 static int parent_errno(int error) {
     if (error == ENOENT) return X_NOT_FOUND;
     if (error == ENOTDIR) return X_NOT_DIRECTORY;
@@ -755,6 +790,73 @@ static int open_stage(
         return -X_STAGE_INVALID;
     }
     return stage_fd;
+}
+
+static int open_relative_directory(int stage_fd, const char *relative, int create) {
+    if (!relative_path_ok(relative, 1)) return -X_USAGE;
+    int current_fd = fcntl(stage_fd, F_DUPFD_CLOEXEC, 0);
+    if (current_fd < 0) return -X_IO;
+    if (relative[0] == '\0') return current_fd;
+    char *copy = strdup(relative);
+    if (copy == NULL) {
+        close(current_fd);
+        return -X_IO;
+    }
+    char *save = NULL;
+    char *component = strtok_r(copy, "/", &save);
+    while (component != NULL) {
+        if (!basename_ok(component)) {
+            free(copy);
+            close(current_fd);
+            return -X_USAGE;
+        }
+        if (create && mkdirat(current_fd, component, 0700) != 0 && errno != EEXIST) {
+            int result = write_errno(errno);
+            free(copy);
+            close(current_fd);
+            return -result;
+        }
+        int child_fd = openat(
+            current_fd,
+            component,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        );
+        if (child_fd < 0) {
+            free(copy);
+            close(current_fd);
+            return -X_STAGE_INVALID;
+        }
+        struct stat child_status;
+        if (fstat(child_fd, &child_status) != 0 ||
+            !stage_security_valid(current_fd, &child_status)) {
+            close(child_fd);
+            free(copy);
+            close(current_fd);
+            return -X_STAGE_INVALID;
+        }
+        close(current_fd);
+        current_fd = child_fd;
+        component = strtok_r(NULL, "/", &save);
+    }
+    free(copy);
+    return current_fd;
+}
+
+static int remove_known_extract_file(
+    int directory_fd,
+    const char *name,
+    const struct stat *expected
+) {
+    struct stat current;
+    if (fstatat(directory_fd, name, &current, AT_SYMLINK_NOFOLLOW) != 0) {
+        return errno == ENOENT ? 0 : X_STAGE_INVALID;
+    }
+    int same = current.st_dev == expected->st_dev && current.st_ino == expected->st_ino;
+    int emulated = is_emulated_storage_fd(directory_fd) &&
+        payload_security_valid(directory_fd, &current) &&
+        current.st_size == expected->st_size;
+    if (!S_ISREG(current.st_mode) || (!same && !emulated)) return X_STAGE_INVALID;
+    return unlinkat(directory_fd, name, 0) == 0 || errno == ENOENT ? 0 : X_STAGE_INVALID;
 }
 
 static int remove_known_payload(int stage_fd, const struct stat *expected) {
@@ -1166,6 +1268,339 @@ static int remove_stage(int argc, char **argv) {
     return result;
 }
 
+static int prepare_extraction_stage(int argc, char **argv) {
+    if (argc != 7 || !extraction_stage_name_ok(argv[4])) return X_USAGE;
+    unsigned long long parent_device;
+    unsigned long long parent_inode;
+    if (!parse_identity(argv, 5, &parent_device, &parent_inode)) return X_USAGE;
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    if (mkdirat(parent_fd, argv[4], 0700) != 0) {
+        int result = write_errno(errno);
+        close(parent_fd);
+        return result;
+    }
+    int stage_fd = openat(
+        parent_fd,
+        argv[4],
+        O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+    );
+    struct stat status;
+    if (stage_fd < 0 || fstat(stage_fd, &status) != 0) {
+        if (stage_fd >= 0) close(stage_fd);
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (!stage_security_valid(parent_fd, &status)) {
+        int cleanup = remove_stage_path(parent_fd, stage_fd, argv[4], &status, 0);
+        close(parent_fd);
+        return cleanup == 0 ? X_STAGE_INVALID : X_OUTCOME_UNCERTAIN;
+    }
+    printf("%llu:%llu\n", (unsigned long long) status.st_dev, (unsigned long long) status.st_ino);
+    close(stage_fd);
+    close(parent_fd);
+    return 0;
+}
+
+static int mkdir_extract(int argc, char **argv) {
+    if (argc != 10 || !extraction_stage_name_ok(argv[4]) ||
+        !relative_path_ok(argv[5], 0)) return X_USAGE;
+    unsigned long long parent_device;
+    unsigned long long parent_inode;
+    unsigned long long stage_device;
+    unsigned long long stage_inode;
+    if (!parse_identity(argv, 6, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 8, &stage_device, &stage_inode)) return X_USAGE;
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    int stage_fd = open_stage(parent_fd, argv[4], stage_device, stage_inode);
+    if (stage_fd < 0) {
+        close(parent_fd);
+        return -stage_fd;
+    }
+    int directory_fd = open_relative_directory(stage_fd, argv[5], 1);
+    if (directory_fd < 0) {
+        close(stage_fd);
+        close(parent_fd);
+        return -directory_fd;
+    }
+    if (fsync(directory_fd) != 0 && errno != EINVAL && errno != EROFS) {
+        close(directory_fd);
+        close(stage_fd);
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    close(directory_fd);
+    close(stage_fd);
+    close(parent_fd);
+    return 0;
+}
+
+static int copy_extract_stdin(int argc, char **argv) {
+    if (argc != 12 || !extraction_stage_name_ok(argv[4]) ||
+        !relative_path_ok(argv[5], 1) || !basename_ok(argv[6])) return X_USAGE;
+    unsigned long long parent_device;
+    unsigned long long parent_inode;
+    unsigned long long stage_device;
+    unsigned long long stage_inode;
+    unsigned long long expected_size;
+    if (!parse_identity(argv, 7, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 9, &stage_device, &stage_inode) ||
+        !parse_u64(argv[11], &expected_size)) return X_USAGE;
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    int stage_fd = open_stage(parent_fd, argv[4], stage_device, stage_inode);
+    if (stage_fd < 0) {
+        close(parent_fd);
+        return -stage_fd;
+    }
+    int directory_fd = open_relative_directory(stage_fd, argv[5], 0);
+    if (directory_fd < 0) {
+        close(stage_fd);
+        close(parent_fd);
+        return -directory_fd;
+    }
+    int file_fd = openat(
+        directory_fd,
+        argv[6],
+        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+        0600
+    );
+    if (file_fd < 0) {
+        int result = write_errno(errno);
+        close(directory_fd);
+        close(stage_fd);
+        close(parent_fd);
+        return result;
+    }
+    struct stat file_status;
+    if (fstat(file_fd, &file_status) != 0 ||
+        !payload_security_valid(directory_fd, &file_status)) {
+        if (fstat(file_fd, &file_status) == 0) {
+            remove_known_extract_file(directory_fd, argv[6], &file_status);
+        }
+        close(file_fd);
+        close(directory_fd);
+        close(stage_fd);
+        close(parent_fd);
+        return X_STAGE_INVALID;
+    }
+    unsigned char buffer[65536];
+    unsigned long long copied = 0;
+    int result = 0;
+    while (copied < expected_size) {
+        size_t wanted = expected_size - copied < sizeof(buffer)
+            ? (size_t) (expected_size - copied)
+            : sizeof(buffer);
+        ssize_t read_count;
+        do {
+            read_count = read(STDIN_FILENO, buffer, wanted);
+        } while (read_count < 0 && errno == EINTR);
+        if (read_count < 0) {
+            result = X_SOURCE_UNREADABLE;
+            break;
+        }
+        if (read_count == 0) {
+            result = X_SOURCE_CHANGED;
+            break;
+        }
+        size_t offset = 0U;
+        while (offset < (size_t) read_count) {
+            ssize_t written;
+            do {
+                written = write(file_fd, buffer + offset, (size_t) read_count - offset);
+            } while (written < 0 && errno == EINTR);
+            if (written <= 0) {
+                result = written < 0 ? write_errno(errno) : X_IO;
+                break;
+            }
+            offset += (size_t) written;
+            copied += (unsigned long long) written;
+        }
+        if (result != 0) break;
+    }
+    if (result == 0) {
+        unsigned char extra;
+        ssize_t read_count;
+        do {
+            read_count = read(STDIN_FILENO, &extra, 1U);
+        } while (read_count < 0 && errno == EINTR);
+        if (read_count < 0) result = X_SOURCE_UNREADABLE;
+        else if (read_count != 0) result = X_SOURCE_CHANGED;
+    }
+    if (result == 0 && fsync(file_fd) != 0 && errno != EINVAL) result = write_errno(errno);
+    if (result == 0) {
+        struct stat verified;
+        if (fstat(file_fd, &verified) != 0 ||
+            !payload_security_valid(directory_fd, &verified) ||
+            verified.st_dev != file_status.st_dev || verified.st_ino != file_status.st_ino ||
+            (unsigned long long) verified.st_size != expected_size) {
+            result = X_STAGE_INVALID;
+        } else {
+            file_status = verified;
+        }
+    }
+    close(file_fd);
+    if (result != 0) {
+        int cleanup = remove_known_extract_file(directory_fd, argv[6], &file_status);
+        close(directory_fd);
+        close(stage_fd);
+        close(parent_fd);
+        return cleanup == 0 ? result : X_OUTCOME_UNCERTAIN;
+    }
+    printf(
+        "%llu:%llu:%llu\n",
+        (unsigned long long) file_status.st_dev,
+        (unsigned long long) file_status.st_ino,
+        copied
+    );
+    close(directory_fd);
+    close(stage_fd);
+    close(parent_fd);
+    return 0;
+}
+
+static int commit_extraction_stage(int argc, char **argv) {
+    if (argc != 10 || !extraction_stage_name_ok(argv[4]) || !basename_ok(argv[5])) {
+        return X_USAGE;
+    }
+    unsigned long long parent_device;
+    unsigned long long parent_inode;
+    unsigned long long stage_device;
+    unsigned long long stage_inode;
+    if (!parse_identity(argv, 6, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 8, &stage_device, &stage_inode)) return X_USAGE;
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    int stage_fd = open_stage(parent_fd, argv[4], stage_device, stage_inode);
+    if (stage_fd < 0) {
+        close(parent_fd);
+        return -stage_fd;
+    }
+    struct stat held;
+    if (fstat(stage_fd, &held) != 0 || !identity_matches(&held, stage_device, stage_inode)) {
+        close(stage_fd);
+        close(parent_fd);
+        return X_STAGE_INVALID;
+    }
+    long renamed = syscall(
+        SYS_renameat2,
+        parent_fd,
+        argv[4],
+        parent_fd,
+        argv[5],
+        RENAME_NOREPLACE
+    );
+    if (renamed != 0) {
+        int result = write_errno(errno);
+        close(stage_fd);
+        close(parent_fd);
+        return result;
+    }
+    struct stat committed;
+    if (fstat(stage_fd, &committed) != 0 || committed.st_dev != held.st_dev ||
+        committed.st_ino != held.st_ino) {
+        close(stage_fd);
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (fsync(parent_fd) != 0 && errno != EINVAL && errno != EROFS) {
+        close(stage_fd);
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    printf("%llu:%llu\n", (unsigned long long) committed.st_dev, (unsigned long long) committed.st_ino);
+    close(stage_fd);
+    close(parent_fd);
+    return 0;
+}
+
+static int remove_extraction_contents(int directory_fd) {
+    int duplicate = fcntl(directory_fd, F_DUPFD_CLOEXEC, 0);
+    if (duplicate < 0) return X_STAGE_INVALID;
+    DIR *directory = fdopendir(duplicate);
+    if (directory == NULL) {
+        close(duplicate);
+        return X_STAGE_INVALID;
+    }
+    int result = 0;
+    errno = 0;
+    struct dirent *entry;
+    while ((entry = readdir(directory)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        struct stat status;
+        if (fstatat(directory_fd, entry->d_name, &status, AT_SYMLINK_NOFOLLOW) != 0) {
+            result = X_STAGE_INVALID;
+            break;
+        }
+        if (S_ISDIR(status.st_mode)) {
+            int child_fd = openat(
+                directory_fd,
+                entry->d_name,
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+            );
+            if (child_fd < 0 || !stage_security_valid(directory_fd, &status)) {
+                if (child_fd >= 0) close(child_fd);
+                result = X_STAGE_INVALID;
+                break;
+            }
+            result = remove_extraction_contents(child_fd);
+            close(child_fd);
+            if (result != 0) break;
+            struct stat current;
+            if (fstatat(directory_fd, entry->d_name, &current, AT_SYMLINK_NOFOLLOW) != 0 ||
+                current.st_dev != status.st_dev || current.st_ino != status.st_ino ||
+                unlinkat(directory_fd, entry->d_name, AT_REMOVEDIR) != 0) {
+                result = X_STAGE_INVALID;
+                break;
+            }
+        } else if (S_ISREG(status.st_mode)) {
+            if (!payload_security_valid(directory_fd, &status) ||
+                unlinkat(directory_fd, entry->d_name, 0) != 0) {
+                result = X_STAGE_INVALID;
+                break;
+            }
+        } else if (S_ISLNK(status.st_mode)) {
+            if (unlinkat(directory_fd, entry->d_name, 0) != 0) {
+                result = X_STAGE_INVALID;
+                break;
+            }
+        } else {
+            result = X_STAGE_INVALID;
+            break;
+        }
+        errno = 0;
+    }
+    if (result == 0 && errno != 0) result = X_STAGE_INVALID;
+    closedir(directory);
+    return result;
+}
+
+static int remove_extraction_stage(int argc, char **argv) {
+    if (argc != 9 || !extraction_stage_name_ok(argv[4])) return X_USAGE;
+    unsigned long long parent_device;
+    unsigned long long parent_inode;
+    unsigned long long stage_device;
+    unsigned long long stage_inode;
+    if (!parse_identity(argv, 5, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 7, &stage_device, &stage_inode)) return X_USAGE;
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    int stage_fd = open_stage(parent_fd, argv[4], stage_device, stage_inode);
+    if (stage_fd < 0) {
+        struct stat missing;
+        int absent = fstatat(parent_fd, argv[4], &missing, AT_SYMLINK_NOFOLLOW) != 0 &&
+            errno == ENOENT;
+        close(parent_fd);
+        return absent ? 0 : X_STAGE_INVALID;
+    }
+    int result = remove_extraction_contents(stage_fd);
+    if (result == 0) result = finish_stage(parent_fd, stage_fd, argv[4]);
+    else close(stage_fd);
+    close(parent_fd);
+    return result;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) return X_USAGE;
     if (strcmp(argv[1], "list-dir") == 0) return list_directory(argc, argv);
@@ -1173,5 +1608,10 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);
+    if (strcmp(argv[1], "prepare-extract-stage") == 0) return prepare_extraction_stage(argc, argv);
+    if (strcmp(argv[1], "mkdir-extract") == 0) return mkdir_extract(argc, argv);
+    if (strcmp(argv[1], "copy-extract-stdin") == 0) return copy_extract_stdin(argc, argv);
+    if (strcmp(argv[1], "commit-extract-stage") == 0) return commit_extraction_stage(argc, argv);
+    if (strcmp(argv[1], "remove-extract-stage") == 0) return remove_extraction_stage(argc, argv);
     return X_USAGE;
 }
