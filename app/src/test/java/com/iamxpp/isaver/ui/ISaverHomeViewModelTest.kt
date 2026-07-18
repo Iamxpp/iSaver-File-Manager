@@ -10,6 +10,39 @@ import org.junit.Test
 
 class ISaverHomeViewModelTest {
     @Test
+    fun `archive destination restores only root path name and source tab`() {
+        val handle = SavedStateHandle()
+        val source = RootPath.parse("/archives/backup.tar.gz").getOrThrow()
+        ISaverHomeViewModel(handle).openArchive(source, "backup.tar.gz", HomeTab.RECENT)
+
+        val restored = ISaverHomeViewModel(handle)
+
+        assertEquals(
+            HomeDestination.Archive(source, "backup.tar.gz", HomeTab.RECENT),
+            restored.state.value.destination,
+        )
+        assertTrue(handle.keys().all { handle.get<Any>(it) is String })
+    }
+
+    @Test
+    fun `extraction target destination survives recreation without cache paths`() {
+        val handle = SavedStateHandle()
+        val source = RootPath.parse("/archives/a.zip").getOrThrow()
+        val viewModel = ISaverHomeViewModel(handle)
+        viewModel.openArchive(source, "a.zip", HomeTab.BROWSE)
+
+        viewModel.chooseExtractionTarget()
+        val restored = ISaverHomeViewModel(handle)
+
+        assertEquals(HomeTab.VIEWS, restored.state.value.selectedTab)
+        assertEquals(
+            HomeDestination.ExtractionTarget(source, "a.zip", HomeTab.BROWSE),
+            restored.state.value.destination,
+        )
+        assertTrue(handle.keys().mapNotNull { handle.get<String>(it) }.none { "cache" in it })
+    }
+
+    @Test
     fun `restores a custom browser destination from saved primitive state`() {
         val handle = SavedStateHandle()
         val path = RootPath.parse("/data/local/tmp/custom").getOrThrow()

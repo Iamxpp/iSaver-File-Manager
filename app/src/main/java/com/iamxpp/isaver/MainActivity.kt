@@ -100,7 +100,9 @@ class MainActivity : ComponentActivity() {
                         if (pickerActive) {
                             when (destination) {
                                 is HomeDestination.Browser -> transferViewModel.selectTarget(browserState.currentPath)
-                                is HomeDestination.Tab -> transferViewModel.clearTarget()
+                                is HomeDestination.Tab,
+                                is HomeDestination.Archive,
+                                is HomeDestination.ExtractionTarget -> transferViewModel.clearTarget()
                             }
                         }
                     }

@@ -23,6 +23,8 @@ import com.iamxpp.isaver.ui.theme.ISaverBackground
 import com.iamxpp.isaver.ui.recent.RecentScreen
 import com.iamxpp.isaver.ui.recent.RecentUiItem
 import com.iamxpp.isaver.ui.recent.RecentUiState
+import com.iamxpp.isaver.ui.archive.ArchiveScreen
+import com.iamxpp.isaver.ui.archive.ArchiveUiState
 
 @Composable
 fun ISaverHomeScreen(
@@ -68,6 +70,15 @@ fun ISaverHomeScreen(
     recentState: RecentUiState = RecentUiState(),
     onOpenRecent: (RecentUiItem) -> Unit = {},
     onRefreshRecent: () -> Unit = {},
+    archiveState: ArchiveUiState = ArchiveUiState(),
+    onArchiveBack: () -> Unit = {},
+    onEnterArchiveDirectory: (com.iamxpp.isaver.archive.ArchiveNode) -> Unit = {},
+    onArchiveQueryChange: (String) -> Unit = {},
+    onArchiveDisplayModeChange: (DisplayMode) -> Unit = {},
+    onChooseExtractionTarget: () -> Unit = {},
+    onRetryArchive: () -> Unit = {},
+    onCancelExtraction: () -> Unit = {},
+    onDismissArchiveOperation: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val saveMode = transferState != TransferUiState.Idle
@@ -134,6 +145,33 @@ fun ISaverHomeScreen(
                 saveAction = saveAction,
                 modifier = Modifier.weight(1f),
             )
+            is HomeDestination.Archive -> ArchiveScreen(
+                state = archiveState,
+                onBack = onArchiveBack,
+                onEnter = onEnterArchiveDirectory,
+                onQueryChange = onArchiveQueryChange,
+                onDisplayModeChange = onArchiveDisplayModeChange,
+                onChooseExtractionTarget = onChooseExtractionTarget,
+                onRetry = onRetryArchive,
+                onCancelExtraction = onCancelExtraction,
+                onDismissOperation = onDismissArchiveOperation,
+                modifier = Modifier.weight(1f),
+            )
+            is HomeDestination.ExtractionTarget -> LocationHomeScreen(
+                state = locationState,
+                displayMode = displayMode,
+                onOpenLocation = onOpenLocation,
+                onAdd = onAddCustomLocation,
+                onEdit = onEditCustomLocation,
+                onRemove = onRemoveCustomLocation,
+                onRetry = onRetryLocations,
+                onClearAddError = onClearLocationError,
+                onRevalidate = onRevalidateCustomLocation,
+                sortSpec = sortSpec,
+                onDisplayModeChange = onDisplayModeChange,
+                onSortChange = onSortChange,
+                modifier = Modifier.weight(1f),
+            )
         }
         if (saveMode) {
             InlineSaveBar(
@@ -145,6 +183,8 @@ fun ISaverHomeScreen(
                     } else {
                         0
                     }
+                    is HomeDestination.Archive,
+                    is HomeDestination.ExtractionTarget -> 0
                 },
                 onStemChange = onStemChange,
                 onExtensionChange = onExtensionChange,

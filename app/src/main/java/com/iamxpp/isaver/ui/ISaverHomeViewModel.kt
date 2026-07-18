@@ -41,6 +41,29 @@ class ISaverHomeViewModel(
         openLocation(path, displayName, HomeTab.VIEWS)
     }
 
+    fun openArchive(source: RootPath, sourceName: String, sourceTab: HomeTab) {
+        transition(
+            mutableState.value.copy(
+                selectedTab = sourceTab,
+                destination = HomeDestination.Archive(source, sourceName, sourceTab),
+            ),
+        )
+    }
+
+    fun chooseExtractionTarget() {
+        val archive = mutableState.value.destination as? HomeDestination.Archive ?: return
+        transition(
+            mutableState.value.copy(
+                selectedTab = HomeTab.VIEWS,
+                destination = HomeDestination.ExtractionTarget(
+                    archive.source,
+                    archive.sourceName,
+                    archive.sourceTab,
+                ),
+            ),
+        )
+    }
+
     fun onBrowserBack(result: BrowserBackResult): HomeBackResult {
         if (result != BrowserBackResult.RETURN_HOME) return HomeBackResult.CONSUMED
         val browser = mutableState.value.destination as? HomeDestination.Browser ?: return HomeBackResult.CONSUMED
@@ -70,6 +93,18 @@ class ISaverHomeViewModel(
                 savedStateHandle[KEY_TITLE] = destination.title
                 savedStateHandle[KEY_SOURCE] = destination.source.name
             }
+            is HomeDestination.Archive -> saveArchiveDestination(
+                DESTINATION_ARCHIVE,
+                destination.source,
+                destination.sourceName,
+                destination.sourceTab,
+            )
+            is HomeDestination.ExtractionTarget -> saveArchiveDestination(
+                DESTINATION_EXTRACTION_TARGET,
+                destination.source,
+                destination.sourceName,
+                destination.sourceTab,
+            )
         }
     }
 
@@ -89,6 +124,22 @@ class ISaverHomeViewModel(
                     }
                     ISaverHomeUiState(selected, HomeDestination.Browser(path, title, source))
                 }
+                DESTINATION_ARCHIVE -> {
+                    val source = restoredPath()
+                    val sourceName = savedStateHandle.get<String>(KEY_TITLE).orEmpty()
+                    val sourceTab = restoredSourceTab()
+                    require(selected == sourceTab) { "Selected tab must match archive source" }
+                    ISaverHomeUiState(selected, HomeDestination.Archive(source, sourceName, sourceTab))
+                }
+                DESTINATION_EXTRACTION_TARGET -> {
+                    val source = restoredPath()
+                    val sourceName = savedStateHandle.get<String>(KEY_TITLE).orEmpty()
+                    val sourceTab = restoredSourceTab()
+                    ISaverHomeUiState(
+                        selected,
+                        HomeDestination.ExtractionTarget(source, sourceName, sourceTab),
+                    )
+                }
                 else -> throw IllegalArgumentException("Unknown home destination")
             }
         } catch (_: IllegalArgumentException) {
@@ -99,6 +150,24 @@ class ISaverHomeViewModel(
             ISaverHomeUiState()
         }
     }
+
+    private fun saveArchiveDestination(
+        kind: String,
+        source: RootPath,
+        sourceName: String,
+        sourceTab: HomeTab,
+    ) {
+        savedStateHandle[KEY_DESTINATION] = kind
+        savedStateHandle[KEY_PATH] = source.value
+        savedStateHandle[KEY_TITLE] = sourceName
+        savedStateHandle[KEY_SOURCE] = sourceTab.name
+    }
+
+    private fun restoredPath(): RootPath =
+        RootPath.parse(savedStateHandle.get<String>(KEY_PATH).orEmpty()).getOrThrow()
+
+    private fun restoredSourceTab(): HomeTab =
+        HomeTab.valueOf(savedStateHandle.get<String>(KEY_SOURCE).orEmpty())
 
     private fun clearSavedState() {
         SAVED_STATE_KEYS.forEach { key -> savedStateHandle.remove<Any>(key) }
@@ -114,6 +183,8 @@ class ISaverHomeViewModel(
         const val KEY_SOURCE = "home.source"
         const val DESTINATION_TAB = "TAB"
         const val DESTINATION_BROWSER = "BROWSER"
+        const val DESTINATION_ARCHIVE = "ARCHIVE"
+        const val DESTINATION_EXTRACTION_TARGET = "EXTRACTION_TARGET"
         val SAVED_STATE_KEYS = listOf(KEY_SELECTED_TAB, KEY_DESTINATION, KEY_PATH, KEY_TITLE, KEY_SOURCE)
     }
 }

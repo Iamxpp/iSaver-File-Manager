@@ -21,6 +21,19 @@ sealed interface HomeDestination {
             }
         }
     }
+
+    data class Archive(
+        val source: RootPath,
+        val sourceName: String,
+        val sourceTab: HomeTab,
+    ) : HomeDestination
+
+    data class ExtractionTarget(
+        val source: RootPath,
+        val sourceName: String,
+        val sourceTab: HomeTab,
+        val targetBrowser: Browser? = null,
+    ) : HomeDestination
 }
 
 data class ISaverHomeUiState(
