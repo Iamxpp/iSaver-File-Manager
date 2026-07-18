@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
+import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.remote.RemoteConnectionDraft
 import com.iamxpp.isaver.remote.RemoteConnectionUiState
 import com.iamxpp.isaver.remote.RemoteProtocol
@@ -67,6 +68,10 @@ fun BrowserScreen(
     onSortChange: (SortSpec) -> Unit = {},
     onCreateDirectory: (String) -> Unit = {},
     onToggleSelection: (DirectoryEntry) -> Unit = {},
+    onOpenEntry: (DirectoryEntry) -> Unit = onToggleSelection,
+    onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
+    onClearSelection: () -> Unit = {},
+    onDismissFileInfo: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
@@ -139,12 +144,30 @@ fun BrowserScreen(
                 )
             },
         )
+        if (RootPathRiskPolicy.isProtected(state.currentPath)) {
+            Text(
+                "系统保护区域 · 只读浏览",
+                color = ISaverSecondaryText,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+        if (state.selectionMode) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("已选择 ${state.selectedEntries.size} 项", modifier = Modifier.weight(1f))
+                TextButton(onClick = onClearSelection) { Text("清除") }
+            }
+        }
         BrowserContent(
             state = state,
             onEnterDirectory = onEnterDirectory,
             onRetry = onRetry,
             onLoadMore = onLoadMore,
             onToggleSelection = onToggleSelection,
+            onOpenEntry = onOpenEntry,
+            onSelectEntry = onSelectEntry,
             modifier = Modifier.weight(1f),
         )
     }
@@ -185,6 +208,7 @@ fun BrowserScreen(
     state.compressionMessage?.let {
         MessageDialog(it, "关闭", onDismissCompressionMessage)
     }
+    state.fileInfo?.let { FileInfoDialog(it, onDismissFileInfo) }
     when (remoteConnectionState) {
         is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
             state = remoteConnectionState,
@@ -209,6 +233,8 @@ internal fun BrowserContent(
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
     onToggleSelection: (DirectoryEntry) -> Unit = {},
+    onOpenEntry: (DirectoryEntry) -> Unit = onToggleSelection,
+    onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize().background(ISaverCard)) {
@@ -230,9 +256,11 @@ internal fun BrowserContent(
                     enabled = entry.type != EntryType.DIRECTORY || (entry.readable && !entry.symbolicLink),
                     selected = entry in state.selectedEntries,
                     onClick = {
-                        if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
-                        else onToggleSelection(entry)
+                        if (state.selectionMode) onSelectEntry(entry)
+                        else if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
+                        else onOpenEntry(entry)
                     },
+                    onLongClick = { onSelectEntry(entry) },
                     modifier = targetModifier(state, entry),
                 )
             }
@@ -245,9 +273,11 @@ internal fun BrowserContent(
                         enabled = entry.type != EntryType.DIRECTORY || (entry.readable && !entry.symbolicLink),
                         selected = entry in state.selectedEntries,
                         onClick = {
-                            if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
-                            else onToggleSelection(entry)
+                            if (state.selectionMode) onSelectEntry(entry)
+                            else if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
+                            else onOpenEntry(entry)
                         },
+                        onLongClick = { onSelectEntry(entry) },
                         modifier = targetModifier(state, entry),
                     )
                 }

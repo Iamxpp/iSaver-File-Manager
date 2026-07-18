@@ -29,10 +29,13 @@ data class BrowserUiState(
     val searchQuery: String = "",
     val presentationError: String? = null,
     val selectedEntries: Set<DirectoryEntry> = emptySet(),
+    val fileInfo: DirectoryEntry? = null,
+    val archiveToOpen: DirectoryEntry? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {
     val empty: Boolean get() = !loading && !refreshing && errorMessage == null && totalCount == 0
+    val selectionMode: Boolean get() = selectedEntries.isNotEmpty()
 }
 
 data class BrowserOperationError(

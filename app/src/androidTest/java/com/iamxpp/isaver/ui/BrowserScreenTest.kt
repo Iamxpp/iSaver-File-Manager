@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -31,6 +33,22 @@ import org.junit.Test
 
 class BrowserScreenTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun longPressSelectsReadableDirectoryForCompression() {
+        val directory = entry("folder", EntryType.DIRECTORY)
+        var selected: DirectoryEntry? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(directory)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onSelectEntry = { selected = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：folder").performTouchInput { longClick() }
+        compose.runOnIdle { assertEquals(directory, selected) }
+    }
 
     @Test
     fun saveModeReplacesBrowserOverflowAndForwardsClick() {

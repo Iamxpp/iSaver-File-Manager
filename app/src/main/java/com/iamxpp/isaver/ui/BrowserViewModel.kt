@@ -13,6 +13,7 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -70,11 +71,41 @@ class BrowserViewModel(
         return true
     }
 
-    fun toggleSelection(entry: DirectoryEntry) {
-        if (entry.type != EntryType.FILE) return
+    fun openEntry(entry: DirectoryEntry) {
+        if (mutableState.value.selectionMode) {
+            selectEntry(entry)
+            return
+        }
+        when (entry.type) {
+            EntryType.DIRECTORY -> enterDirectory(entry)
+            EntryType.FILE -> if (entry.readable && !entry.symbolicLink && isSupportedArchive(entry.name)) {
+                mutableState.value = mutableState.value.copy(archiveToOpen = entry, fileInfo = null)
+            } else {
+                mutableState.value = mutableState.value.copy(fileInfo = entry, archiveToOpen = null)
+            }
+            EntryType.OTHER -> mutableState.value = mutableState.value.copy(fileInfo = entry, archiveToOpen = null)
+        }
+    }
+
+    fun selectEntry(entry: DirectoryEntry) {
+        if (!entry.readable || entry.symbolicLink || entry.type == EntryType.OTHER) return
         val selected = mutableState.value.selectedEntries.toMutableSet()
         if (!selected.add(entry)) selected.remove(entry)
         mutableState.value = mutableState.value.copy(selectedEntries = selected)
+    }
+
+    fun toggleSelection(entry: DirectoryEntry) = selectEntry(entry)
+
+    fun clearSelection() {
+        mutableState.value = mutableState.value.copy(selectedEntries = emptySet())
+    }
+
+    fun dismissFileInfo() {
+        mutableState.value = mutableState.value.copy(fileInfo = null)
+    }
+
+    fun consumeArchiveOpen() {
+        mutableState.value = mutableState.value.copy(archiveToOpen = null)
     }
 
     fun compress(outputName: String) {
@@ -232,7 +263,7 @@ class BrowserViewModel(
             refreshing = true,
             canGoBack = stack.isNotEmpty(),
             hasMore = cachedEntries.size > PAGE_SIZE,
-            canCreateDirectory = cachedSnapshot?.parentWritable == true,
+            canCreateDirectory = cachedSnapshot?.parentWritable == true && !RootPathRiskPolicy.isProtected(path),
             locationTarget = locationTarget,
             displayMode = mutableState.value.displayMode,
             sortSpec = mutableState.value.sortSpec,
@@ -332,7 +363,7 @@ class BrowserViewModel(
                 totalCount = derived.size,
                 loading = false,
                 refreshing = false,
-                canCreateDirectory = snapshot.parentWritable,
+                canCreateDirectory = snapshot.parentWritable && !RootPathRiskPolicy.isProtected(path),
                 hasMore = visibleCount < derived.size,
             )
             return
@@ -406,6 +437,13 @@ class BrowserViewModel(
         const val PAGE_SIZE = 200
         const val LOADING_INDICATOR_DELAY_MILLIS = 120L
     }
+}
+
+private fun isSupportedArchive(name: String): Boolean {
+    val normalized = name.lowercase()
+    return normalized.endsWith(".zip") || normalized.endsWith(".tar") ||
+        normalized.endsWith(".tar.gz") || normalized.endsWith(".tgz") ||
+        normalized.endsWith(".7z") || normalized.endsWith(".rar")
 }
 
 enum class BrowserBackResult {

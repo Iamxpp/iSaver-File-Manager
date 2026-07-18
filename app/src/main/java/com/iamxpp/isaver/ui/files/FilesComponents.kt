@@ -1,9 +1,11 @@
 package com.iamxpp.isaver.ui.files
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -250,6 +252,7 @@ fun FilesSearchField(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun FileListRow(
     entry: DirectoryEntry,
     displayName: String,
@@ -257,6 +260,7 @@ fun FileListRow(
     onClick: () -> Unit,
     enabled: Boolean = true,
     selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -267,7 +271,7 @@ fun FileListRow(
                 contentDescription = "列表项：$displayName"
                 this.selected = selected
             }
-            .clickable(enabled = enabled, onClick = onClick),
+            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick),
     ) {
         Row(
             modifier = Modifier
@@ -313,6 +317,7 @@ fun FileListRow(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun FileGridCell(
     entry: DirectoryEntry,
     displayName: String,
@@ -320,6 +325,7 @@ fun FileGridCell(
     onClick: () -> Unit,
     enabled: Boolean = true,
     selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -330,7 +336,7 @@ fun FileGridCell(
                 contentDescription = "网格项：$displayName"
                 this.selected = selected
             }
-            .clickable(enabled = enabled, onClick = onClick)
+            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 6.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

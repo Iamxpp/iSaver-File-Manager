@@ -947,6 +947,37 @@ class BrowserViewModelTest {
         assertEquals(ErrorCode.NOT_WRITABLE, vm.state.value.createDirectoryError?.code)
     }
 
+    @Test fun `ordinary file opens information while archive emits archive target`() = runTest {
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
+        val ordinary = entry("report.pdf", EntryType.FILE)
+        val archive = entry("backup.tar.gz", EntryType.FILE)
+
+        vm.openEntry(ordinary)
+        assertEquals(ordinary, vm.state.value.fileInfo)
+        vm.dismissFileInfo()
+        vm.openEntry(archive)
+
+        assertEquals(archive, vm.state.value.archiveToOpen)
+    }
+
+    @Test fun `long press selection accepts readable files and directories and rejects unsafe entries`() = runTest {
+        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
+        val file = entry("file.txt", EntryType.FILE)
+        val directory = entry("folder", EntryType.DIRECTORY)
+        val symlink = entry("link", EntryType.FILE, symbolicLink = true)
+        val unreadable = DirectoryEntry(RootPath.parse("/x/blocked").getOrThrow(), "blocked", EntryType.FILE, 1, 2, false, false, false)
+
+        vm.selectEntry(file)
+        vm.selectEntry(directory)
+        vm.selectEntry(symlink)
+        vm.selectEntry(unreadable)
+
+        assertEquals(setOf(file, directory), vm.state.value.selectedEntries)
+        assertTrue(vm.state.value.selectionMode)
+        vm.clearSelection()
+        assertFalse(vm.state.value.selectionMode)
+    }
+
     @Test fun `symlink directory listing failure does not allow folder creation`() = runTest {
         val fs = FakeFileSystem(
             snapshotBlock = {
