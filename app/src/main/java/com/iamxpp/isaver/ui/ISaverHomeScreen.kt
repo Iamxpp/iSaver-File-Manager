@@ -1,12 +1,9 @@
 package com.iamxpp.isaver.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import com.iamxpp.isaver.domain.DirectoryEntry
@@ -23,7 +20,9 @@ import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.theme.ISaverBackground
-import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
+import com.iamxpp.isaver.ui.recent.RecentScreen
+import com.iamxpp.isaver.ui.recent.RecentUiItem
+import com.iamxpp.isaver.ui.recent.RecentUiState
 
 @Composable
 fun ISaverHomeScreen(
@@ -62,6 +61,9 @@ fun ISaverHomeScreen(
     onRetryTransfer: () -> Unit = {},
     onAcknowledgeUncertain: () -> Unit = {},
     onContinueQueued: () -> Unit = {},
+    recentState: RecentUiState = RecentUiState(),
+    onOpenRecent: (RecentUiItem) -> Unit = {},
+    onRefreshRecent: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val saveMode = transferState != TransferUiState.Idle
@@ -78,7 +80,13 @@ fun ISaverHomeScreen(
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
         when (homeState.destination) {
             is HomeDestination.Tab -> when (homeState.selectedTab) {
-                HomeTab.RECENT -> RecentEmptyScreen(Modifier.weight(1f))
+                HomeTab.RECENT -> RecentScreen(
+                    state = recentState,
+                    displayMode = displayMode,
+                    onOpen = onOpenRecent,
+                    onRefresh = onRefreshRecent,
+                    modifier = Modifier.weight(1f),
+                )
                 HomeTab.VIEWS -> LocationHomeScreen(
                     state = locationState,
                     displayMode = displayMode,
@@ -146,10 +154,3 @@ fun ISaverHomeScreen(
 
 private fun LocationHomeUiState.visibleLocationCount(): Int =
     appGroups.sumOf { it.children.size } + commonLocations.size + customLocations.size
-
-@Composable
-private fun RecentEmptyScreen(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("暂无最近项目", color = ISaverSecondaryText)
-    }
-}
