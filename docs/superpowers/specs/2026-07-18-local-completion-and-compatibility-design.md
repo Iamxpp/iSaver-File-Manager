@@ -163,7 +163,7 @@ ZIP 创建成功后退出选择模式、刷新当前目录并记录最终归档�
 
 - `prepareExtractionStage(parent)`：创建隐藏目录并返回 parent/stage device+inode 身份。
 - `createExtractionDirectory(stage, relativeComponents)`：只在已绑定 stage FD 内创建安全目录。
-- 文件发布继续复用一次性私有缓存流，但目标被限制在身份绑定 stage 内。
+- `transferIntoExtractionStage(stage, relativeParent, source, finalName)`：继续复用一次性私有缓存流，但 helper 从已绑定 stage FD 逐组件打开目录，拒绝符号链接和身份变化，不把普通 Root 路径当作目标。
 - `commitExtractionStage(stage, finalName)`：复核 parent/stage 身份、无符号链接后执行目录级无覆盖原子 rename。
 - `cleanupExtractionStage(stage)`：只递归删除身份匹配的隐藏 stage；遍历使用 `openat/fstatat/unlinkat`、不跟随符号链接，不接受任意用户路径删除。
 
