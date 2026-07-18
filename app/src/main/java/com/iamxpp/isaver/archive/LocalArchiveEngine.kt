@@ -208,7 +208,7 @@ class LocalArchiveEngine(
             currentCoroutineContext().ensureActive()
             val entry = tar.nextTarEntry ?: break
             val safe = validateEntry(state, entry.name, entry.isDirectory, entry.size, null, entry.isSymbolicLink || entry.isLink)
-            writeEntry(safe, entry.isDirectory, staging, tar, onProgress)
+            writeEntry(safe, entry.isDirectory, staging, tar, onProgress, closeInput = false)
         }
         ArchiveOperationSummary(format, state.count, state.expandedBytes)
     }
@@ -249,20 +249,29 @@ class LocalArchiveEngine(
         staging: File,
         input: InputStream,
         onProgress: suspend (ArchiveProgress) -> Unit,
+        closeInput: Boolean = true,
     ) {
         if (directory) {
             File(staging, safePath.path).mkdirs()
             return
         }
-        input.use { source ->
-            val target = File(staging, safePath.path)
-            target.parentFile?.mkdirs()
-            require(target.canonicalPath.startsWith(staging.canonicalPath + File.separator)) {
-                "archive entry escaped destination"
-            }
-            Files.newOutputStream(target.toPath(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use { output ->
-                copyBounded(source, output, safePath.sizeBytes ?: Long.MAX_VALUE, safePath.path, onProgress)
-            }
+        if (closeInput) input.use { source -> writeFileEntry(safePath, staging, source, onProgress) }
+        else writeFileEntry(safePath, staging, input, onProgress)
+    }
+
+    private suspend fun writeFileEntry(
+        safePath: ArchiveEntry,
+        staging: File,
+        input: InputStream,
+        onProgress: suspend (ArchiveProgress) -> Unit,
+    ) {
+        val target = File(staging, safePath.path)
+        target.parentFile?.mkdirs()
+        require(target.canonicalPath.startsWith(staging.canonicalPath + File.separator)) {
+            "archive entry escaped destination"
+        }
+        Files.newOutputStream(target.toPath(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use { output ->
+            copyBounded(input, output, safePath.sizeBytes ?: Long.MAX_VALUE, safePath.path, onProgress)
         }
     }
 

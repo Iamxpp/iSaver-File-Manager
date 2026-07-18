@@ -162,12 +162,16 @@ private fun ArchiveOperationDialog(
 ) {
     val cancellable = operation is ArchiveState.Preparing || operation is ArchiveState.Running
     AlertDialog(
-        onDismissRequest = { if (!cancellable && operation !is ArchiveState.Publishing) onDismiss() },
+        onDismissRequest = {
+            if (operation is ArchiveState.Success || operation is ArchiveState.Failure) onDismiss()
+        },
         title = {
             Text(
                 when (operation) {
                     ArchiveState.Preparing, is ArchiveState.Running -> "正在解压"
                     is ArchiveState.Publishing -> "正在完成"
+                    ArchiveState.Cleaning -> "正在清理"
+                    ArchiveState.Finalizing -> "正在完成"
                     is ArchiveState.Success -> "解压完成"
                     is ArchiveState.Failure -> "解压失败"
                 },
@@ -197,6 +201,8 @@ private fun ArchiveState.message(): String = when (this) {
         is ArchiveProgress.Publishing -> "${current.completedEntries} / ${current.totalEntries ?: "—"} 项"
     }
     is ArchiveState.Publishing -> path
+    ArchiveState.Cleaning -> "正在清理解压临时目录"
+    ArchiveState.Finalizing -> "正在原子发布解压目录"
     is ArchiveState.Success -> "${entryCount} 项 · ${expandedBytes} B"
     is ArchiveState.Failure -> message
 }

@@ -1,5 +1,6 @@
 package com.iamxpp.isaver.archive
 
+import com.iamxpp.isaver.domain.DirectoryEntry
 import java.io.File
 
 enum class ArchiveFormat {
@@ -67,6 +68,13 @@ sealed interface ArchiveState {
     data object Preparing : ArchiveState
     data class Running(val progress: ArchiveProgress) : ArchiveState
     data class Publishing(val path: String) : ArchiveState
-    data class Success(val format: ArchiveFormat, val entryCount: Long, val expandedBytes: Long) : ArchiveState
+    data object Cleaning : ArchiveState
+    data object Finalizing : ArchiveState
+    data class Success(
+        val output: DirectoryEntry,
+        val format: ArchiveFormat,
+        val entryCount: Long,
+        val expandedBytes: Long,
+    ) : ArchiveState
     data class Failure(val code: com.iamxpp.isaver.domain.ErrorCode, val message: String) : ArchiveState
 }

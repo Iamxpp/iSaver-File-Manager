@@ -150,6 +150,9 @@ class ArchiveViewModel(
     }
 
     fun cancelExtraction() {
+        val operation = mutableState.value.operation
+        if (operation !is ArchiveState.Preparing && operation !is ArchiveState.Running) return
+        mutableState.value = mutableState.value.copy(operation = ArchiveState.Cleaning)
         extractionJob?.cancel()
     }
 

@@ -121,6 +121,25 @@ class ISaverApplication : Application() {
             publish = { cached, outputName, target ->
                 transferRepository.transfer(cached, outputName, target)
             },
+            issueSource = { cached ->
+                incomingStreamRegistry.issue(cached).fold(
+                    onSuccess = { OperationResult.Success(it) },
+                    onFailure = {
+                        OperationResult.Failure(
+                            ErrorCode.SOURCE_UNREADABLE,
+                            "无法读取解压文件",
+                            "Extraction stream capability could not be issued",
+                        )
+                    },
+                )
+            },
+            revokeSource = incomingStreamRegistry::revoke,
+            recordCompressed = { entry ->
+                recentRepository.recordCompressed(entry.path, entry.name)
+            },
+            recordExtracted = { entry ->
+                recentRepository.recordExtracted(entry.path, entry.name)
+            },
         )
     }
     internal val remoteCredentialStore by lazy { KeystoreCredentialStore(this) }

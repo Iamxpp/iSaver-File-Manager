@@ -125,6 +125,12 @@ class LocalArchiveEngineTest {
             val engine = LocalArchiveEngine()
             assertEquals(ArchiveFormat.TAR, engine.inspect(tar).getOrThrow().format)
             assertEquals(ArchiveFormat.TAR_GZ, engine.inspect(tarGz).getOrThrow().format)
+            val tarOutput = File(root, "tar-output")
+            val gzipOutput = File(root, "gzip-output")
+            engine.extract(tar, tarOutput).getOrThrow()
+            engine.extract(tarGz, gzipOutput).getOrThrow()
+            assertEquals("tar payload", File(tarOutput, "docs/readme.txt").readText())
+            assertEquals("tar gz payload", File(gzipOutput, "docs/gz.txt").readText())
         } finally {
             root.deleteRecursively()
         }

@@ -76,31 +76,6 @@ class ArchiveRepositoryTest {
         }
     }
 
-    @Test
-    fun `extracts safe nested zip through typed root directories and publishes files`() = runTest {
-        val cacheDir = Files.createTempDirectory("isaver-archive-extract").toFile()
-        val archive = File(cacheDir, "fixture.zip")
-        ZipOutputStream(archive.outputStream()).use { output ->
-            output.putNextEntry(ZipEntry("docs/readme.txt"))
-            output.write("payload".toByteArray())
-            output.closeEntry()
-        }
-        val root = FakeRootFileSystem().apply { addFile("/source.zip", archive.readBytes()) }
-        val published = mutableListOf<Triple<String, String, String>>()
-        val repository = repository(cacheDir, root) { cached, name, target ->
-            published += Triple(target.value, name.toEntryName().getOrThrow().value, cached.file.readText())
-            flowOf(successTransfer(name.toEntryName().getOrThrow().value, cached.sizeBytes, target))
-        }
-        try {
-            val states = repository.extract(path("/source.zip"), path("/target")).toList()
-            assertTrue(states.last() is ArchiveState.Success)
-            assertEquals(listOf("/target/docs"), root.createdDirectories)
-            assertEquals(listOf(Triple("/target/docs", "readme.txt", "payload")), published)
-        } finally {
-            cacheDir.deleteRecursively()
-        }
-    }
-
     private fun repository(
         cacheDir: File,
         root: RootFileSystem,

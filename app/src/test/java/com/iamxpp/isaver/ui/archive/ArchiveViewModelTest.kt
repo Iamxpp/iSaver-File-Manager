@@ -11,7 +11,11 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.ui.files.HomeTab
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -20,6 +24,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -122,7 +127,15 @@ class ArchiveViewModelTest {
     @Test
     fun `choose extraction target and extraction progress remain explicit`() = runTest(scheduler) {
         val progress = ArchiveState.Running(ArchiveProgress.Entry("item.txt", 2L, 10L))
-        val success = ArchiveState.Success(ArchiveFormat.ZIP, 1L, 10L)
+        val success = ArchiveState.Success(
+            com.iamxpp.isaver.domain.DirectoryEntry(
+                root("/target/a"), "a", com.iamxpp.isaver.domain.EntryType.DIRECTORY,
+                null, 1L, true, true, false,
+            ),
+            ArchiveFormat.ZIP,
+            1L,
+            10L,
+        )
         val viewModel = ArchiveViewModel(
             inspectArchive = { OperationResult.Success(ArchiveListing(ArchiveFormat.ZIP, emptyList())) },
             extractArchive = { _, _ -> flowOf(progress, success) },
@@ -140,6 +153,43 @@ class ArchiveViewModelTest {
         advanceUntilIdle()
 
         assertEquals(success, viewModel.state.value.operation)
+    }
+
+    @Test
+    fun `cancel shows cleaning until repository cleanup finishes`() = runTest(scheduler) {
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val allowCleanup = CompletableDeferred<Unit>()
+        val viewModel = ArchiveViewModel(
+            inspectArchive = { OperationResult.Success(ArchiveListing(ArchiveFormat.ZIP, emptyList())) },
+            extractArchive = { _, _ ->
+                flow {
+                    try {
+                        emit(ArchiveState.Running(ArchiveProgress.Preparing))
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) {
+                            cleanupStarted.complete(Unit)
+                            allowCleanup.await()
+                        }
+                    }
+                }
+            },
+            recordAccess = { _, _ -> },
+            ioDispatcher = dispatcher,
+        )
+        viewModel.open(root("/a.zip"), "a.zip", HomeTab.VIEWS)
+        advanceUntilIdle()
+        viewModel.extractTo(root("/target"))
+        scheduler.runCurrent()
+
+        viewModel.cancelExtraction()
+        scheduler.runCurrent()
+
+        assertEquals(ArchiveState.Cleaning, viewModel.state.value.operation)
+        cleanupStarted.await()
+        allowCleanup.complete(Unit)
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.operation)
     }
 
     private fun viewModel(

@@ -1,7 +1,9 @@
 package com.iamxpp.isaver.archive
 
 import com.iamxpp.isaver.data.root.AppCachePath
+import com.iamxpp.isaver.data.root.ExtractionStage
 import com.iamxpp.isaver.data.root.RootFileSystem
+import com.iamxpp.isaver.data.root.RootTransferSource
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
@@ -16,12 +18,21 @@ import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 class ArchiveRepository(
     private val rootFileSystem: RootFileSystem,
     private val localEngine: LocalArchiveEngine,
     private val cacheDir: File,
     private val publish: (CachedIncomingFile, OutputNameDraft, RootPath) -> Flow<TransferState>,
+    private val issueSource: (CachedIncomingFile) -> OperationResult<RootTransferSource> = {
+        OperationResult.Failure(ErrorCode.SOURCE_UNREADABLE, "无法准备解压文件流")
+    },
+    private val revokeSource: (RootTransferSource) -> Unit = {},
+    private val recordCompressed: suspend (DirectoryEntry) -> Unit = {},
+    private val recordExtracted: suspend (DirectoryEntry) -> Unit = {},
     private val cachedFactory: (File) -> Result<CachedIncomingFile> = { file ->
         runCatching {
             CachedIncomingFile(
@@ -79,9 +90,17 @@ class ArchiveRepository(
                 }
             }
             when (val result = terminal) {
-                is TransferState.Success -> send(
-                    ArchiveState.Success(summary.format, summary.entryCount, summary.expandedBytes),
-                )
+                is TransferState.Success -> {
+                    recordWithoutBlocking { recordCompressed(result.entry) }
+                    send(
+                        ArchiveState.Success(
+                            result.entry,
+                            summary.format,
+                            summary.entryCount,
+                            summary.expandedBytes,
+                        ),
+                    )
+                }
                 is TransferState.Failure -> {
                     if (result.code != ErrorCode.OUTCOME_UNCERTAIN) archiveFile.delete()
                     send(failure(result.code, result.message))
@@ -127,6 +146,9 @@ class ArchiveRepository(
             is OperationResult.Success -> result.value
         }
         val localDestination = File(extractionDir, UUID.randomUUID().toString())
+        var stage: ExtractionStage? = null
+        var cleanupStage = false
+        var preserveUncertainStage = false
         try {
             val summary = localEngine.extract(sourceCache.file, localDestination) { progress ->
                 send(ArchiveState.Running(progress))
@@ -134,19 +156,34 @@ class ArchiveRepository(
                 send(failure(ErrorCode.COMMAND_FAILED, "无法解压文件"))
                 return@channelFlow
             }
+            val activeStage = when (val prepared = rootFileSystem.prepareExtractionStage(targetDirectory)) {
+                is OperationResult.Success -> prepared.value
+                is OperationResult.Failure -> {
+                    send(failure(prepared.code, prepared.userMessage))
+                    return@channelFlow
+                }
+            }
+            stage = activeStage
+            cleanupStage = true
+            val directories = localDestination.walkTopDown()
+                .drop(1)
+                .filter(File::isDirectory)
+                .sortedBy { it.relativeTo(localDestination).invariantSeparatorsPath.count { character -> character == '/' } }
+                .toList()
+            for (directory in directories) {
+                val relative = directory.relativeTo(localDestination).invariantSeparatorsPath
+                when (val created = rootFileSystem.createExtractionDirectory(activeStage, relative)) {
+                    is OperationResult.Success -> Unit
+                    is OperationResult.Failure -> {
+                        send(failure(created.code, created.userMessage))
+                        return@channelFlow
+                    }
+                }
+            }
             val files = localDestination.walkTopDown().filter(File::isFile).toList()
             for ((index, file) in files.withIndex()) {
                 val relative = file.relativeTo(localDestination).invariantSeparatorsPath
-                val parentComponents = relative.substringBeforeLast('/', "")
-                    .split('/')
-                    .filter(String::isNotEmpty)
-                val parent = when (val ensured = ensureDirectories(targetDirectory, parentComponents)) {
-                    is OperationResult.Failure -> {
-                        send(failure(ensured.code, ensured.userMessage))
-                        return@channelFlow
-                    }
-                    is OperationResult.Success -> ensured.value
-                }
+                val relativeParent = relative.substringBeforeLast('/', "")
                 val incoming = newIncomingFile()
                 file.copyTo(incoming, overwrite = false)
                 val cached = cachedFactory(incoming).getOrElse {
@@ -154,31 +191,109 @@ class ArchiveRepository(
                     send(failure(ErrorCode.COMMAND_FAILED, "无法准备解压文件缓存"))
                     return@channelFlow
                 }
-                send(ArchiveState.Publishing(relative))
-                val terminal = publish(
-                    cached,
-                    OutputNameDraft.fromDisplayName(file.name),
-                    parent,
-                ).lastTerminal()
-                when (terminal) {
-                    is TransferState.Success -> incoming.delete()
-                    is TransferState.Failure -> {
-                        if (terminal.code != ErrorCode.OUTCOME_UNCERTAIN) incoming.delete()
-                        send(failure(terminal.code, terminal.message))
-                        return@channelFlow
-                    }
-                    else -> {
+                val transferSource = when (val issued = issueSource(cached)) {
+                    is OperationResult.Success -> issued.value
+                    is OperationResult.Failure -> {
                         incoming.delete()
-                        send(failure(ErrorCode.COMMAND_FAILED, "解压文件发布失败"))
+                        send(failure(issued.code, issued.userMessage))
                         return@channelFlow
                     }
                 }
-                send(ArchiveState.Running(ArchiveProgress.Publishing(index.toLong() + 1L, files.size.toLong())))
+                try {
+                    send(ArchiveState.Running(ArchiveProgress.Publishing(index.toLong(), files.size.toLong())))
+                    when (val transferred = rootFileSystem.transferIntoExtractionStage(
+                        activeStage,
+                        relativeParent,
+                        transferSource,
+                        com.iamxpp.isaver.domain.EntryName.parse(file.name).getOrElse {
+                            send(failure(ErrorCode.COMMAND_FAILED, "压缩包文件名无效"))
+                            return@channelFlow
+                        },
+                    )) {
+                        is OperationResult.Success -> Unit
+                        is OperationResult.Failure -> {
+                            send(failure(transferred.code, transferred.userMessage))
+                            return@channelFlow
+                        }
+                    }
+                } finally {
+                    revokeSource(transferSource)
+                    incoming.delete()
+                }
+                send(
+                    ArchiveState.Running(
+                        ArchiveProgress.Publishing(index.toLong() + 1L, files.size.toLong()),
+                    ),
+                )
             }
-            send(ArchiveState.Success(summary.format, summary.entryCount, summary.expandedBytes))
+            send(ArchiveState.Finalizing)
+            val baseName = archiveDisplayName(source.value.substringAfterLast('/'))
+            var output: DirectoryEntry? = null
+            for (attempt in 0 until MAX_EXTRACTION_NAME_ATTEMPTS) {
+                val candidate = FolderName.parse(
+                    if (attempt == 0) baseName else "$baseName ($attempt)",
+                ).getOrElse {
+                    send(failure(ErrorCode.COMMAND_FAILED, "解压目录名称无效"))
+                    return@channelFlow
+                }
+                when (val committed = rootFileSystem.commitExtractionStage(activeStage, candidate)) {
+                    is OperationResult.Success -> {
+                        output = committed.value
+                        cleanupStage = false
+                        break
+                    }
+                    is OperationResult.Failure -> when (committed.code) {
+                        ErrorCode.ALREADY_EXISTS -> Unit
+                        ErrorCode.OUTCOME_UNCERTAIN -> {
+                            preserveUncertainStage = true
+                            cleanupStage = false
+                            send(failure(committed.code, committed.userMessage))
+                            return@channelFlow
+                        }
+                        else -> {
+                            send(failure(committed.code, committed.userMessage))
+                            return@channelFlow
+                        }
+                    }
+                }
+            }
+            if (output == null) {
+                send(failure(ErrorCode.ALREADY_EXISTS, "同名解压目录过多"))
+                return@channelFlow
+            }
+            recordWithoutBlocking { recordExtracted(output) }
+            send(
+                ArchiveState.Success(
+                    output,
+                    summary.format,
+                    summary.entryCount,
+                    summary.expandedBytes,
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            if (cleanupStage && !preserveUncertainStage) {
+                withContext(NonCancellable) {
+                    stage?.let { rootFileSystem.cleanupExtractionStage(it) }
+                }
+                cleanupStage = false
+            }
+            throw cancelled
         } finally {
+            if (cleanupStage && !preserveUncertainStage) {
+                withContext(NonCancellable) {
+                    stage?.let { rootFileSystem.cleanupExtractionStage(it) }
+                }
+            }
             sourceCache.file.delete()
             localDestination.deleteRecursively()
+        }
+    }
+
+    private suspend fun recordWithoutBlocking(record: suspend () -> Unit) {
+        try {
+            record()
+        } catch (_: Exception) {
+            Unit
         }
     }
 
@@ -241,45 +356,14 @@ class ArchiveRepository(
         }
     }
 
-    private suspend fun ensureDirectories(
-        target: RootPath,
-        components: List<String>,
-    ): OperationResult<RootPath> {
-        var current = target
-        for (component in components) {
-            val name = FolderName.parse(component).getOrElse {
-                return OperationResult.Failure(ErrorCode.COMMAND_FAILED, "压缩包目录名称无效")
-            }
-            val child = RootPath.parse("${current.value.trimEnd('/')}/${name.value}").getOrThrow()
-            when (val existing = rootFileSystem.stat(child)) {
-                is OperationResult.Success -> {
-                    if (existing.value.type != EntryType.DIRECTORY || existing.value.symbolicLink) {
-                        return OperationResult.Failure(ErrorCode.NOT_DIRECTORY, "解压目标路径不是文件夹")
-                    }
-                }
-                is OperationResult.Failure -> {
-                    if (existing.code != ErrorCode.NOT_FOUND) return existing
-                    when (val created = rootFileSystem.createDirectory(current, name)) {
-                        is OperationResult.Failure -> return created
-                        is OperationResult.Success -> Unit
-                    }
-                }
-            }
-            current = child
-        }
-        return OperationResult.Success(current)
-    }
-
     private fun newIncomingFile(): File {
         check(incomingDir.exists() || incomingDir.mkdirs())
         return File(incomingDir, "${UUID.randomUUID()}.tmp")
     }
 
-    private suspend fun Flow<TransferState>.lastTerminal(): TransferState? {
-        var terminal: TransferState? = null
-        collect { terminal = it }
-        return terminal
-    }
-
     private fun failure(code: ErrorCode, message: String) = ArchiveState.Failure(code, message)
+
+    private companion object {
+        const val MAX_EXTRACTION_NAME_ATTEMPTS = 100
+    }
 }
