@@ -1,6 +1,8 @@
 # iSaver 远程服务器安全边界
 
-当前远程连接支持 SFTP、FTPS 和普通 FTP。所有连接都通过 `RemoteProfile`、`RemoteSecurityPolicy` 和协议适配器创建，UI 不接触 Shell 命令、原始 socket 或密码明文。
+> 0.1.0 不提供远程服务器功能，产品 UI 中没有连接入口。本文仅记录保留代码的安全设计，不能作为已发布功能声明。
+
+保留的远程代码包含 SFTP、FTPS 和普通 FTP 适配器。所有连接设计都通过 `RemoteProfile`、`RemoteSecurityPolicy` 和协议适配器创建，UI 不接触 Shell 命令、原始 socket 或密码明文。
 
 - SFTP 必须配置主机密钥 SHA-256 指纹；JSch 使用严格主机密钥检查，指纹不匹配时连接阻断。
 - FTPS 使用系统信任链、主机名校验和叶证书 SHA-256 指纹固定；不接受信任所有证书的回退路径。
