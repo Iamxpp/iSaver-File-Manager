@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPath
@@ -68,6 +70,27 @@ class FilesComponentsTest {
         compose.onNodeWithContentDescription("更多操作").assertIsDisplayed()
         compose.onNodeWithTag("page-top-bar").assertIsDisplayed()
         compose.onNodeWithTag("page-search").assertIsDisplayed()
+    }
+
+    @Test
+    fun pageHeaderKeepsTopBarBelowStatusBarInset() {
+        compose.setContent {
+            FilesPageHeader(
+                title = "视图",
+                query = "",
+                onQueryChange = {},
+                onOverflow = {},
+                topBarTestTag = "inset-top-bar",
+                statusBarInsets = WindowInsets(top = 24.dp),
+            )
+        }
+
+        val barBounds = compose.onNodeWithTag("inset-top-bar")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        assertTrue("barBounds=$barBounds", barBounds.top > 0f)
     }
 
     @Test
