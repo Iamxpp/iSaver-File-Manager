@@ -35,7 +35,7 @@ import org.junit.Test
 class ArchiveExtractionRepositoryTest {
     @Test
     fun `extract writes only to one stage commits once and records definite output`() = runTest {
-        fixture(listOf("docs/readme.txt" to "one", "docs/second.txt" to "two", "empty/" to null)) { cacheDir, root ->
+        fixture(listOf("empty/" to null, "docs/second.txt" to "two", "docs/readme.txt" to "one")) { cacheDir, root ->
             val harness = repository(cacheDir, root)
 
             val states = harness.repository.extract(path("/source.zip"), path("/target")).toList()

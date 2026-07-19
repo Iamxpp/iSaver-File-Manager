@@ -168,7 +168,15 @@ class ArchiveRepository(
             val directories = localDestination.walkTopDown()
                 .drop(1)
                 .filter(File::isDirectory)
-                .sortedBy { it.relativeTo(localDestination).invariantSeparatorsPath.count { character -> character == '/' } }
+                .sortedWith(
+                    compareBy<File>(
+                        { directory ->
+                            directory.relativeTo(localDestination).invariantSeparatorsPath
+                                .count { character -> character == '/' }
+                        },
+                        { directory -> directory.relativeTo(localDestination).invariantSeparatorsPath },
+                    ),
+                )
                 .toList()
             for (directory in directories) {
                 val relative = directory.relativeTo(localDestination).invariantSeparatorsPath
@@ -180,7 +188,10 @@ class ArchiveRepository(
                     }
                 }
             }
-            val files = localDestination.walkTopDown().filter(File::isFile).toList()
+            val files = localDestination.walkTopDown()
+                .filter(File::isFile)
+                .sortedBy { file -> file.relativeTo(localDestination).invariantSeparatorsPath }
+                .toList()
             for ((index, file) in files.withIndex()) {
                 val relative = file.relativeTo(localDestination).invariantSeparatorsPath
                 val relativeParent = relative.substringBeforeLast('/', "")
