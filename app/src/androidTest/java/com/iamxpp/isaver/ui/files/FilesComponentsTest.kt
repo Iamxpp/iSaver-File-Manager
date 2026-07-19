@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -282,7 +283,7 @@ class FilesComponentsTest {
         compose.onNodeWithText("名称").assertIsSelected()
         compose.onNodeWithText("新建文件夹").assertIsEnabled()
         compose.onNodeWithText("压缩文件").assertIsNotEnabled()
-        compose.onNodeWithText("连接服务器").assertIsNotEnabled()
+        compose.onAllNodesWithText("连接服务器").assertCountEquals(0)
         val commandConfig = compose.onNodeWithText("新建文件夹")
             .fetchSemanticsNode()
             .config

@@ -1,9 +1,11 @@
 package com.iamxpp.isaver.ui
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -282,7 +284,7 @@ class BrowserScreenTest {
         compose.onNodeWithContentDescription("更多操作").performClick()
         compose.onNodeWithText("压缩文件").assertIsNotEnabled()
         compose.onNodeWithContentDescription("更多操作").performClick()
-        compose.onNodeWithText("连接服务器").assertIsNotEnabled()
+        compose.onAllNodesWithText("连接服务器").assertCountEquals(0)
     }
 
     @Test fun selectedFileEnablesZipDialogAndReturnsExplicitName() {
