@@ -74,6 +74,29 @@ class InlineSaveBarTest {
     }
 
     @Test
+    fun clickingCompactNameOpensExpandedEditorForLongNames() {
+        var draft by mutableStateOf(OutputNameDraft("很长的文件名".repeat(12), "pdf"))
+        compose.setContent {
+            ISaverTheme {
+                InlineSaveBar(
+                    state = choosing(draft),
+                    itemCount = 1,
+                    onStemChange = { draft = draft.copy(stem = it) },
+                    onExtensionChange = { draft = draft.copy(extension = it) },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("inline-save-stem").performClick()
+        compose.onNodeWithText("编辑文件名").assertIsDisplayed()
+        compose.onNodeWithTag("expanded-name-field").performTextReplacement("完整文件名")
+        compose.onNodeWithText("完成").performClick()
+
+        compose.runOnIdle { assertEquals(OutputNameDraft("完整文件名", "pdf"), draft) }
+        compose.onNodeWithTag("inline-save-stem").assertTextEquals("完整文件名")
+    }
+
+    @Test
     fun uncertainStateKeepsCompactAcknowledgementAction() {
         var acknowledged = false
         compose.setContent {

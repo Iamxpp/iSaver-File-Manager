@@ -3,6 +3,7 @@ package com.iamxpp.isaver.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,9 +16,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +67,7 @@ fun InlineSaveBar(
     val outputName = state.outputNameDraft()
     val fieldsEnabled = state is TransferUiState.Caching || state is TransferUiState.Choosing
     val status = transferStatus(state)
+    var expandedEditor by remember { mutableStateOf<ExpandedNameEditor?>(null) }
     val statusColor = if (
         state is TransferUiState.Failure ||
         state is TransferUiState.Uncertain ||
@@ -104,6 +108,7 @@ fun InlineSaveBar(
             CompactNameField(
                 value = outputName?.stem.orEmpty(),
                 onValueChange = onStemChange,
+                onExpand = { expandedEditor = ExpandedNameEditor.Stem },
                 enabled = fieldsEnabled,
                 contentDescription = "文件名",
                 placeholder = "文件名",
@@ -115,6 +120,7 @@ fun InlineSaveBar(
             CompactNameField(
                 value = outputName?.extension.orEmpty(),
                 onValueChange = onExtensionChange,
+                onExpand = { expandedEditor = ExpandedNameEditor.Extension },
                 enabled = fieldsEnabled,
                 contentDescription = "扩展名",
                 placeholder = "扩展名",
@@ -150,12 +156,23 @@ fun InlineSaveBar(
             }
         }
     }
+    val draft = outputName
+    val editor = expandedEditor
+    if (draft != null && editor != null) {
+        ExpandedNameDialog(
+            title = if (editor == ExpandedNameEditor.Stem) "编辑文件名" else "编辑扩展名",
+            value = if (editor == ExpandedNameEditor.Stem) draft.stem else draft.extension,
+            onValueChange = if (editor == ExpandedNameEditor.Stem) onStemChange else onExtensionChange,
+            onDismiss = { expandedEditor = null },
+        )
+    }
 }
 
 @Composable
 private fun CompactNameField(
     value: String,
     onValueChange: (String) -> Unit,
+    onExpand: () -> Unit,
     enabled: Boolean,
     contentDescription: String,
     placeholder: String,
@@ -179,6 +196,7 @@ private fun CompactNameField(
                 color = if (focused) ISaverBlue else ISaverDivider,
                 shape = RoundedCornerShape(8.dp),
             )
+            .clickable(enabled = enabled, onClick = onExpand)
             .onFocusChanged { focused = it.isFocused }
             .semantics { this.contentDescription = contentDescription },
         decorationBox = { innerTextField ->
@@ -200,6 +218,41 @@ private fun CompactNameField(
         },
     )
 }
+
+@Composable
+private fun ExpandedNameDialog(
+    title: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(title, color = ISaverPrimaryText)
+        },
+        text = {
+            TextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = false,
+                minLines = 3,
+                maxLines = 6,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = ISaverPrimaryText),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("expanded-name-field"),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("完成", color = ISaverBlue)
+            }
+        },
+    )
+}
+
+private enum class ExpandedNameEditor { Stem, Extension }
 
 @Composable
 private fun CompactAction(label: String, onClick: () -> Unit) {

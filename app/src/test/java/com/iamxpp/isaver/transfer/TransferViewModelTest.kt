@@ -149,6 +149,24 @@ class TransferViewModelTest {
     }
 
     @Test
+    fun `publish failure keeps specific repository message`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val viewModel = readyViewModel(
+            transferCached = { _, _, _, _ ->
+                flowOf(TransferState.Failure(ErrorCode.COMMAND_FAILED, "文件名过长，无法保存"))
+            },
+            dispatcher = dispatcher,
+        )
+
+        viewModel.save()
+        advanceUntilIdle()
+
+        val failure = viewModel.state.value as TransferUiState.Failure
+        assertEquals(ErrorCode.COMMAND_FAILED, failure.code)
+        assertEquals("文件名过长，无法保存", failure.message)
+    }
+
+    @Test
     fun `save revalidates cache and target before the publish boundary`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         var targetValidations = 0

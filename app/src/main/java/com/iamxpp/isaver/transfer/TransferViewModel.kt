@@ -433,7 +433,7 @@ class TransferViewModel(
             outputName = request.outputName,
             targetDirectory = request.targetDirectory,
             code = transfer.code,
-            message = safeFailureMessage(transfer.code),
+            message = transfer.message.ifBlank { safeFailureMessage(transfer.code) },
             retryable = retryable,
             requiresReshare = transfer.code == ErrorCode.SOURCE_UNREADABLE,
             queuedPending = retryable && queued != null,
