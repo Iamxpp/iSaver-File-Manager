@@ -42,6 +42,17 @@ Run the local gates from PowerShell:
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
+## GitHub Releases
+
+The repository publishes installable debug APKs through the `Android Release` workflow. Push a version tag to create a GitHub Release with an APK and SHA-256 checksum:
+
+```powershell
+git tag v0.1.0-fix1
+git push origin v0.1.0-fix1
+```
+
+Until private release signing is configured, GitHub Release assets are debug-signed development builds and are named `iSaver-<tag>-debug.apk`.
+
 ## Device Verification
 
 The primary Root test device is a Xiaomi 9 running Android 11/API 30. API 29, 33, and 35 have non-Root compatibility coverage. See [the compatibility matrix](docs/testing/android-compatibility-matrix.md) for the exact scope.

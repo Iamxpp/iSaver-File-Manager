@@ -1,0 +1,58 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Existing tag to publish, for example v0.1.0-fix1"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a prerelease"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  publish-debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare Gradle wrapper
+        run: chmod +x gradlew
+      - name: Install Android toolchain
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+      - name: Verify and build debug APK
+        run: ./gradlew testDebugUnitTest assembleDebug
+      - name: Prepare release asset
+        run: |
+          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+          mkdir -p release-assets
+          cp app/build/outputs/apk/debug/app-debug.apk "release-assets/iSaver-${tag}-debug.apk"
+          sha256sum "release-assets/iSaver-${tag}-debug.apk" > "release-assets/iSaver-${tag}-debug.apk.sha256"
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          name: iSaver ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(github.ref_name, '-rc') }}
+          generate_release_notes: true
+          files: |
+            release-assets/*.apk
+            release-assets/*.sha256
