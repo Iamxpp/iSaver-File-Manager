@@ -179,6 +179,36 @@ class RootStreamTransferInstrumentedTest {
     }
 
     @Test
+    fun sharedStorageRootPublishesLongChineseDocumentName() = runBlocking {
+        val app = app()
+        assertDeviceHasRoot(app)
+        val finalPath = "$SHARED_ROOT_TARGET/$LONG_CHINESE_DOCUMENT"
+        root(app, "rm -f -- ${quote(finalPath)}")
+        cleanupStages(app, SHARED_ROOT_TARGET)
+        val cached = fixture(app, "xiaomi17-root-regression".toByteArray())
+        try {
+            val source = app.incomingStreamRegistry.issue(cached).getOrThrow()
+            val result = try {
+                app.rootFileSystem.transferFromStream(
+                    source = source,
+                    targetDirectory = path(SHARED_ROOT_TARGET),
+                    finalName = EntryName.parse(LONG_CHINESE_DOCUMENT).getOrThrow(),
+                )
+            } finally {
+                app.incomingStreamRegistry.revoke(source)
+            }
+
+            assertTrue("Shared root publish failed: $result", result is OperationResult.Success)
+            assertEquals("xiaomi17-root-regression", root(app, "cat -- ${quote(finalPath)}"))
+            assertNoStages(app, SHARED_ROOT_TARGET)
+        } finally {
+            cached.file.delete()
+            runCatching { root(app, "rm -f -- ${quote(finalPath)}") }
+            runCatching { cleanupStages(app, SHARED_ROOT_TARGET) }
+        }
+    }
+
+    @Test
     fun sharedStorageCollisionKeepsOriginalAndPublishesNumberedCopy() = runBlocking {
         val app = app()
         assertDeviceHasRoot(app)
@@ -222,12 +252,20 @@ class RootStreamTransferInstrumentedTest {
     }
 
     private suspend fun assertNoStages(app: ISaverApplication) {
+        assertNoStages(app, TARGET)
+    }
+
+    private suspend fun assertNoStages(app: ISaverApplication, target: String) {
         assertTrue(
             root(
                 app,
-                "find ${quote(TARGET)} -maxdepth 1 -name '.isaver-*' -print",
+                "find ${quote(target)} -maxdepth 1 -name '.isaver-*' -print",
             ).isBlank(),
         )
+    }
+
+    private suspend fun cleanupStages(app: ISaverApplication, target: String) {
+        root(app, "for p in ${quote(target)}/.isaver-stage-*; do [ -e \"\$p\" ] && rm -rf -- \"\$p\"; done; true")
     }
 
     private suspend fun root(app: ISaverApplication, command: String): String {
@@ -261,6 +299,8 @@ class RootStreamTransferInstrumentedTest {
 
     private companion object {
         const val TARGET = "/data/local/tmp/isaver-stream-test"
+        const val SHARED_ROOT_TARGET = "/storage/emulated/0"
         const val SHARED_TARGET = "/storage/emulated/0/Download/.isaver-stream-test"
+        const val LONG_CHINESE_DOCUMENT = "附件2：作品报告_虚拟货币挖矿流量智能识别.docx"
     }
 }

@@ -1,5 +1,6 @@
 package com.iamxpp.isaver.data.root
 
+import android.util.Log
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
@@ -129,7 +130,7 @@ class LibsuRootFileSystem internal constructor(
     ) { directory, stage ->
         transferHelper.copyPublish(
             directory.original.value,directory.canonical.value,stage,finalName.value,
-            directory.identity,source,timeoutMillis,
+            directory.identity,source,transferDeadlineMillis(source.expectedSizeBytes),
         )
     }
 
@@ -157,7 +158,7 @@ class LibsuRootFileSystem internal constructor(
             return failure(ErrorCode.COMMAND_FAILED, "无法读取来源文件", "Root archive read exceeded deadline")
         }
         if (result.exitCode != 0) {
-            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法读取来源文件")
+            return mapExitCode(result.exitCode, result.stderr, "无法读取来源文件", "read-file")
         }
         return RootFileReadProtocol.decode(result.stdout, output, expectedSize)
     }
@@ -182,7 +183,7 @@ class LibsuRootFileSystem internal constructor(
             return uncertainExtraction("Prepare extraction stage result was lost")
         }
         if (result.exitCode != 0) {
-            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法准备解压目录")
+            return mapExitCode(result.exitCode, result.stderr, "无法准备解压目录", "prepare-extract-stage")
         }
         val identity = RootFileIdentity.parse(result.stdout).getOrElse {
             return uncertainExtraction("Malformed extraction stage identity")
@@ -213,7 +214,7 @@ class LibsuRootFileSystem internal constructor(
             return uncertainExtraction("Create extraction directory result was lost")
         }
         if (result.exitCode != 0) {
-            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法创建解压目录")
+            return mapExitCode(result.exitCode, result.stderr, "无法创建解压目录", "mkdir-extract")
         }
         return OperationResult.Success(Unit)
     }
@@ -230,15 +231,16 @@ class LibsuRootFileSystem internal constructor(
         if (source.expectedSizeBytes < 0L) {
             return failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Negative extraction source size")
         }
+        val transferDeadline = transferDeadlineMillis(source.expectedSizeBytes)
         val command = transferHelper.copyIntoExtraction(
             stage,
             safeParent.value,
             source,
             finalName,
-            timeoutMillis,
+            transferDeadline,
         )
         val callerJob = currentCoroutineContext()[Job]
-        val dispatch = awaitTransferExecution(command, callerJob)
+        val dispatch = awaitTransferExecution(command, callerJob, transferDeadline)
         if (!dispatch.dispatched) throw CancellationException("Extraction transfer cancelled before dispatch")
         return withContext(NonCancellable) {
             val execution = dispatch.result.getOrElse {
@@ -247,8 +249,9 @@ class LibsuRootFileSystem internal constructor(
             if (execution.exitCode != 0) {
                 return@withContext mapExitCode(
                     execution.exitCode,
-                    execution.stderr.isNotEmpty(),
+                    execution.stderr,
                     "无法写入解压文件",
+                    "copy-extract",
                 )
             }
             val identity = parsePublishedIdentity(execution.stdout)
@@ -274,8 +277,9 @@ class LibsuRootFileSystem internal constructor(
             if (execution.exitCode != 0) {
                 return@withContext mapExitCode(
                     execution.exitCode,
-                    execution.stderr.isNotEmpty(),
+                    execution.stderr,
                     "无法完成解压",
+                    "commit-extract",
                 )
             }
             val committedIdentity = RootFileIdentity.parse(execution.stdout).getOrElse {
@@ -307,7 +311,7 @@ class LibsuRootFileSystem internal constructor(
             return uncertainExtraction("Extraction stage cleanup result was lost")
         }
         if (result.exitCode != 0) {
-            return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), "无法清理解压临时目录")
+            return mapExitCode(result.exitCode, result.stderr, "无法清理解压临时目录", "remove-extract-stage")
         }
         return OperationResult.Success(Unit)
     }
@@ -335,9 +339,10 @@ class LibsuRootFileSystem internal constructor(
             throw cancelled
         }
 
+        val transferDeadline = transferDeadlineMillis(expectedSizeBytes)
         val command=copyCommand(directory,stage)
         val callerJob=currentCoroutineContext()[Job]
-        val dispatch=awaitTransferExecution(command,callerJob)
+        val dispatch=awaitTransferExecution(command,callerJob,transferDeadline)
         if(!dispatch.dispatched){
             cleanupStage(directory,stage)
             throw CancellationException("Transfer cancelled before dispatch")
@@ -350,13 +355,20 @@ class LibsuRootFileSystem internal constructor(
                     error is java.net.SocketTimeoutException->"Copy-publish backend timed out after dispatch"
                     else->"Copy-publish result was lost"
                 }
+                logRootUncertain("copy-publish", reason)
                 return@withContext reconcileLostTransfer(directory,stage,finalName,reason)
             }
             if(execution.exitCode!=0){
                 if(execution.exitCode==55||execution.exitCode==137){
+                    logRootUncertain("copy-publish", "Native helper reported exit ${execution.exitCode}")
                     return@withContext reconcileLostTransfer(directory,stage,finalName,"Native helper reported an uncertain outcome")
                 }
-                return@withContext mapExitCode(execution.exitCode,execution.stderr.isNotEmpty(),"无法完成保存")
+                return@withContext mapExitCode(
+                    execution.exitCode,
+                    execution.stderr,
+                    "无法完成保存",
+                    "copy-publish",
+                )
             }
             val published=parsePublishedIdentity(execution.stdout)
             if(published !is OperationResult.Success)return@withContext uncertainTransfer("Malformed copy-publish result")
@@ -375,7 +387,11 @@ class LibsuRootFileSystem internal constructor(
         }
     }
 
-    private suspend fun awaitTransferExecution(command:String,callerJob:Job?):TransferDispatch =
+    private suspend fun awaitTransferExecution(
+        command:String,
+        callerJob:Job?,
+        waitTimeoutMillis:Long = timeoutMillis,
+    ):TransferDispatch =
         withContext(NonCancellable){
             if(callerJob?.isActive==false)return@withContext TransferDispatch.notDispatched()
             val scope=CoroutineScope(SupervisorJob()+ioDispatcher)
@@ -385,7 +401,7 @@ class LibsuRootFileSystem internal constructor(
                 return@withContext TransferDispatch.notDispatched()
             }
             backend.start()
-            val softResult=withTimeoutOrNull(timeoutMillis){backend.await()}
+            val softResult=withTimeoutOrNull(waitTimeoutMillis){backend.await()}
             if(softResult!=null){
                 scope.cancel()
                 return@withContext TransferDispatch(softResult,false,callerJob?.isCancelled==true,true)
@@ -402,6 +418,14 @@ class LibsuRootFileSystem internal constructor(
             )
         }
 
+    private fun transferDeadlineMillis(expectedSizeBytes: Long): Long {
+        if (timeoutMillis < DEFAULT_TIMEOUT_MILLIS) return timeoutMillis
+        val size = expectedSizeBytes.coerceAtLeast(0L)
+        val throughputMillis = ((size + TRANSFER_TIMEOUT_BYTES_PER_SECOND - 1) /
+            TRANSFER_TIMEOUT_BYTES_PER_SECOND) * 1_000L
+        return maxOf(timeoutMillis, MIN_STREAM_TRANSFER_TIMEOUT_MILLIS, throughputMillis)
+    }
+
     private suspend fun prepareStage(directory:PreparedTransferDirectory,stageName:String):OperationResult<TransferStage>{
         val command=transferHelper.prepare(
             directory.original.value,directory.canonical.value,stageName,directory.identity,
@@ -409,7 +433,7 @@ class LibsuRootFileSystem internal constructor(
         val result=runHelperBounded(command,helperOperationTimeoutMillis).getOrElse{
             return uncertainTransfer("Prepare-stage exceeded its bounded deadline or lost its result")
         }
-        if(result.exitCode!=0)return mapExitCode(result.exitCode,result.stderr.isNotEmpty(),"无法准备目标目录")
+        if(result.exitCode!=0)return mapExitCode(result.exitCode,result.stderr,"无法准备目标目录","prepare-stage")
         return RootFileIdentity.parse(result.stdout).fold(
             onSuccess={OperationResult.Success(TransferStage(stageName,it))},
             onFailure={uncertainTransfer("Malformed prepare-stage identity")},
@@ -475,7 +499,7 @@ class LibsuRootFileSystem internal constructor(
         } catch (_: Exception) {
             return failure(ErrorCode.COMMAND_FAILED, failureMessage, "Root command execution failed")
         }
-        if (result.exitCode != 0) return mapExitCode(result.exitCode, result.stderr.isNotEmpty(), failureMessage)
+        if (result.exitCode != 0) return mapExitCode(result.exitCode, result.stderr, failureMessage)
         return OperationResult.Success(result.stdout)
     }
 
@@ -493,44 +517,110 @@ class LibsuRootFileSystem internal constructor(
             return failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper execution failed")
         }
         if (result.exitCode != 0) {
-            return mapDirectoryExitCode(result.exitCode, result.stderr.isNotEmpty())
+            return mapDirectoryExitCode(result.exitCode, result.stderr)
         }
         return OperationResult.Success(result.stdout)
     }
 
-    private fun mapDirectoryExitCode(exitCode: Int, hadStderr: Boolean): OperationResult.Failure = when (exitCode) {
-        43 -> failure(ErrorCode.ROOT_DENIED, "请授予 Root 权限后运行 iSaver", "Root access was lost")
-        EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
-        EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
-        EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
-        EXIT_NATIVE_IO -> failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper I/O failed")
-        EXIT_OUTPUT_LIMIT -> failure(ErrorCode.COMMAND_FAILED, "目录内容过多，无法读取", "Native directory listing exceeded protocol limits")
-        EXIT_USAGE -> failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper rejected its fixed invocation")
-        else -> failure(
-            ErrorCode.COMMAND_FAILED,
-            "无法读取目录信息",
-            if (hadStderr) "Native directory helper failed with diagnostic output" else "Native directory helper failed",
-        )
+    private fun mapDirectoryExitCode(exitCode: Int, stderr: List<String>): OperationResult.Failure {
+        val hadStderr = stderr.isNotEmpty()
+        val failure = when (exitCode) {
+            43 -> failure(ErrorCode.ROOT_DENIED, "请授予 Root 权限后运行 iSaver", "Root access was lost")
+            EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
+            EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
+            EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
+            EXIT_NATIVE_IO -> failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper I/O failed")
+            EXIT_OUTPUT_LIMIT -> failure(ErrorCode.COMMAND_FAILED, "目录内容过多，无法读取", "Native directory listing exceeded protocol limits")
+            EXIT_USAGE -> failure(ErrorCode.COMMAND_FAILED, "无法读取目录信息", "Native directory helper rejected its fixed invocation")
+            else -> failure(
+                ErrorCode.COMMAND_FAILED,
+                "无法读取目录信息",
+                if (hadStderr) "Native directory helper failed with diagnostic output" else "Native directory helper failed",
+            )
+        }
+        logRootFailure("list-dir", exitCode, stderr, failure.code)
+        return failure
     }
 
-    private fun mapExitCode(exitCode: Int, hadStderr: Boolean, failureMessage: String): OperationResult.Failure = when (exitCode) {
-        43 -> failure(ErrorCode.ROOT_DENIED,"请授予 Root 权限后运行 iSaver","Root access was lost")
-        EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
-        EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
-        EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
-        48 -> failure(ErrorCode.NOT_WRITABLE, "目录不可写", "Path was not writable")
-        49 -> failure(ErrorCode.ALREADY_EXISTS, "文件已存在", "Final reservation already exists")
-        50 -> failure(ErrorCode.NO_SPACE, "存储空间不足", "No space left on device")
-        54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
-        56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
-        55 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
-        137 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
-        else -> failure(
-            ErrorCode.COMMAND_FAILED,
-            failureMessage,
-            if (hadStderr) "Root command failed with diagnostic output" else "Root command failed",
-        )
+    private fun mapExitCode(
+        exitCode: Int,
+        stderr: List<String>,
+        failureMessage: String,
+        operation: String = "root-command",
+    ): OperationResult.Failure {
+        val hadStderr = stderr.isNotEmpty()
+        val failure = when (exitCode) {
+            43 -> failure(ErrorCode.ROOT_DENIED, "请授予 Root 权限后运行 iSaver", "Root access was lost")
+            EXIT_NOT_FOUND -> failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
+            EXIT_NOT_DIRECTORY -> failure(ErrorCode.NOT_DIRECTORY, "路径不是目录", "Path was not a directory")
+            EXIT_NOT_READABLE -> failure(ErrorCode.NOT_READABLE, "目录不可读", "Path was not readable")
+            48 -> failure(ErrorCode.NOT_WRITABLE, "目录不可写", "Path was not writable")
+            49 -> failure(ErrorCode.ALREADY_EXISTS, "文件已存在", "Final reservation already exists")
+            50 -> failure(ErrorCode.NO_SPACE, "存储空间不足", "No space left on device")
+            54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
+            56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
+            55 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
+            137 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
+            else -> if (operation in STREAM_COPY_OPERATIONS && stderr.looksLikeContentReadFailure()) {
+                failure(
+                    ErrorCode.SOURCE_UNREADABLE,
+                    "无法读取来源文件",
+                    "Content stream provider could not be read",
+                )
+            } else {
+                failure(
+                    ErrorCode.COMMAND_FAILED,
+                    failureMessage,
+                    if (hadStderr) "Root command failed with diagnostic output" else "Root command failed",
+                )
+            }
+        }
+        logRootFailure(operation, exitCode, stderr, failure.code)
+        return failure
     }
+
+    private fun logRootFailure(
+        operation: String,
+        exitCode: Int,
+        stderr: List<String>,
+        code: ErrorCode,
+    ) {
+        val sample = stderr.asSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            ?.let(::redactDiagnostic)
+            .orEmpty()
+        runCatching {
+            Log.w(
+                LOG_TAG,
+                "operation=$operation exitCode=$exitCode code=$code hasStderr=${stderr.isNotEmpty()} stderrSample=$sample",
+            )
+        }
+    }
+
+    private fun logRootUncertain(operation: String, reason: String) {
+        runCatching {
+            Log.w(
+                LOG_TAG,
+                "operation=$operation code=${ErrorCode.OUTCOME_UNCERTAIN} reason=${redactDiagnostic(reason)}",
+            )
+        }
+    }
+
+    private fun redactDiagnostic(value: String): String =
+        value
+            .replace(INCOMING_URI_PATTERN, "content://com.iamxpp.isaver.incoming-stream/incoming/<redacted>")
+            .replace(ANY_CONTENT_URI_PATTERN, "content://<redacted>")
+            .replace(ANDROID_PATH_PATTERN, "/<path>")
+            .replace(LONG_HEX_PATTERN, "<hex>")
+            .take(240)
+
+    private fun List<String>.looksLikeContentReadFailure(): Boolean =
+        any { line ->
+            CONTENT_READ_FAILURE_PATTERNS.any { pattern ->
+                line.contains(pattern, ignoreCase = true)
+            }
+        }
 
     private fun buildStatCommand(path: RootPath): String {
         val quoted = RootCommandCodec.quote(path.value)
@@ -601,6 +691,8 @@ class LibsuRootFileSystem internal constructor(
 
     private companion object {
         const val DEFAULT_TIMEOUT_MILLIS = 10_000L
+        const val MIN_STREAM_TRANSFER_TIMEOUT_MILLIS = 30_000L
+        const val TRANSFER_TIMEOUT_BYTES_PER_SECOND = 2L * 1024L * 1024L
         const val EXIT_NOT_FOUND = 44
         const val EXIT_NOT_DIRECTORY = 45
         const val EXIT_NOT_READABLE = 46
@@ -608,6 +700,18 @@ class LibsuRootFileSystem internal constructor(
         const val EXIT_OUTPUT_LIMIT = 57
         const val EXIT_USAGE = 64
         const val MAX_ROOT_CACHE_BYTES = 256L * 1024L * 1024L
+        const val LOG_TAG = "iSaverTransfer"
+        val STREAM_COPY_OPERATIONS = setOf("copy-publish", "copy-extract")
+        val CONTENT_READ_FAILURE_PATTERNS = listOf(
+            "Error while accessing provider",
+            "FileNotFoundException",
+            "SecurityException",
+            "Stream unavailable",
+        )
+        val INCOMING_URI_PATTERN = Regex("""content://com\.iamxpp\.isaver\.incoming-stream/incoming/[^\s"'`|;]+""")
+        val ANY_CONTENT_URI_PATTERN = Regex("""content://[^\s"'`|;]+""")
+        val ANDROID_PATH_PATTERN = Regex("""/(?:storage|sdcard|data|mnt|system|apex|vendor|product|dev|proc)(?:/[^\s"'`|;]*)+""")
+        val LONG_HEX_PATTERN = Regex("""[0-9a-fA-F]{32,}""")
         val STAGE_NAME=Regex("\\.isaver-stage-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
     }
 }

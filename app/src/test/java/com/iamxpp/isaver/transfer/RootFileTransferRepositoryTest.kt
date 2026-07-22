@@ -109,6 +109,18 @@ class RootFileTransferRepositoryTest {
     }
 
     @Test
+    fun `filesystem failure preserves its safe user message`() = runTest {
+        val terminal = repository(
+            FakeFs(mutableListOf(failure(ErrorCode.COMMAND_FAILED, "文件名过长，无法保存"))),
+            CleanupSpy(true),
+            CapabilitySpy(),
+        ).transfer(fakeCached(), draft("very-long-name.txt"), path("/target")).toList().last()
+
+        assertEquals(ErrorCode.COMMAND_FAILED, (terminal as TransferState.Failure).code)
+        assertEquals("文件名过长，无法保存", terminal.message)
+    }
+
+    @Test
     fun `uncertain outcome revokes capability retains cache and is terminal`() = runTest {
         val cleanup = CleanupSpy(true)
         val capabilities = CapabilitySpy()
@@ -371,9 +383,9 @@ class RootFileTransferRepositoryTest {
         ),
     )
 
-    private fun failure(code: ErrorCode) = OperationResult.Failure(
+    private fun failure(code: ErrorCode, userMessage: String = "安全消息") = OperationResult.Failure(
         code = code,
-        userMessage = "安全消息",
+        userMessage = userMessage,
         technicalMessage = "technical redacted",
     )
 

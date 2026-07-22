@@ -42,6 +42,45 @@ class RootTransferStagingTest {
     }
 
     @Test
+    fun `large incoming streams get a size based publish timeout`() = runTest {
+        val expectedSize = 80L * 1024L * 1024L
+        val runner = StagingRunner(expectedSize = expectedSize)
+
+        val result = fileSystem(runner, timeoutMillis = 10_000)
+            .transferFromStream(
+                source = source(expectedSize),
+                targetDirectory = path("/target"),
+                finalName = name("final.txt"),
+            )
+
+        assertTrue(result.toString(), result is OperationResult.Success<*>)
+        val copy = runner.commands.single { it.contains("'copy-publish-stdin'") }
+        assertTrue(copy.contains("'/system/bin/timeout' '-s' 'KILL' '40.000'"))
+    }
+
+    @Test
+    fun `size based publish timeout also controls outer wait`() = runTest {
+        val expectedSize = 80L * 1024L * 1024L
+        val gate = CompletableDeferred<Unit>()
+        val runner = StagingRunner(copyGate = gate, expectedSize = expectedSize)
+        val transfer = async {
+            fileSystem(
+                runner,
+                timeoutMillis = 10_000,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            ).transferFromStream(source(expectedSize), path("/target"), name("final.txt"))
+        }
+        runner.copyStarted.await()
+
+        testScheduler.advanceTimeBy(10_001)
+        testScheduler.runCurrent()
+
+        assertFalse(transfer.isCompleted)
+        gate.complete(Unit)
+        assertTrue(transfer.await() is OperationResult.Success)
+    }
+
+    @Test
     fun `transfer maps final race and no space without claiming success`() = runTest {
         listOf(49 to ErrorCode.ALREADY_EXISTS, 50 to ErrorCode.NO_SPACE).forEach { (exit, expected) ->
             val runner = StagingRunner(copyExit = exit)
@@ -61,6 +100,18 @@ class RootTransferStagingTest {
 
             assertEquals(expected, (result as OperationResult.Failure).code)
         }
+    }
+
+    @Test
+    fun `content read provider failures map to source unreadable`() = runTest {
+        val result = fileSystem(
+            StagingRunner(
+                copyExit = 1,
+                copyStderr = listOf("Error while accessing provider: java.io.FileNotFoundException: Stream unavailable"),
+            ),
+        ).transferFromStream(source(), path("/target"), name("final.txt"))
+
+        assertEquals(ErrorCode.SOURCE_UNREADABLE, (result as OperationResult.Failure).code)
     }
 
     @Test
@@ -309,9 +360,9 @@ class RootTransferStagingTest {
             helperOperationTimeoutMillis=helperOperationTimeoutMillis,
         )
 
-    private fun source() = RootTransferSource(
+    private fun source(sizeBytes: Long = 4L) = RootTransferSource(
         contentUri = "content://com.iamxpp.isaver.incoming-stream/incoming/${"ab".repeat(32)}",
-        expectedSizeBytes = 4L,
+        expectedSizeBytes = sizeBytes,
         token = "ab".repeat(32),
     )
 
@@ -322,6 +373,8 @@ class RootTransferStagingTest {
         private val finalOnFailure:Boolean = false,
         private val copyGate:CompletableDeferred<Unit>?=null,
         private val prepareExit:Int=0,
+        private val expectedSize: Long = 4L,
+        private val copyStderr: List<String> = emptyList(),
     ) : RootCommandRunner {
         val commands = mutableListOf<String>()
         var finalExists = false
@@ -332,7 +385,7 @@ class RootTransferStagingTest {
             commands += command
             return when {
                 command.contains("target='/target/final.txt'") || command.contains("target='/target/报告 final.txt'") ->
-                    if (finalExists) RootCommandResult(0, listOf(record("final.txt", "/target/final.txt", "file", "4")), emptyList())
+                    if (finalExists) RootCommandResult(0, listOf(record("final.txt", "/target/final.txt", "file", expectedSize.toString())), emptyList())
                     else RootCommandResult(44, emptyList(), emptyList())
                 command.contains("target='/target'") && command.contains("readlink -f") -> RootCommandResult(0, listOf(b64("/target\n")), emptyList())
                 command.contains("target='/target'") && command.contains("emit_isaver_record") -> RootCommandResult(
@@ -353,7 +406,7 @@ class RootTransferStagingTest {
                         CopyFailure.CANCEL -> { finalExists=finalOnFailure;throw CancellationException("cancelled") }
                         null -> {
                             if (copyExit == 0 || (copyExit == 55 && finalOnFailure)) finalExists = true
-                            RootCommandResult(copyExit, if (copyExit == 0) listOf("77:88:4") else emptyList(), emptyList())
+                            RootCommandResult(copyExit, if (copyExit == 0) listOf("77:88:$expectedSize") else emptyList(), copyStderr)
                         }
                     }
                 }

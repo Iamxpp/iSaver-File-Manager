@@ -1,5 +1,6 @@
 package com.iamxpp.isaver.transfer
 
+import android.util.Log
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.data.root.RootTransferSource
 import com.iamxpp.isaver.domain.DirectoryEntry
@@ -45,7 +46,7 @@ class RootFileTransferRepository(
                 val source = when (val issued = issueSource(cached)) {
                     is OperationResult.Success -> issued.value
                     is OperationResult.Failure -> {
-                        emit(TransferState.Failure(issued.code, safeFailureMessage(issued.code)))
+                        emit(failureState("issue-source", issued))
                         return@flow
                     }
                 }
@@ -76,7 +77,7 @@ class RootFileTransferRepository(
                                 attempt++
                                 continue
                             }
-                            emit(TransferState.Failure(result.code, safeFailureMessage(result.code)))
+                            emit(failureState("copy-publish", result))
                             return@flow
                         }
                     }
@@ -99,7 +100,22 @@ class RootFileTransferRepository(
             }
         }
 
-    private companion object { const val CLEANUP_WARNING = "临时缓存清理失败，请稍后重试" }
+    private fun failureState(stage: String, failure: OperationResult.Failure): TransferState.Failure {
+        logFailure(stage, failure)
+        return TransferState.Failure(
+            failure.code,
+            failure.userMessage.ifBlank { safeFailureMessage(failure.code) },
+        )
+    }
+
+    private fun logFailure(stage: String, failure: OperationResult.Failure) {
+        runCatching {
+            Log.w(
+                LOG_TAG,
+                "stage=$stage code=${failure.code} hasTechnical=${!failure.technicalMessage.isNullOrBlank()}",
+            )
+        }
+    }
 
     private fun safeNameFailure(error: Throwable): String = when (error) {
         is TargetNameException.AttemptsExhausted -> "同名文件过多，无法生成可用名称"
@@ -115,5 +131,10 @@ class RootFileTransferRepository(
         ErrorCode.OUTCOME_UNCERTAIN -> "无法确认文件是否已保存；已保留临时缓存，请检查目标文件夹"
         ErrorCode.CANCELLED -> "保存已取消"
         else -> "保存失败，请稍后重试"
+    }
+
+    private companion object {
+        const val CLEANUP_WARNING = "临时缓存清理失败，请稍后重试"
+        const val LOG_TAG = "iSaverTransfer"
     }
 }

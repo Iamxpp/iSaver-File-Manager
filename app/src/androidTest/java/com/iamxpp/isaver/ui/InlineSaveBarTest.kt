@@ -43,8 +43,14 @@ class InlineSaveBarTest {
         compose.onNodeWithTag("inline-save-extension").assertTextEquals("pdf")
         compose.onNodeWithText("3 个项目").assertIsDisplayed()
         assertCompactHeight()
-        compose.onNodeWithTag("inline-save-stem").performTextReplacement("归档")
-        compose.onNodeWithTag("inline-save-extension").performTextReplacement("tar.gz")
+
+        compose.onNodeWithTag("inline-save-stem").performClick()
+        compose.onNodeWithTag("expanded-name-field").performTextReplacement("归档")
+        compose.onNodeWithText("完成").performClick()
+        compose.onNodeWithTag("inline-save-extension").performClick()
+        compose.onNodeWithTag("expanded-name-field").performTextReplacement("tar.gz")
+        compose.onNodeWithText("完成").performClick()
+
         compose.runOnIdle { assertEquals(OutputNameDraft("归档", "tar.gz"), draft) }
     }
 
@@ -65,8 +71,10 @@ class InlineSaveBarTest {
             }
         }
 
-        compose.onNodeWithTag("inline-save-stem").performTextReplacement("changed")
-        compose.onNodeWithTag("inline-save-extension").performTextReplacement("txt")
+        compose.onNodeWithTag("inline-save-stem").performClick()
+        compose.onNodeWithText("编辑文件名").assertDoesNotExist()
+        compose.onNodeWithTag("inline-save-extension").performClick()
+        compose.onNodeWithText("编辑扩展名").assertDoesNotExist()
         compose.onNodeWithTag("inline-save-stem").assertTextEquals("report")
         compose.onNodeWithTag("inline-save-extension").assertTextEquals("pdf")
         compose.onNodeWithText("正在准备文件 · 4 B").assertIsDisplayed()

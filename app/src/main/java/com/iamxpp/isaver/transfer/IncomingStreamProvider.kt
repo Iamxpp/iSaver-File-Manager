@@ -17,7 +17,7 @@ class IncomingStreamProvider : ContentProvider() {
         mode: String,
     ): ParcelFileDescriptor {
         val caller = Binder.getCallingUid()
-        if (caller != ROOT_UID && caller != SHELL_UID) deny()
+        if (caller != ROOT_UID && caller != SYSTEM_UID && caller != SHELL_UID) deny()
         val application = context?.applicationContext as? ISaverApplication ?: deny()
         if (mode != READ_MODE || uri.authority != "${application.packageName}.incoming-stream") deny()
         val segments = uri.pathSegments
@@ -62,6 +62,7 @@ class IncomingStreamProvider : ContentProvider() {
 
     private companion object {
         const val ROOT_UID = 0
+        const val SYSTEM_UID = 1000
         const val SHELL_UID = 2000
         const val READ_MODE = "r"
         const val INCOMING_SEGMENT = "incoming"

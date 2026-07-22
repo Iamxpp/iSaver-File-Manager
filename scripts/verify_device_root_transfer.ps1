@@ -3,6 +3,7 @@ param(
     [string]$JavaHome = "D:\compiler\java\jdk-21",
     [switch]$SkipBuild,
     [switch]$SkipInstall,
+    [switch]$AutoGrantKernelSU,
     [int]$RootGrantTimeoutSeconds = 90
 )
 
@@ -58,6 +59,7 @@ function Get-UiDumpText {
     $remote = "/sdcard/isaver-root-check-$PID.xml"
     $local = Join-Path ([IO.Path]::GetTempPath()) "isaver-root-check-$PID.xml"
     Invoke-Adb @("shell", "uiautomator", "dump", $remote) | Out-Null
+    Invoke-Root "chmod 0644 $remote" | Out-Null
     Invoke-Adb @("pull", $remote, $local) | Out-Null
     Get-Content -Raw -LiteralPath $local
 }
@@ -94,9 +96,20 @@ if (-not $SkipInstall) {
     Install-ApkViaRoot $testApk "/data/local/tmp/isaver-debug-androidTest.apk"
 }
 
+if ($AutoGrantKernelSU) {
+    $grantScript = Join-Path $PSScriptRoot "grant_isaver_root_ksu.ps1"
+    if (-not (Test-Path -LiteralPath $grantScript)) {
+        throw "KernelSU grant script not found: $grantScript"
+    }
+    & powershell -ExecutionPolicy Bypass -File $grantScript -Serial $Serial -PackageName $packageName
+    if ($LASTEXITCODE -ne 0) {
+        throw "KernelSU auto grant failed"
+    }
+}
+
 Write-Host "Launching iSaver and checking app root grant..."
 Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
-Invoke-Adb @("shell", "monkey", "-p", $packageName, "1") | Out-Null
+Invoke-Adb @("shell", "am", "start", "-n", "$packageName/.MainActivity") | Out-Null
 
 $deadline = [DateTime]::UtcNow.AddSeconds($RootGrantTimeoutSeconds)
 do {
@@ -113,10 +126,23 @@ if (-not (Test-AppHasRootUi)) {
 }
 
 Write-Host "Running root stream transfer instrumentation..."
-Invoke-Adb @(
+$instrumentationOutput = Invoke-Adb @(
     "shell", "am", "instrument", "-w",
     "-e", "class", $rootStreamTest,
     $runner
-) | Out-Host
+)
+$instrumentationOutput | Out-Host
+$instrumentationText = $instrumentationOutput -join "`n"
+if (
+    $instrumentationText -match "FAILURES!!!" -or
+    $instrumentationText -match "Failures:\s*[1-9]" -or
+    $instrumentationText -match "INSTRUMENTATION_FAILED" -or
+    $instrumentationText -match "shortMsg="
+) {
+    throw "Root stream transfer instrumentation failed"
+}
+if ($instrumentationText -notmatch "OK \(\d+ tests?\)") {
+    throw "Root stream transfer instrumentation did not report a successful JUnit result"
+}
 
 Write-Host "PASS: device root transfer verification completed"
