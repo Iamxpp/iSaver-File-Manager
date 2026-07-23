@@ -726,18 +726,38 @@ static int is_emulated_storage_fd(int fd) {
         (unsigned long) file_system.f_type == (unsigned long) SDCARDFS_SUPER_MAGIC;
 }
 
+static int emulated_mode_is_safe(mode_t permissions) {
+    return (permissions & 0002) == 0;
+}
+
 static int stage_security_valid(int parent_fd, const struct stat *status) {
-    if (!S_ISDIR(status->st_mode) || status->st_uid != 0) return 0;
+    if (!S_ISDIR(status->st_mode)) return 0;
     mode_t permissions = status->st_mode & 07777;
-    if (permissions == 0700) return 1;
-    return permissions == 0770 && is_emulated_storage_fd(parent_fd);
+    if (status->st_uid == 0 && permissions == 0700) return 1;
+    return is_emulated_storage_fd(parent_fd) && emulated_mode_is_safe(permissions);
 }
 
 static int payload_security_valid(int parent_fd, const struct stat *status) {
-    if (!S_ISREG(status->st_mode) || status->st_uid != 0 || status->st_nlink != 1) return 0;
+    if (!S_ISREG(status->st_mode) || status->st_nlink != 1) return 0;
     mode_t permissions = status->st_mode & 07777;
-    if (permissions == 0600) return 1;
-    return permissions == 0660 && is_emulated_storage_fd(parent_fd);
+    if (status->st_uid == 0 && permissions == 0600) return 1;
+    return is_emulated_storage_fd(parent_fd) && emulated_mode_is_safe(permissions);
+}
+
+static void print_stage_security_diagnostic(int parent_fd, const struct stat *status) {
+    struct statfs file_system;
+    unsigned long fs_type = fstatfs(parent_fd, &file_system) == 0
+        ? (unsigned long) file_system.f_type
+        : 0UL;
+    fprintf(
+        stderr,
+        "stage security invalid: mode=%o uid=%llu gid=%llu nlink=%llu fs=0x%lx\n",
+        (unsigned int) (status->st_mode & 07777),
+        (unsigned long long) status->st_uid,
+        (unsigned long long) status->st_gid,
+        (unsigned long long) status->st_nlink,
+        fs_type
+    );
 }
 
 static int open_parent(
@@ -1035,6 +1055,7 @@ static int prepare_stage(int argc, char **argv) {
         return X_OUTCOME_UNCERTAIN;
     }
     if (!stage_security_valid(parent_fd, &status)) {
+        print_stage_security_diagnostic(parent_fd, &status);
         int cleanup = remove_stage_path(parent_fd, stage_fd, argv[4], &status, 0);
         close(parent_fd);
         return cleanup == 0 ? X_STAGE_INVALID : X_OUTCOME_UNCERTAIN;

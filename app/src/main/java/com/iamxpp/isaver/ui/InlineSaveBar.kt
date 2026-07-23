@@ -62,7 +62,9 @@ fun InlineSaveBar(
     modifier: Modifier = Modifier,
 ) {
     val outputName = state.outputNameDraft()
-    val fieldsEnabled = state is TransferUiState.Caching || state is TransferUiState.Choosing
+    val fieldsEnabled = state is TransferUiState.Caching ||
+        state is TransferUiState.Choosing ||
+        (state is TransferUiState.Failure && state.retryable && !state.requiresReshare)
     val status = transferStatus(state)
     var expandedEditor by remember { mutableStateOf<ExpandedNameEditor?>(null) }
     val statusColor = if (

@@ -167,6 +167,45 @@ class TransferViewModelTest {
     }
 
     @Test
+    fun `editing name after retryable failure returns to saveable choosing state`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val publishedNames = mutableListOf<OutputNameDraft>()
+        val viewModel = readyViewModel(
+            transferCached = { _, outputName, _, _ ->
+                publishedNames += outputName
+                if (publishedNames.size == 1) {
+                    flowOf(TransferState.Failure(ErrorCode.COMMAND_FAILED, "无法准备目标目录"))
+                } else {
+                    val displayName = if (outputName.extension.isEmpty()) {
+                        outputName.stem
+                    } else {
+                        "${outputName.stem}.${outputName.extension}"
+                    }
+                    flowOf(TransferState.Success(file("/target/$displayName"), name(displayName)))
+                }
+            },
+            dispatcher = dispatcher,
+        )
+
+        viewModel.save()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value is TransferUiState.Failure)
+
+        viewModel.setStem("renamed")
+        advanceUntilIdle()
+
+        val choosing = viewModel.state.value as TransferUiState.Choosing
+        assertEquals(OutputNameDraft("renamed", "txt"), choosing.outputName)
+        assertTrue(choosing.canSave)
+
+        viewModel.save()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value is TransferUiState.Success)
+        assertEquals(listOf(OutputNameDraft("a", "txt"), OutputNameDraft("renamed", "txt")), publishedNames)
+    }
+
+    @Test
     fun `save revalidates cache and target before the publish boundary`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         var targetValidations = 0

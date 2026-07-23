@@ -557,6 +557,12 @@ class LibsuRootFileSystem internal constructor(
             48 -> failure(ErrorCode.NOT_WRITABLE, "目录不可写", "Path was not writable")
             49 -> failure(ErrorCode.ALREADY_EXISTS, "文件已存在", "Final reservation already exists")
             50 -> failure(ErrorCode.NO_SPACE, "存储空间不足", "No space left on device")
+            EXIT_PARENT_INVALID -> failure(ErrorCode.COMMAND_FAILED, "目标目录已变化，请重新打开后再试", "Parent directory identity changed")
+            EXIT_STAGE_INVALID -> failure(
+                ErrorCode.COMMAND_FAILED,
+                if (operation == "prepare-stage") "目标目录临时文件受系统限制，请换个文件夹再试" else failureMessage,
+                "Stage directory did not pass safety checks",
+            )
             54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
             56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
             55 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
@@ -697,6 +703,8 @@ class LibsuRootFileSystem internal constructor(
         const val EXIT_NOT_DIRECTORY = 45
         const val EXIT_NOT_READABLE = 46
         const val EXIT_NATIVE_IO = 51
+        const val EXIT_PARENT_INVALID = 52
+        const val EXIT_STAGE_INVALID = 53
         const val EXIT_OUTPUT_LIMIT = 57
         const val EXIT_USAGE = 64
         const val MAX_ROOT_CACHE_BYTES = 256L * 1024L * 1024L

@@ -445,7 +445,15 @@ class TransferViewModel(
         if (publishInFlight || mutableState.value is TransferUiState.Uncertain) return
         request.outputName = transform(request.outputName)
         when (val current = mutableState.value) {
-            is TransferUiState.Failure -> mutableState.value = current.copy(outputName = request.outputName)
+            is TransferUiState.Failure -> if (
+                current.retryable &&
+                !current.requiresReshare &&
+                request.cached != null
+            ) {
+                render(request)
+            } else {
+                mutableState.value = current.copy(outputName = request.outputName)
+            }
             else -> render(request)
         }
     }

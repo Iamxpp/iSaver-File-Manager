@@ -3,17 +3,21 @@ package com.iamxpp.isaver.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.platform.app.InstrumentationRegistry
+import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.transfer.OutputNameDraft
 import com.iamxpp.isaver.transfer.ShareSummary
+import com.iamxpp.isaver.transfer.TransferPhase
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.ui.theme.ISaverTheme
 import org.junit.Assert.assertEquals
@@ -55,14 +59,16 @@ class InlineSaveBarTest {
     }
 
     @Test
-    fun cachingDisablesFieldsAndShowsStatusWithinCompactHeight() {
+    fun savingDisablesFieldsAndShowsStatusWithinCompactHeight() {
         compose.setContent {
             ISaverTheme {
                 InlineSaveBar(
-                    state = TransferUiState.Caching(
+                    state = TransferUiState.Saving(
                         share = ShareSummary("report.pdf", 10L, "application/pdf"),
                         outputName = OutputNameDraft("report", "pdf"),
-                        bytesCopied = 4L,
+                        cachedBytes = 10L,
+                        targetDirectory = root("/target"),
+                        phase = TransferPhase.ResolvingName,
                     ),
                     itemCount = 0,
                     onStemChange = {},
@@ -72,12 +78,12 @@ class InlineSaveBarTest {
         }
 
         compose.onNodeWithTag("inline-save-stem").performClick()
-        compose.onNodeWithText("编辑文件名").assertDoesNotExist()
+        compose.onAllNodesWithText("编辑文件名").assertCountEquals(0)
         compose.onNodeWithTag("inline-save-extension").performClick()
-        compose.onNodeWithText("编辑扩展名").assertDoesNotExist()
+        compose.onAllNodesWithText("编辑扩展名").assertCountEquals(0)
         compose.onNodeWithTag("inline-save-stem").assertTextEquals("report")
         compose.onNodeWithTag("inline-save-extension").assertTextEquals("pdf")
-        compose.onNodeWithText("正在准备文件 · 4 B").assertIsDisplayed()
+        compose.onNodeWithText("正在准备存储").assertIsDisplayed()
         assertCompactHeight()
     }
 
@@ -102,6 +108,35 @@ class InlineSaveBarTest {
 
         compose.runOnIdle { assertEquals(OutputNameDraft("完整文件名", "pdf"), draft) }
         compose.onNodeWithTag("inline-save-stem").assertTextEquals("完整文件名")
+    }
+
+    @Test
+    fun retryableFailureAllowsExpandedEditorForRenameBeforeRetry() {
+        var draft by mutableStateOf(OutputNameDraft("失败后的长文件名".repeat(8), "docx"))
+        compose.setContent {
+            ISaverTheme {
+                InlineSaveBar(
+                    state = TransferUiState.Failure(
+                        share = ShareSummary("失败后的长文件名.docx", 37L, "application/octet-stream"),
+                        outputName = draft,
+                        targetDirectory = root("/target"),
+                        code = ErrorCode.COMMAND_FAILED,
+                        message = "无法准备目标目录",
+                        retryable = true,
+                    ),
+                    itemCount = 1,
+                    onStemChange = { draft = draft.copy(stem = it) },
+                    onExtensionChange = { draft = draft.copy(extension = it) },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("inline-save-stem").performClick()
+        compose.onNodeWithText("编辑文件名").assertIsDisplayed()
+        compose.onNodeWithTag("expanded-name-field").performTextReplacement("重命名后再保存")
+        compose.onNodeWithText("完成").performClick()
+
+        compose.runOnIdle { assertEquals(OutputNameDraft("重命名后再保存", "docx"), draft) }
     }
 
     @Test

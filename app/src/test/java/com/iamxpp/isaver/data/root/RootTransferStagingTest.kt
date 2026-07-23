@@ -115,6 +115,20 @@ class RootTransferStagingTest {
     }
 
     @Test
+    fun `prepare stage security failures explain incompatible target directory`() = runTest {
+        val result = fileSystem(
+            StagingRunner(
+                prepareExit = 53,
+                prepareStderr = listOf("stage security invalid: mode=775 uid=1023 gid=9997 fs=0x65735546"),
+            ),
+        ).transferFromStream(source(), path("/target"), name("final.txt"))
+
+        val failure = result as OperationResult.Failure
+        assertEquals(ErrorCode.COMMAND_FAILED, failure.code)
+        assertEquals("目标目录临时文件受系统限制，请换个文件夹再试", failure.userMessage)
+    }
+
+    @Test
     fun `toybox timeout exit is uncertain and reconciles stage only after final check`() = runTest {
         val runner=StagingRunner(copyExit=137)
 
@@ -373,6 +387,7 @@ class RootTransferStagingTest {
         private val finalOnFailure:Boolean = false,
         private val copyGate:CompletableDeferred<Unit>?=null,
         private val prepareExit:Int=0,
+        private val prepareStderr: List<String> = emptyList(),
         private val expectedSize: Long = 4L,
         private val copyStderr: List<String> = emptyList(),
     ) : RootCommandRunner {
@@ -396,7 +411,11 @@ class RootTransferStagingTest {
                 command.contains("stat -c '%d:%i'") && (command.contains("/target/final.txt") || command.contains("/target/报告 final.txt")) ->
                     RootCommandResult(0, listOf("77:88"), emptyList())
                 command.contains("stat -c '%d:%i'") -> RootCommandResult(0, listOf("11:22"), emptyList())
-                command.contains("'prepare-stage'") -> RootCommandResult(prepareExit, if(prepareExit==0)listOf("33:44")else emptyList(), emptyList())
+                command.contains("'prepare-stage'") -> RootCommandResult(
+                    prepareExit,
+                    if (prepareExit == 0) listOf("33:44") else emptyList(),
+                    prepareStderr,
+                )
                 command.contains("'copy-publish-stdin'") -> {
                     copyStarted.complete(Unit)
                     try{copyGate?.await()}catch(cancelled:CancellationException){copyCancelled=true;throw cancelled}
