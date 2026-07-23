@@ -1,19 +1,23 @@
 # iSaver
 
-iSaver is a Root-only Android file manager inspired by the locations model in iOS Files. It groups common Android and application storage paths into readable entries while preserving access to the real Root filesystem.
+[English](README.md) | [中文](README.zh-CN.md)
 
-## Release Scope
+iSaver is a Root-only Android file manager for users who need direct access to the real Android filesystem. It combines common storage locations, a Root browser, recent items, and a safe share/open save flow in one app.
 
-Version 0.1.0 includes:
+Current public build: `0.1.2`.
+
+## Features
 
 - Root permission gate with explicit retry and exit actions.
 - Recent, locations, and Root browser tabs.
-- Built-in WeChat path candidates and custom absolute locations.
+- Built-in Android and application storage locations, plus custom absolute paths.
 - List/grid presentation, search, stable sorting, and folder creation.
 - Single-file `ACTION_SEND` and `content://` `ACTION_VIEW` save flow.
+- Inline save bar with long filename editing and retry after failed saves.
+- Root stream publication with identity-bound staging and no-overwrite finalization.
 - ZIP creation and safe ZIP, TAR, TAR.GZ, 7Z, and RAR browsing/extraction.
 
-Remote SFTP, FTPS, and FTP support is not part of 0.1.0. The incomplete remote implementation remains disabled and has no user-visible entry.
+Remote SFTP, FTPS, and FTP code is still experimental and is not exposed as a supported public feature in this release.
 
 ## Requirements
 
@@ -22,6 +26,14 @@ Remote SFTP, FTPS, and FTP support is not part of 0.1.0. The incomplete remote i
 - Root authorization granted to iSaver.
 
 iSaver does not provide Root access and does not include a SAF, Shizuku, or non-Root fallback.
+
+## Install
+
+Installable APKs are published from GitHub Releases:
+
+- [Latest release](https://github.com/Iamxpp/iSaver-File-Manager/releases/latest)
+
+Until private release signing is configured, release assets are debug-signed development builds and are named `iSaver-<tag>-debug.apk`.
 
 ## Build
 
@@ -36,26 +48,28 @@ Run the local gates from PowerShell:
 
 ```powershell
 .\gradlew.bat testDebugUnitTest
-.\gradlew.bat lintDebug
 .\gradlew.bat assembleDebug
+.\gradlew.bat assembleDebugAndroidTest
 ```
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-## GitHub Releases
-
-The repository publishes installable debug APKs through the `Android Release` workflow. Push a version tag to create a GitHub Release with an APK and SHA-256 checksum:
-
-```powershell
-git tag v0.1.0-fix1
-git push origin v0.1.0-fix1
-```
-
-Until private release signing is configured, GitHub Release assets are debug-signed development builds and are named `iSaver-<tag>-debug.apk`.
-
 ## Device Verification
 
-The primary Root test device is a Xiaomi 9 running Android 11/API 30. API 29, 33, and 35 have non-Root compatibility coverage. See [the compatibility matrix](docs/testing/android-compatibility-matrix.md) for the exact scope.
+Root save/share behavior should be verified on a rooted test device:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\verify_device_root_transfer.ps1 -Serial d51f42ac -AutoGrantKernelSU
+```
+
+The expected result is:
+
+```text
+RootStreamTransferInstrumentedTest: OK
+PASS: device root transfer verification completed
+```
+
+The primary Root test device is a Xiaomi 9 running Android 11/API 30. Xiaomi 17 issues are validated through user-provided logs when the device is not available over ADB. API 29, 33, and 35 have non-Root compatibility coverage. See [the compatibility matrix](docs/testing/android-compatibility-matrix.md) for the exact scope.
 
 Root and integration tests use dedicated paths under `/data/local/tmp/isaver-test`. Never use real application data as disposable test fixtures.
 
@@ -67,4 +81,4 @@ Read [SECURITY.md](SECURITY.md) before reporting a vulnerability. Do not attach 
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Every behavior change must start with a failing test and pass the relevant Gradle and device gates before merge.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Every behavior change should start with a failing test and pass the relevant Gradle and device gates before merge.
