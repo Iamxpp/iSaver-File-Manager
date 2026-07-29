@@ -504,10 +504,15 @@ private fun sortLocationContent(
     }
     val locationComparator = locationComparator(itemDirection)
     val groupComparator = appGroupComparator(itemDirection)
-    val sectionOrder = if (sortSpec.field == SortField.TYPE && sortSpec.direction == SortDirection.DESCENDING) {
-        LocationSection.entries.reversed()
+    val baseSectionOrder = if (apps.isEmpty()) {
+        listOf(LocationSection.COMMON, LocationSection.CUSTOM)
     } else {
-        LocationSection.entries
+        listOf(LocationSection.APP, LocationSection.COMMON, LocationSection.CUSTOM)
+    }
+    val sectionOrder = if (sortSpec.field == SortField.TYPE && sortSpec.direction == SortDirection.DESCENDING) {
+        baseSectionOrder.reversed()
+    } else {
+        baseSectionOrder
     }
     return SortedLocationContent(
         apps = apps

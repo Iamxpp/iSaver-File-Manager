@@ -10,7 +10,7 @@ Current public build: `0.1.2`.
 
 - Root permission gate with explicit retry and exit actions.
 - Recent, locations, and Root browser tabs.
-- Built-in Android and application storage locations, plus custom absolute paths.
+- Built-in common Android storage locations, plus user-defined absolute paths.
 - List/grid presentation, search, stable sorting, and folder creation.
 - Single-file `ACTION_SEND` and `content://` `ACTION_VIEW` save flow.
 - Inline save bar with long filename editing and retry after failed saves.

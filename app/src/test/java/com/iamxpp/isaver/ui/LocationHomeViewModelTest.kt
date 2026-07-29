@@ -6,8 +6,6 @@ import com.iamxpp.isaver.locations.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.*
 import org.junit.*
 import org.junit.Assert.*
@@ -26,7 +24,7 @@ class LocationHomeViewModelTest {
         val vm=LocationHomeViewModel(resolver,store,fs,StandardTestDispatcher(testScheduler))
         assertEquals(LocationCatalog.commonLocations.map{it.path},vm.state.value.commonLocations.map{it.path})
         advanceUntilIdle()
-        assertFalse(vm.state.value.loading);assertTrue(vm.state.value.appGroups.single().empty)
+        assertFalse(vm.state.value.loading);assertTrue(vm.state.value.appGroups.isEmpty())
         assertTrue(vm.state.value.customLocations.single().availability is LocationAvailability.Available)
     }
 
@@ -108,12 +106,14 @@ class LocationHomeViewModelTest {
         vm.editCustomLocation(LocationId.of("custom.edit")," Edit ",raw);advanceUntilIdle()
         assertEquals("custom.edit",store.updatedId!!.value);assertEquals("Edit",store.updatedName);assertEquals(raw,store.updatedPath!!.value)
     }
-    @Test fun `late refresh cannot overwrite newer app result`()=runTest{
-        val old=CompletableDeferred<ResolvedAppLocation>();val fresh=CompletableDeferred<ResolvedAppLocation>();var calls=0
-        val resolver=LocationHomeAppResolver{t->calls++;if(calls==1)withContext(NonCancellable){old.await()}else fresh.await()}
-        val vm=LocationHomeViewModel(resolver,FakeStore(),FakeFs(),StandardTestDispatcher(testScheduler));testScheduler.runCurrent();vm.refresh();testScheduler.runCurrent()
-        fresh.complete(ResolvedAppLocation(LocationCatalog.weChat.id,"fresh",emptyList(),0));testScheduler.runCurrent();old.complete(ResolvedAppLocation(LocationCatalog.weChat.id,"old",emptyList(),0));advanceUntilIdle()
-        assertEquals("fresh",vm.state.value.appGroups.single().displayName)
+    @Test fun `refresh skips app resolver when product catalog has no app templates`()=runTest{
+        var calls=0
+        val resolver=LocationHomeAppResolver{template->calls++;ResolvedAppLocation(template.id,template.displayName,emptyList(),0)}
+        val vm=LocationHomeViewModel(resolver,FakeStore(),FakeFs(),StandardTestDispatcher(testScheduler));advanceUntilIdle()
+        vm.refresh();advanceUntilIdle()
+        assertEquals(0,calls)
+        assertFalse(vm.state.value.loading)
+        assertTrue(vm.state.value.appGroups.isEmpty())
     }
     @Test fun `custom probes run concurrently at max four and preserve order`()=runTest{
         val store=FakeStore();store.flow.value=(1..6).map{StorageLocation.Direct(LocationId.of("custom.$it"),"$it",root("/$it"),StorageLocation.Source.CUSTOM)}

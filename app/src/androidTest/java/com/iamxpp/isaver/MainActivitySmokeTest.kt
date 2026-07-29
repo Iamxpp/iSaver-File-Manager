@@ -28,7 +28,8 @@ class MainActivitySmokeTest {
         assertTrue(device.wait(Until.hasObject(By.text("视图")), TIMEOUT_MILLIS))
         assertTrue(device.hasObject(By.text("最近项目")))
         assertTrue(device.hasObject(By.text("浏览")))
-        assertTrue(device.hasObject(By.text("应用位置")))
+        assertTrue(device.hasObject(By.text("通用位置")))
+        assertFalse(device.hasObject(By.text("应用位置")))
     }
 
     @Test
@@ -42,7 +43,8 @@ class MainActivitySmokeTest {
         assertTrue(device.wait(Until.hasObject(By.text("测试 报告")), TIMEOUT_MILLIS))
         assertTrue(device.hasObject(By.text("最近项目")))
         assertTrue(device.hasObject(By.text("浏览")))
-        assertTrue(device.hasObject(By.text("应用位置")))
+        assertTrue(device.hasObject(By.text("通用位置")))
+        assertFalse(device.hasObject(By.text("应用位置")))
         assertTrue(device.hasObject(By.desc("文件名")))
         assertTrue(device.hasObject(By.desc("扩展名")))
         assertTrue(device.hasObject(By.text("存储")))

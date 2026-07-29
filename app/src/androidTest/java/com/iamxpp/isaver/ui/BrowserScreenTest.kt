@@ -112,7 +112,7 @@ class BrowserScreenTest {
         compose.setContent {
             BrowserScreen(
                 state = state(
-                    title = "Android/data/com.tencent.mm/MicroMsg/Download/非常长的目录名称",
+                    title = "Android/data/example.app/files/Download/非常长的目录名称",
                     canGoBack = true,
                 ),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
@@ -181,7 +181,7 @@ class BrowserScreenTest {
         var sort: SortSpec? = null
         compose.setContent {
             BrowserScreen(
-                state = state(rootTitle = "微信文件", searchQuery = query),
+                state = state(rootTitle = "应用文件", searchQuery = query),
                 onEnterDirectory = {}, onBack = { backed = true }, onRetry = {}, onLoadMore = {},
                 onSearchQueryChange = { query = it },
                 onDisplayModeChange = { mode = it },
@@ -189,7 +189,7 @@ class BrowserScreenTest {
             )
         }
 
-        compose.onNodeWithText("微信文件").assertIsDisplayed()
+        compose.onNodeWithText("应用文件").assertIsDisplayed()
         compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithContentDescription("搜索文件").performTextInput("报告")
         compose.onNodeWithContentDescription("更多操作").performClick()

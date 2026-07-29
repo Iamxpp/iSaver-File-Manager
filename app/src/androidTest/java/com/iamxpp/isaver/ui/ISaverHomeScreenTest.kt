@@ -59,7 +59,8 @@ class ISaverHomeScreenTest {
         compose.onNode(hasText("视图") and hasClickAction()).assertIsSelected()
         compose.onNodeWithText("最近项目").assertIsDisplayed()
         compose.onNodeWithText("浏览").assertIsDisplayed()
-        compose.onNodeWithText("应用位置").assertIsDisplayed()
+        compose.onNodeWithText("通用位置").assertIsDisplayed()
+        compose.onNodeWithText("应用位置").assertDoesNotExist()
     }
 
     @Test
@@ -91,7 +92,8 @@ class ISaverHomeScreenTest {
         compose.onNode(hasText("最近项目") and hasClickAction()).performClick()
         compose.onNodeWithText("暂无最近项目").assertIsDisplayed()
         compose.onNode(hasText("视图") and hasClickAction()).performClick()
-        compose.onNodeWithText("应用位置").assertIsDisplayed()
+        compose.onNodeWithText("通用位置").assertIsDisplayed()
+        compose.onNodeWithText("应用位置").assertDoesNotExist()
         compose.onNode(hasText("浏览") and hasClickAction()).performClick()
         compose.onNode(hasText("浏览") and hasClickAction()).assertIsSelected()
         compose.onNodeWithText("/").assertIsDisplayed()

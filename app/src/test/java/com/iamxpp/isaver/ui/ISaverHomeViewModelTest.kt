@@ -269,11 +269,11 @@ class ISaverHomeViewModelTest {
     @Test
     fun `opening an app candidate uses the candidate title without rewriting its path`() {
         val viewModel = ISaverHomeViewModel(SavedStateHandle())
-        val path = RootPath.parse("/data/user/0/com.tencent.mm").getOrThrow()
+        val path = RootPath.parse("/data/user/0/example.app").getOrThrow()
 
-        viewModel.openAppCandidate(path, "微信内部数据")
+        viewModel.openAppCandidate(path, "应用内部数据")
 
-        assertEquals(HomeDestination.Browser(path, "微信内部数据", HomeTab.VIEWS), viewModel.state.value.destination)
+        assertEquals(HomeDestination.Browser(path, "应用内部数据", HomeTab.VIEWS), viewModel.state.value.destination)
     }
 
     @Test

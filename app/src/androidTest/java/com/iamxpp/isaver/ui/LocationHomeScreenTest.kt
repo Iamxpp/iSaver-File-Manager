@@ -59,7 +59,7 @@ class LocationHomeScreenTest {
         }
 
         compose.onNodeWithText("视图").assertIsDisplayed()
-        compose.onNodeWithText("应用位置").assertIsDisplayed()
+        compose.onNodeWithText("应用位置").assertDoesNotExist()
         compose.onNodeWithText("通用位置").assertIsDisplayed()
         compose.onNodeWithText("自定义位置").assertIsDisplayed()
     }
@@ -83,7 +83,7 @@ class LocationHomeScreenTest {
             .fetchSemanticsNode().boundsInRoot
         val search = compose.onNodeWithTag("views-search").assertIsDisplayed()
             .fetchSemanticsNode().boundsInRoot
-        val firstSection = compose.onNodeWithText("应用位置").assertIsDisplayed()
+        val firstSection = compose.onNodeWithText("通用位置").assertIsDisplayed()
             .fetchSemanticsNode().boundsInRoot
 
         assertEquals(topBar.center.x, title.center.x, 1f)
@@ -293,9 +293,9 @@ class LocationHomeScreenTest {
     @Test
     fun appCandidateDisplaysResolvedPathAndOpensWithTypedUnchangedPath() {
         val candidate = direct(
-            id = "wechat.internal",
-            name = "内部数据目录",
-            path = "/data/user/0/com.tencent.mm//files",
+            id = "app.internal",
+            name = "应用目录",
+            path = "/data/user/0/example.app//files",
             source = StorageLocation.Source.APP_TEMPLATE,
         )
         var opened: Pair<RootPath, String>? = null
@@ -305,8 +305,8 @@ class LocationHomeScreenTest {
                     loading = false,
                     appGroups = listOf(
                         ResolvedAppLocation(
-                            templateId = LocationId.of("template.wechat"),
-                            displayName = "微信",
+                            templateId = LocationId.of("template.app"),
+                            displayName = "应用",
                             children = listOf(candidate),
                             unavailableCount = 0,
                         ),
@@ -321,22 +321,22 @@ class LocationHomeScreenTest {
             )
         }
 
-        compose.onNodeWithText("微信").assertIsDisplayed()
-        compose.onNodeWithText("内部数据目录").performClick()
+        compose.onNodeWithText("应用").assertIsDisplayed()
+        compose.onNodeWithText("应用目录").performClick()
         compose.runOnIdle {
-            assertEquals(candidate.path to "内部数据目录", opened)
+            assertEquals(candidate.path to "应用目录", opened)
         }
     }
 
     @Test
-    fun emptyWechatAndLocationGroupsExposeUsefulState() {
+    fun emptyAppAndLocationGroupsExposeUsefulState() {
         val common = direct("common.downloads", "下载", "/storage/emulated/0/Download", StorageLocation.Source.BUILT_IN)
         val custom = direct("custom.work", "我的工作", "/data/local/tmp/work", StorageLocation.Source.CUSTOM)
         compose.setContent {
             LocationHomeScreen(
                 state = LocationHomeUiState(
                     loading = false,
-                    appGroups = listOf(ResolvedAppLocation(LocationId.of("template.wechat"), "微信", emptyList(), 5)),
+                    appGroups = listOf(ResolvedAppLocation(LocationId.of("template.app"), "应用", emptyList(), 5)),
                     commonLocations = listOf(common),
                     customLocations = listOf(CustomLocationState(custom, LocationAvailability.Unavailable("路径不存在"))),
                 ),
@@ -345,8 +345,8 @@ class LocationHomeScreenTest {
             )
         }
 
-        compose.onNodeWithText("微信").assertIsDisplayed()
-        compose.onNodeWithText("未找到可用微信目录").assertIsDisplayed()
+        compose.onNodeWithText("应用").assertIsDisplayed()
+        compose.onNodeWithText("未找到可用应用目录").assertIsDisplayed()
         compose.onNodeWithText("下载").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("我的工作").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("路径不存在").performScrollTo().assertIsDisplayed()
@@ -419,14 +419,14 @@ class LocationHomeScreenTest {
 
     @Test
     fun gridKeepsAppCommonAndCustomItemsInsideTheirOwnSections() {
-        val candidate = direct("wechat.media", "微信媒体", "/wechat", StorageLocation.Source.APP_TEMPLATE)
+        val candidate = direct("app.media", "应用媒体", "/app", StorageLocation.Source.APP_TEMPLATE)
         val common = direct("common.downloads", "下载", "/download", StorageLocation.Source.BUILT_IN)
         val custom = direct("custom.work", "工作", "/work", StorageLocation.Source.CUSTOM)
         compose.setContent {
             LocationHomeScreen(
                 state = LocationHomeUiState(
                     loading = false,
-                    appGroups = listOf(ResolvedAppLocation(LocationId.of("template.wechat"), "微信", listOf(candidate), 0)),
+                    appGroups = listOf(ResolvedAppLocation(LocationId.of("template.app"), "应用", listOf(candidate), 0)),
                     commonLocations = listOf(common),
                     customLocations = listOf(CustomLocationState(custom, LocationAvailability.Available(true, true))),
                 ),
@@ -438,7 +438,7 @@ class LocationHomeScreenTest {
         compose.onNodeWithTag("section-app").assertIsDisplayed()
         compose.onNodeWithTag("section-common").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("section-custom").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithContentDescription("网格项：微信媒体")
+        compose.onNodeWithContentDescription("网格项：应用媒体")
             .assert(hasAnyAncestor(hasTestTag("grid-app")))
         compose.onNodeWithContentDescription("网格项：下载")
             .assert(hasAnyAncestor(hasTestTag("grid-common")))
