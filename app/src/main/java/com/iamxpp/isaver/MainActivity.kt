@@ -2,6 +2,7 @@ package com.iamxpp.isaver
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -32,6 +33,7 @@ import com.iamxpp.isaver.ui.archive.ArchiveBackResult
 import com.iamxpp.isaver.ui.archive.ArchiveViewModel
 import com.iamxpp.isaver.ui.recent.RecentOpenTarget
 import com.iamxpp.isaver.ui.recent.RecentViewModel
+import com.iamxpp.isaver.share.ShareSourceLocationResolver
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.transfer.TransferViewModel
 import com.iamxpp.isaver.remote.RemoteConnectionViewModel
@@ -81,7 +83,7 @@ class MainActivity : ComponentActivity() {
                 flags = intent.flags,
             )
         ) {
-            transferViewModel.handleIntent(intent)
+            handleIncomingShareIntent(intent)
         }
         val rootGateViewModel = ViewModelProvider(
             this,
@@ -305,8 +307,32 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (ShareIntentDispatchPolicy.shouldHandleNewIntent(intent.flags)) {
-            transferViewModel.handleIntent(intent)
+            handleIncomingShareIntent(intent)
         }
+    }
+
+    private fun handleIncomingShareIntent(intent: Intent?) {
+        when (ShareTarget.fromIntent(intent)) {
+            ShareTarget.SAVE -> transferViewModel.handleIntent(intent)
+            ShareTarget.OPEN_LOCATION -> openSharedFileLocation(requireNotNull(intent))
+            null -> Unit
+        }
+    }
+
+    private fun openSharedFileLocation(intent: Intent) {
+        transferViewModel.exitRootGate()
+        val location = ShareSourceLocationResolver.resolve(intent)
+        if (location == null) {
+            homeViewModel.selectTab(HomeTab.VIEWS)
+            Toast.makeText(this, "无法识别来源目录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        homeViewModel.openLocation(
+            path = location.directory,
+            displayName = location.title,
+            source = HomeTab.VIEWS,
+            recordAccess = false,
+        )
     }
 }
 

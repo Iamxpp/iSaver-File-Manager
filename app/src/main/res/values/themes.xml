@@ -7,4 +7,8 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:forceDarkAllowed">false</item>
     </style>
+
+    <style name="Theme.ISaver.NoDisplay" parent="android:style/Theme.NoDisplay">
+        <item name="android:windowDisablePreview">true</item>
+    </style>
 </resources>

@@ -2,8 +2,6 @@ package com.iamxpp.isaver.share
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import android.os.CancellationSignal
 import android.os.OperationCanceledException
 import android.os.RemoteException
@@ -91,19 +89,18 @@ class ShareIntentParser private constructor(
         cancellationSignal: CancellationSignal? = null,
     ): ShareIntentParseResult {
         val stream = when (intent.action) {
-            Intent.ACTION_SEND -> extractStreamUri(intent)
-            Intent.ACTION_VIEW -> intent.data?.let(StreamExtra::Valid) ?: StreamExtra.Missing
+            Intent.ACTION_SEND, Intent.ACTION_VIEW -> ShareIntentStream.extract(intent)
             else -> return failure(
                 ShareIntentFailureReason.UNSUPPORTED_INTENT,
                 "仅支持分享单个文件",
             )
         }
         val uri = when (stream) {
-            StreamExtra.Missing ->
+            ShareIntentStreamExtra.Missing ->
                 return failure(ShareIntentFailureReason.MISSING_STREAM, "未接收到文件")
-            StreamExtra.Invalid ->
+            ShareIntentStreamExtra.Invalid ->
                 return failure(ShareIntentFailureReason.INVALID_SHARE, "分享文件信息无效")
-            is StreamExtra.Valid -> stream.uri
+            is ShareIntentStreamExtra.Valid -> stream.uri
         }
 
         if (uri.scheme != "content") {
@@ -167,47 +164,6 @@ class ShareIntentParser private constructor(
         return if (extension == null) "未命名文件" else "未命名文件.$extension"
     }
 
-    private fun extractStreamUri(intent: Intent): StreamExtra {
-        val extra = extractExtraUri(intent)
-        val clip = extractClipUri(intent)
-        if (extra == StreamExtra.Invalid || clip == StreamExtra.Invalid) {
-            return StreamExtra.Invalid
-        }
-        if (extra is StreamExtra.Valid && clip is StreamExtra.Valid) {
-            return if (extra.uri == clip.uri) extra else StreamExtra.Invalid
-        }
-        return when {
-            extra is StreamExtra.Valid -> extra
-            clip is StreamExtra.Valid -> clip
-            else -> StreamExtra.Missing
-        }
-    }
-
-    private fun extractExtraUri(intent: Intent): StreamExtra {
-        return try {
-            if (!intent.hasExtra(Intent.EXTRA_STREAM)) return StreamExtra.Missing
-            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                (intent.extras?.get(Intent.EXTRA_STREAM) as? Uri)
-            }
-            uri?.let(StreamExtra::Valid) ?: StreamExtra.Invalid
-        } catch (_: RuntimeException) {
-            StreamExtra.Invalid
-        }
-    }
-
-    private fun extractClipUri(intent: Intent): StreamExtra {
-        return try {
-            val clipData = intent.clipData ?: return StreamExtra.Missing
-            if (clipData.itemCount != 1) return StreamExtra.Invalid
-            clipData.getItemAt(0).uri?.let(StreamExtra::Valid) ?: StreamExtra.Invalid
-        } catch (_: RuntimeException) {
-            StreamExtra.Invalid
-        }
-    }
-
     private fun failure(
         reason: ShareIntentFailureReason,
         userMessage: String,
@@ -224,9 +180,4 @@ class ShareIntentParser private constructor(
         )
     }
 
-    private sealed interface StreamExtra {
-        data object Missing : StreamExtra
-        data object Invalid : StreamExtra
-        data class Valid(val uri: Uri) : StreamExtra
-    }
 }

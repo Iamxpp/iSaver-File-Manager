@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">iSaver</string>
+    <string name="share_target_open_location">打开文件所在位置</string>
+    <string name="share_target_save">保存到 iSaver</string>
+</resources>
