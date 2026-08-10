@@ -10,6 +10,7 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.export.ExternalFileGrant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -947,17 +948,111 @@ class BrowserViewModelTest {
         assertEquals(ErrorCode.NOT_WRITABLE, vm.state.value.createDirectoryError?.code)
     }
 
-    @Test fun `ordinary file opens information while archive emits archive target`() = runTest {
-        val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
+    @Test fun `ordinary file emits external open grant while archive stays internal`() = runTest {
         val ordinary = entry("report.pdf", EntryType.FILE)
         val archive = entry("backup.tar.gz", EntryType.FILE)
+        val grant = ExternalFileGrant(
+            contentUri = "content://com.iamxpp.isaver.external-file/file/${"ab".repeat(32)}",
+            token = "ab".repeat(32),
+            displayName = ordinary.name,
+            mimeType = "application/pdf",
+        )
+        val exported = mutableListOf<DirectoryEntry>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            exportFile = { entry ->
+                exported += entry
+                OperationResult.Success(grant)
+            },
+        )
 
         vm.openEntry(ordinary)
-        assertEquals(ordinary, vm.state.value.fileInfo)
-        vm.dismissFileInfo()
+        advanceUntilIdle()
+
+        assertEquals(listOf(ordinary), exported)
+        assertEquals(grant, vm.state.value.externalFileToOpen)
+        assertNull(vm.state.value.fileInfo)
         vm.openEntry(archive)
 
         assertEquals(archive, vm.state.value.archiveToOpen)
+    }
+
+    @Test fun `archive tap supersedes an external file export still in progress`() = runTest {
+        val exportResult = CompletableDeferred<OperationResult<ExternalFileGrant>>()
+        val ordinary = entry("report.pdf", EntryType.FILE)
+        val archive = entry("backup.zip", EntryType.FILE)
+        val grant = ExternalFileGrant(
+            contentUri = "content://com.iamxpp.isaver.external-file/file/${"ef".repeat(32)}",
+            token = "ef".repeat(32),
+            displayName = ordinary.name,
+            mimeType = "application/pdf",
+        )
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            exportFile = { exportResult.await() },
+        )
+
+        vm.openEntry(ordinary)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.openingFile)
+
+        vm.openEntry(archive)
+        exportResult.complete(OperationResult.Success(grant))
+        advanceUntilIdle()
+
+        assertEquals(archive, vm.state.value.archiveToOpen)
+        assertNull(vm.state.value.externalFileToOpen)
+        assertFalse(vm.state.value.openingFile)
+    }
+
+    @Test fun `failed Android launch revokes the grant and exposes a retryable error`() = runTest {
+        val grant = ExternalFileGrant(
+            contentUri = "content://com.iamxpp.isaver.external-file/file/${"cd".repeat(32)}",
+            token = "cd".repeat(32),
+            displayName = "report.pdf",
+            mimeType = "application/pdf",
+        )
+        val revoked = mutableListOf<ExternalFileGrant>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            exportFile = { OperationResult.Success(grant) },
+            revokeExport = revoked::add,
+        )
+
+        vm.openEntry(entry("report.pdf", EntryType.FILE))
+        advanceUntilIdle()
+        vm.completeExternalOpen(grant, launched = false)
+
+        assertEquals(listOf(grant), revoked)
+        assertNull(vm.state.value.externalFileToOpen)
+        assertEquals("没有可打开此文件的应用", vm.state.value.fileOpenError?.userMessage)
+        vm.dismissFileOpenError()
+        assertNull(vm.state.value.fileOpenError)
+    }
+
+    @Test fun `unsafe file is rejected before an export capability is requested`() = runTest {
+        var exportCalls = 0
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            exportFile = {
+                exportCalls += 1
+                error("must not export")
+            },
+        )
+
+        vm.openEntry(entry("link.pdf", EntryType.FILE, symbolicLink = true))
+        advanceUntilIdle()
+
+        assertEquals(0, exportCalls)
+        assertEquals(ErrorCode.SOURCE_UNREADABLE, vm.state.value.fileOpenError?.code)
     }
 
     @Test fun `long press selection accepts readable files and directories and rejects unsafe entries`() = runTest {

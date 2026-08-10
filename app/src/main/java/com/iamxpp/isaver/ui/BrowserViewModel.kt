@@ -14,6 +14,7 @@ import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
+import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -38,6 +39,10 @@ class BrowserViewModel(
     private val recordFileAccess: suspend (RootPath, String) -> Unit = { _, _ -> },
     private val snapshotCache: DirectorySnapshotCache = DirectorySnapshotCache(),
     private val sorter: (List<DirectoryEntry>, SortSpec) -> List<DirectoryEntry> = FileEntrySorter::sort,
+    private val exportFile: suspend (DirectoryEntry) -> OperationResult<ExternalFileGrant> = {
+        OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法打开文件")
+    },
+    private val revokeExport: (ExternalFileGrant) -> Unit = {},
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
@@ -46,6 +51,8 @@ class BrowserViewModel(
     private var loadJob: Job? = null
     private var presentationJob: Job? = null
     private var createDirectoryJob: Job? = null
+    private var openFileJob: Job? = null
+    private var openFileGeneration = 0L
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
     private var presentedEntries: List<DirectoryEntry> = emptyList()
@@ -78,13 +85,20 @@ class BrowserViewModel(
             selectEntry(entry)
             return
         }
+        val openRequest = cancelExternalOpen()
         when (entry.type) {
             EntryType.DIRECTORY -> enterDirectory(entry)
-            EntryType.FILE -> if (entry.readable && !entry.symbolicLink && isSupportedArchive(entry.name)) {
-                mutableState.value = mutableState.value.copy(archiveToOpen = entry, fileInfo = null)
-            } else {
-                mutableState.value = mutableState.value.copy(fileInfo = entry, archiveToOpen = null)
-                recordSuccessfulFileAccess(entry)
+            EntryType.FILE -> when {
+                !entry.readable || entry.symbolicLink -> mutableState.value = mutableState.value.copy(
+                    fileOpenError = BrowserOperationError(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件"),
+                    archiveToOpen = null,
+                )
+                isSupportedArchive(entry.name) -> mutableState.value = mutableState.value.copy(
+                    archiveToOpen = entry,
+                    fileInfo = null,
+                    fileOpenError = null,
+                )
+                else -> openExternalFile(entry, openRequest)
             }
             EntryType.OTHER -> {
                 mutableState.value = mutableState.value.copy(fileInfo = entry, archiveToOpen = null)
@@ -112,6 +126,22 @@ class BrowserViewModel(
 
     fun consumeArchiveOpen() {
         mutableState.value = mutableState.value.copy(archiveToOpen = null)
+    }
+
+    fun completeExternalOpen(grant: ExternalFileGrant, launched: Boolean) {
+        if (mutableState.value.externalFileToOpen?.token != grant.token) return
+        if (!launched) revokeExport(grant)
+        mutableState.value = mutableState.value.copy(
+            externalFileToOpen = null,
+            fileOpenError = if (launched) null else BrowserOperationError(
+                ErrorCode.COMMAND_FAILED,
+                "没有可打开此文件的应用",
+            ),
+        )
+    }
+
+    fun dismissFileOpenError() {
+        mutableState.value = mutableState.value.copy(fileOpenError = null)
     }
 
     fun compress(outputName: String) {
@@ -251,6 +281,7 @@ class BrowserViewModel(
     ) {
         val request = ++generation
         loadJob?.cancel()
+        cancelExternalOpen()
         resetPresentationWindow()
         val cached = snapshotCache.get(path)
         val cachedSnapshot = cached?.snapshot
@@ -412,6 +443,62 @@ class BrowserViewModel(
                 Unit
             }
         }
+    }
+
+    private fun openExternalFile(entry: DirectoryEntry, request: Long) {
+        mutableState.value = mutableState.value.copy(
+            openingFile = true,
+            externalFileToOpen = null,
+            fileOpenError = null,
+            fileInfo = null,
+            archiveToOpen = null,
+        )
+        openFileJob = viewModelScope.launch {
+            try {
+                when (val result = exportFile(entry)) {
+                    is OperationResult.Failure -> if (request == openFileGeneration) {
+                        mutableState.value = mutableState.value.copy(
+                            openingFile = false,
+                            fileOpenError = BrowserOperationError(result.code, result.userMessage),
+                        )
+                    }
+                    is OperationResult.Success -> {
+                        if (request != openFileGeneration) {
+                            revokeExport(result.value)
+                            return@launch
+                        }
+                        mutableState.value = mutableState.value.copy(
+                            openingFile = false,
+                            externalFileToOpen = result.value,
+                        )
+                        recordSuccessfulFileAccess(entry)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                if (request == openFileGeneration) {
+                    mutableState.value = mutableState.value.copy(openingFile = false)
+                }
+                throw cancelled
+            } catch (_: Exception) {
+                if (request == openFileGeneration) {
+                    mutableState.value = mutableState.value.copy(
+                        openingFile = false,
+                        fileOpenError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "无法打开文件"),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun cancelExternalOpen(): Long {
+        openFileGeneration += 1L
+        openFileJob?.cancel()
+        mutableState.value.externalFileToOpen?.let(revokeExport)
+        mutableState.value = mutableState.value.copy(
+            openingFile = false,
+            externalFileToOpen = null,
+        )
+        return openFileGeneration
     }
 
     private fun displayTitle(path: RootPath): String = when {

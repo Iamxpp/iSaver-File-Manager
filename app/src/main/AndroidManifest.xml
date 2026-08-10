@@ -13,6 +13,11 @@
             android:authorities="${applicationId}.incoming-stream"
             android:exported="true"
             android:grantUriPermissions="false" />
+        <provider
+            android:name=".export.ExternalFileProvider"
+            android:authorities="${applicationId}.external-file"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

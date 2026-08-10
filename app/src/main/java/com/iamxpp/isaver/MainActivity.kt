@@ -1,6 +1,7 @@
 package com.iamxpp.isaver
 
 import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -15,6 +16,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.iamxpp.isaver.data.root.RootSession
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.RootFileSystem
+import com.iamxpp.isaver.domain.OperationResult
+import com.iamxpp.isaver.export.ExternalOpenIntentFactory
 import kotlinx.coroutines.CoroutineDispatcher
 import com.iamxpp.isaver.ui.RootGateScreen
 import com.iamxpp.isaver.ui.RootGateViewModel
@@ -60,6 +63,7 @@ class MainActivity : ComponentActivity() {
             app.browserPreferencesStore,
             app.archiveRepository,
             app.recentRepository,
+            rootExportRepository = app.rootExportRepository,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -151,6 +155,19 @@ class MainActivity : ComponentActivity() {
                         browserViewModel.consumeArchiveOpen()
                     }
 
+                    LaunchedEffect(browserState.externalFileToOpen) {
+                        val grant = browserState.externalFileToOpen ?: return@LaunchedEffect
+                        val launched = try {
+                            startActivity(ExternalOpenIntentFactory.create(grant))
+                            true
+                        } catch (_: ActivityNotFoundException) {
+                            false
+                        } catch (_: SecurityException) {
+                            false
+                        }
+                        browserViewModel.completeExternalOpen(grant, launched)
+                    }
+
                     LaunchedEffect(archiveState.operation) {
                         val success = archiveState.operation as? com.iamxpp.isaver.archive.ArchiveState.Success
                             ?: return@LaunchedEffect
@@ -211,7 +228,8 @@ class MainActivity : ComponentActivity() {
                                 target.title,
                                 HomeTab.RECENT,
                             )
-                            is RecentOpenTarget.File, null -> Unit
+                            is RecentOpenTarget.File -> browserViewModel.openEntry(target.entry)
+                            null -> Unit
                         }
                     }
 
@@ -253,6 +271,7 @@ class MainActivity : ComponentActivity() {
                         onOpenBrowserEntry = browserViewModel::openEntry,
                         onClearBrowserSelection = browserViewModel::clearSelection,
                         onDismissFileInfo = browserViewModel::dismissFileInfo,
+                        onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
                         onConnectServer = remoteConnectionViewModel::connect,
@@ -342,6 +361,7 @@ internal class BrowserViewModelFactory(
     private val archiveRepository: com.iamxpp.isaver.archive.ArchiveRepository? = null,
     private val recentRepository: com.iamxpp.isaver.recent.RecentRepository? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val rootExportRepository: com.iamxpp.isaver.export.RootExportRepository? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -367,6 +387,10 @@ internal class BrowserViewModelFactory(
                     com.iamxpp.isaver.recent.RecentItemType.FILE,
                 )
             },
+            exportFile = rootExportRepository?.let { repository -> repository::export } ?: { entry ->
+                OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法打开文件")
+            },
+            revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
         ) as T
     }
 }

@@ -3,6 +3,7 @@ package com.iamxpp.isaver.ui
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
@@ -31,6 +32,9 @@ data class BrowserUiState(
     val selectedEntries: Set<DirectoryEntry> = emptySet(),
     val fileInfo: DirectoryEntry? = null,
     val archiveToOpen: DirectoryEntry? = null,
+    val openingFile: Boolean = false,
+    val externalFileToOpen: ExternalFileGrant? = null,
+    val fileOpenError: BrowserOperationError? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {

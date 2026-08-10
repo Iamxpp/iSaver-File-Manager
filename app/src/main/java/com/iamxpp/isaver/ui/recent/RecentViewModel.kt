@@ -50,9 +50,7 @@ class RecentViewModel(
         return when (item.item.type) {
             RecentItemType.DIRECTORY -> RecentOpenTarget.Directory(entry.path, item.item.displayName)
             RecentItemType.ARCHIVE -> RecentOpenTarget.Archive(entry.path, item.item.displayName)
-            RecentItemType.FILE -> RecentOpenTarget.File(entry).also {
-                mutableState.value = mutableState.value.copy(fileInfo = entry)
-            }
+            RecentItemType.FILE -> RecentOpenTarget.File(entry)
         }
     }
 

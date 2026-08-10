@@ -72,6 +72,7 @@ fun BrowserScreen(
     onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
     onClearSelection: () -> Unit = {},
     onDismissFileInfo: () -> Unit = {},
+    onDismissFileOpenError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
@@ -209,6 +210,7 @@ fun BrowserScreen(
         MessageDialog(it, "关闭", onDismissCompressionMessage)
     }
     state.fileInfo?.let { FileInfoDialog(it, onDismissFileInfo) }
+    state.fileOpenError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileOpenError) }
     when (remoteConnectionState) {
         is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
             state = remoteConnectionState,
@@ -289,6 +291,13 @@ internal fun BrowserContent(
         if (state.creatingDirectory) {
             Text(
                 "正在新建文件夹",
+                color = ISaverSecondaryText,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            )
+        }
+        if (state.openingFile) {
+            Text(
+                "正在准备打开文件",
                 color = ISaverSecondaryText,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
             )

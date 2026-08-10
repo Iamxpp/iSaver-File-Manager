@@ -31,6 +31,10 @@ import com.iamxpp.isaver.transfer.TargetNameResolver
 import com.iamxpp.isaver.transfer.TransferDependencies
 import com.iamxpp.isaver.archive.ArchiveRepository
 import com.iamxpp.isaver.archive.LocalArchiveEngine
+import com.iamxpp.isaver.export.ExternalFileRegistry
+import com.iamxpp.isaver.export.MimeResolver
+import com.iamxpp.isaver.export.RootExportCache
+import com.iamxpp.isaver.export.RootExportRepository
 import com.iamxpp.isaver.remote.KeystoreCredentialStore
 import com.iamxpp.isaver.remote.RemoteFileSystemFactory
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
@@ -142,6 +146,27 @@ class ISaverApplication : Application() {
             },
         )
     }
+    internal val rootExportCache: RootExportCache by lazy {
+        RootExportCache(
+            rootFileSystem = rootFileSystem,
+            cacheDir = cacheDir,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+    internal val externalFileRegistry: ExternalFileRegistry by lazy {
+        ExternalFileRegistry(
+            authority = "$packageName.external-file",
+            validate = rootExportCache::validateNow,
+            onDiscard = rootExportCache::discardNow,
+        )
+    }
+    internal val rootExportRepository: RootExportRepository by lazy {
+        RootExportRepository(
+            cache = rootExportCache,
+            registry = externalFileRegistry,
+            mimeResolver = MimeResolver(),
+        )
+    }
     internal val remoteCredentialStore by lazy { KeystoreCredentialStore(this) }
     internal val remoteFileSystemFactory by lazy { RemoteFileSystemFactory(remoteCredentialStore) }
     internal val transferDependencies: TransferDependencies by lazy {
@@ -171,6 +196,7 @@ class ISaverApplication : Application() {
         // Detailed libsu logging stays disabled, including in debug builds, to avoid path disclosure.
         applicationScope.launch {
             incomingFileCache.cleanupOrphans(System.currentTimeMillis())
+            rootExportCache.cleanupOrphans(System.currentTimeMillis())
         }
     }
 

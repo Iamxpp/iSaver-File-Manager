@@ -99,7 +99,7 @@ class RecentViewModelTest {
         advanceUntilIdle()
 
         assertEquals(RecentOpenTarget.File(entry), viewModel.open(viewModel.state.value.items.single()))
-        assertEquals(entry, viewModel.state.value.fileInfo)
+        assertNull(viewModel.state.value.fileInfo)
         viewModel.dismissFileInfo()
         assertNull(viewModel.state.value.fileInfo)
     }
