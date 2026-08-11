@@ -87,6 +87,8 @@ fun BrowserScreen(
     onDismissFileOpenError: () -> Unit = {},
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
     onDismissFileShareError: () -> Unit = {},
+    onMoveEntry: ((DirectoryEntry) -> Unit)? = null,
+    onDismissFileMoveError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
@@ -97,6 +99,7 @@ fun BrowserScreen(
     onRefreshRemote: () -> Unit = {},
     onCreateRemoteDirectory: (String) -> Unit = {},
     saveAction: FilesSaveAction? = null,
+    fileActionsEnabled: Boolean = true,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var createDialogVisible by remember { mutableStateOf(false) }
@@ -189,8 +192,10 @@ fun BrowserScreen(
             onOpenEntry = onOpenEntry,
             onSelectEntry = onSelectEntry,
             onLongPressEntry = { entry ->
-                if (entry !in state.selectedEntries) onSelectEntry(entry)
-                actionEntry = entry
+                if (fileActionsEnabled) {
+                    if (entry !in state.selectedEntries) onSelectEntry(entry)
+                    actionEntry = entry
+                }
             },
             modifier = Modifier.weight(1f),
         )
@@ -228,6 +233,8 @@ fun BrowserScreen(
             entry = entry,
             shareVisible = onShareEntry != null && entry.type == EntryType.FILE,
             shareEnabled = !state.sharingFile,
+            moveVisible = onMoveEntry != null && entry.type == EntryType.FILE,
+            moveEnabled = !state.movingFile,
             compressVisible = onCompress != null,
             onShare = {
                 actionEntry = null
@@ -236,6 +243,10 @@ fun BrowserScreen(
             onCompress = {
                 actionEntry = null
                 compressDialogVisible = true
+            },
+            onMove = {
+                actionEntry = null
+                onMoveEntry?.invoke(entry)
             },
             onClearSelection = {
                 actionEntry = null
@@ -256,6 +267,7 @@ fun BrowserScreen(
     state.fileInfo?.let { FileInfoDialog(it, onDismissFileInfo) }
     state.fileOpenError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileOpenError) }
     state.fileShareError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileShareError) }
+    state.fileMoveError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileMoveError) }
     when (remoteConnectionState) {
         is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
             state = remoteConnectionState,
@@ -355,6 +367,13 @@ internal fun BrowserContent(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
             )
         }
+        if (state.movingFile) {
+            Text(
+                "正在安全移动文件",
+                color = ISaverSecondaryText,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            )
+        }
     }
 }
 
@@ -364,9 +383,12 @@ private fun FileActionsSheet(
     entry: DirectoryEntry,
     shareVisible: Boolean,
     shareEnabled: Boolean,
+    moveVisible: Boolean,
+    moveEnabled: Boolean,
     compressVisible: Boolean,
     onShare: () -> Unit,
     onCompress: () -> Unit,
+    onMove: () -> Unit,
     onClearSelection: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -397,6 +419,14 @@ private fun FileActionsSheet(
                     description = "分享到其他应用",
                     enabled = shareEnabled,
                     onClick = onShare,
+                )
+            }
+            if (moveVisible) {
+                FileActionRow(
+                    title = "移动到",
+                    description = "选择新的文件夹",
+                    enabled = moveEnabled,
+                    onClick = onMove,
                 )
             }
             if (compressVisible) {

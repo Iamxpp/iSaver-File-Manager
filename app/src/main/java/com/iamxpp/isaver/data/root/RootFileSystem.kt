@@ -38,6 +38,12 @@ interface RootFileSystem {
         finalName: EntryName,
     ): OperationResult<DirectoryEntry> = unsupportedTransfer()
 
+    suspend fun moveFileNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+    ): OperationResult<DirectoryEntry> = unsupportedMove()
+
     suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> =
         unsupportedExtraction()
 
@@ -69,6 +75,12 @@ private fun unsupportedDirectorySnapshot(): OperationResult.Failure = OperationR
 )
 
 private fun <T> unsupportedTransfer():OperationResult<T> = OperationResult.Failure(ErrorCode.COMMAND_FAILED,"不支持文件传输","Transfer primitive unsupported")
+
+private fun unsupportedMove(): OperationResult.Failure = OperationResult.Failure(
+    ErrorCode.COMMAND_FAILED,
+    "不支持安全移动",
+    "Same-filesystem move primitive unsupported",
+)
 
 private fun <T> unsupportedExtraction(): OperationResult<T> = OperationResult.Failure(
     ErrorCode.COMMAND_FAILED,

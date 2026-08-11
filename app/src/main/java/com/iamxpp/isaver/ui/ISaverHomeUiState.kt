@@ -29,6 +29,11 @@ sealed interface HomeDestination {
         val sourceTab: HomeTab,
         val targetBrowser: Browser? = null,
     ) : HomeDestination
+
+    data class MoveTarget(
+        val sourceBrowser: Browser,
+        val targetBrowser: Browser? = null,
+    ) : HomeDestination
 }
 
 data class ISaverHomeUiState(

@@ -5,6 +5,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.EntryName
 import kotlinx.coroutines.CancellationException
@@ -81,10 +82,14 @@ class LibsuRootFileSystem internal constructor(
 
     override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> =
         execute(buildStatCommand(path)).flatMap { lines ->
-            when (val parsed = DirectoryListingParser.parse(lines)) {
-                is OperationResult.Failure -> parsed
-                is OperationResult.Success -> parsed.value.singleOrNull()?.let { OperationResult.Success(it) }
-                    ?: malformedOutput()
+            if (lines == listOf(STAT_NOT_FOUND_MARKER)) {
+                failure(ErrorCode.NOT_FOUND, "路径不存在", "Path was not found")
+            } else {
+                when (val parsed = DirectoryListingParser.parse(lines)) {
+                    is OperationResult.Failure -> parsed
+                    is OperationResult.Success -> parsed.value.singleOrNull()?.let { OperationResult.Success(it) }
+                        ?: malformedOutput()
+                }
             }
         }
 
@@ -426,6 +431,113 @@ class LibsuRootFileSystem internal constructor(
         return maxOf(timeoutMillis, MIN_STREAM_TRANSFER_TIMEOUT_MILLIS, throughputMillis)
     }
 
+    override suspend fun moveFileNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+    ): OperationResult<DirectoryEntry> {
+        val name = EntryName.parse(source.name).getOrElse { return invalidMoveSource() }
+        if (
+            source.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            source.symbolicLink ||
+            !source.readable ||
+            source.path != EntryName.join(sourceDirectory, name)
+        ) {
+            return invalidMoveSource()
+        }
+        if (sourceDirectory == targetDirectory) {
+            return failure(ErrorCode.ALREADY_EXISTS, "文件已在当前目录", "Move target matched source parent")
+        }
+        if (
+            RootPathRiskPolicy.isProtected(sourceDirectory) ||
+            RootPathRiskPolicy.isProtected(targetDirectory)
+        ) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览", "Protected move path")
+        }
+
+        val sourceParent = prepareWritableDirectory(sourceDirectory)
+        if (sourceParent !is OperationResult.Success) return sourceParent as OperationResult.Failure
+        val targetParent = prepareWritableDirectory(targetDirectory)
+        if (targetParent !is OperationResult.Success) return targetParent as OperationResult.Failure
+        val preparedSourceParent = sourceParent.value
+        val preparedTargetParent = targetParent.value
+
+        val expectedCanonicalSource = EntryName.join(preparedSourceParent.canonical, name)
+        val currentSource = stat(source.path)
+        if (
+            currentSource !is OperationResult.Success ||
+            currentSource.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            currentSource.value.symbolicLink ||
+            !currentSource.value.readable ||
+            currentSource.value.sizeBytes != source.sizeBytes
+        ) {
+            return invalidMoveSource()
+        }
+        val canonicalSource = canonicalize(source.path)
+        if (canonicalSource !is OperationResult.Success || canonicalSource.value != expectedCanonicalSource) {
+            return invalidMoveSource("Source no longer mapped to its selected parent")
+        }
+        val sourceIdentity = readIdentity(expectedCanonicalSource)
+        if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
+
+        val targetPath = EntryName.join(preparedTargetParent.canonical, name)
+        when (val target = stat(targetPath)) {
+            is OperationResult.Success -> return failure(
+                ErrorCode.ALREADY_EXISTS,
+                "目标位置已存在同名文件",
+                "Move target already existed",
+            )
+            is OperationResult.Failure -> if (target.code != ErrorCode.NOT_FOUND) return target
+        }
+        currentCoroutineContext().ensureActive()
+
+        val execution = runHelperBounded(
+            transferHelper.moveNoReplace(
+                sourceOriginal = preparedSourceParent.original.value,
+                sourceCanonical = preparedSourceParent.canonical.value,
+                sourceName = name,
+                sourceParentIdentity = preparedSourceParent.identity,
+                sourceIdentity = sourceIdentity.value,
+                targetOriginal = preparedTargetParent.original.value,
+                targetCanonical = preparedTargetParent.canonical.value,
+                targetParentIdentity = preparedTargetParent.identity,
+            ),
+            helperOperationTimeoutMillis,
+        ).getOrElse {
+            return uncertainMove("Move helper exceeded its bounded deadline or lost its result")
+        }
+        if (execution.exitCode != 0) {
+            return mapExitCode(execution.exitCode, execution.stderr, "无法移动文件", "move-noreplace")
+        }
+        val movedIdentity = RootFileIdentity.parse(execution.stdout).getOrElse {
+            return uncertainMove("Move helper returned malformed identity")
+        }
+        if (movedIdentity != sourceIdentity.value) {
+            return uncertainMove("Moved identity differed from the selected source")
+        }
+
+        val sourceAfter = stat(expectedCanonicalSource)
+        val targetAfter = stat(targetPath)
+        val targetIdentityAfter = readIdentity(targetPath)
+        val sourceParentAfter = canonicalize(sourceDirectory)
+        val targetParentAfter = canonicalize(targetDirectory)
+        if (
+            sourceAfter !is OperationResult.Failure || sourceAfter.code != ErrorCode.NOT_FOUND ||
+            targetAfter !is OperationResult.Success ||
+            targetAfter.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            targetAfter.value.symbolicLink ||
+            targetAfter.value.sizeBytes != source.sizeBytes ||
+            targetIdentityAfter !is OperationResult.Success || targetIdentityAfter.value != movedIdentity ||
+            sourceParentAfter !is OperationResult.Success ||
+            sourceParentAfter.value != preparedSourceParent.canonical ||
+            targetParentAfter !is OperationResult.Success ||
+            targetParentAfter.value != preparedTargetParent.canonical
+        ) {
+            return uncertainMove("Move result could not be fully reconciled")
+        }
+        return targetAfter
+    }
+
     private suspend fun prepareStage(directory:PreparedTransferDirectory,stageName:String):OperationResult<TransferStage>{
         val command=transferHelper.prepare(
             directory.original.value,directory.canonical.value,stageName,directory.identity,
@@ -566,6 +678,7 @@ class LibsuRootFileSystem internal constructor(
             54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
             56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
             55 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
+            58 -> failure(ErrorCode.CROSS_DEVICE, "暂不支持跨存储移动", "Move crossed a file-system boundary")
             137 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
             else -> if (operation in STREAM_COPY_OPERATIONS && stderr.looksLikeContentReadFailure()) {
                 failure(
@@ -632,8 +745,11 @@ class LibsuRootFileSystem internal constructor(
         val quoted = RootCommandCodec.quote(path.value)
         return """
             target=$quoted
-            [ -e "${'$'}target" ] || [ -L "${'$'}target" ] || exit $EXIT_NOT_FOUND
-            emit_isaver_record "${'$'}target"
+            if [ -e "${'$'}target" ] || [ -L "${'$'}target" ]; then
+              emit_isaver_record "${'$'}target"
+            else
+              printf '%s\n' '$STAT_NOT_FOUND_MARKER'
+            fi
         """.trimIndent().withRecordEmitter()
     }
 
@@ -700,6 +816,7 @@ class LibsuRootFileSystem internal constructor(
         const val MIN_STREAM_TRANSFER_TIMEOUT_MILLIS = 30_000L
         const val TRANSFER_TIMEOUT_BYTES_PER_SECOND = 2L * 1024L * 1024L
         const val EXIT_NOT_FOUND = 44
+        const val STAT_NOT_FOUND_MARKER = "ISAVER_STAT_V1_NOT_FOUND"
         const val EXIT_NOT_DIRECTORY = 45
         const val EXIT_NOT_READABLE = 46
         const val EXIT_NATIVE_IO = 51
@@ -794,6 +911,8 @@ private fun malformedCanonicalOutput() = failure(
 private fun uncertain(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"文件夹可能已创建，请刷新确认",technical)
 private fun uncertainTransfer(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"保存结果不确定，请刷新确认",technical)
 private fun uncertainExtraction(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"解压结果不确定，请刷新目标目录核对",technical)
+private fun uncertainMove(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"移动结果不确定，请刷新来源和目标目录核对",technical)
+private fun invalidMoveSource(technical:String="Move source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法移动此文件",technical)
 
 private fun failure(code: ErrorCode, userMessage: String, technicalMessage: String) =
     OperationResult.Failure(code, userMessage, technicalMessage)

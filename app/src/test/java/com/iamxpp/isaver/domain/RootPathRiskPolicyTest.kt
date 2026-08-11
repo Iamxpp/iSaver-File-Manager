@@ -7,7 +7,10 @@ import org.junit.Test
 class RootPathRiskPolicyTest {
     @Test
     fun `system roots and descendants are protected`() {
-        listOf("/system", "/system/bin", "/vendor", "/product/app", "/boot").forEach { value ->
+        listOf(
+            "/system", "/system/bin", "/vendor", "/product/app", "/boot",
+            "/data/adb", "/apex", "/proc/1", "/sys", "/dev/block",
+        ).forEach { value ->
             assertTrue(value, RootPathRiskPolicy.isProtected(path(value)))
         }
     }

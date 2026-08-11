@@ -75,6 +75,26 @@ class RootTransferHelperTest {
     }
 
     @Test
+    fun `same filesystem move command carries exact parent and source identities`() {
+        val command = helper.moveNoReplace(
+            sourceOriginal = "/source original",
+            sourceCanonical = "/source canonical",
+            sourceName = com.iamxpp.isaver.domain.EntryName.parse("a';\n.txt").getOrThrow(),
+            sourceParentIdentity = RootFileIdentity(1L, 2L),
+            sourceIdentity = RootFileIdentity(3L, 4L),
+            targetOriginal = "/target original",
+            targetCanonical = "/target canonical",
+            targetParentIdentity = RootFileIdentity(5L, 6L),
+        )
+
+        assertTrue(command.contains("'move-noreplace' '/source original' '/source canonical'"))
+        assertTrue(command.contains("'a'\\'';\n.txt' '1' '2' '3' '4'"))
+        assertTrue(command.endsWith("'/target original' '/target canonical' '5' '6'"))
+        assertFalse(command.contains(" mv "))
+        assertFalse(command.contains("sh -c"))
+    }
+
+    @Test
     fun `extraction commands keep parent and stage identity in fixed argv`() {
         val stage = ExtractionStage.create(
             com.iamxpp.isaver.domain.RootPath.parse("/original").getOrThrow(),

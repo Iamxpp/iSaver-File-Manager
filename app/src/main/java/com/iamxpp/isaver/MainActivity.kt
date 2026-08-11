@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
             app.archiveRepository,
             app.recentRepository,
             rootExportRepository = app.rootExportRepository,
+            fileMoveRepository = app.fileMoveRepository,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -111,6 +112,7 @@ class MainActivity : ComponentActivity() {
                     val remoteConnectionState by remoteConnectionViewModel.state.collectAsStateWithLifecycle()
                     val destination = homeState.destination
                     val pickerActive = transferState != TransferUiState.Idle
+                    val movePickerActive = browserState.moveSelection != null
 
                     LaunchedEffect(pickerActive) {
                         if (pickerActive) homeViewModel.selectTab(HomeTab.VIEWS)
@@ -143,6 +145,9 @@ class MainActivity : ComponentActivity() {
                                 destination.targetBrowser?.let { browser ->
                                     browserViewModel.openRoot(browser.path, browser.title, browser.recordAccess)
                                 }
+                            }
+                            is HomeDestination.MoveTarget -> destination.targetBrowser?.let { browser ->
+                                browserViewModel.openRoot(browser.path, browser.title, browser.recordAccess)
                             }
                             is HomeDestination.Tab -> Unit
                         }
@@ -187,6 +192,13 @@ class MainActivity : ComponentActivity() {
                         browserViewModel.completeExternalShare(grant, launched)
                     }
 
+                    LaunchedEffect(browserState.movedOutput) {
+                        val output = browserState.movedOutput ?: return@LaunchedEffect
+                        homeViewModel.completeMove(browserState.currentPath, browserState.rootTitle)
+                        browserViewModel.consumeMovedOutput()
+                        Toast.makeText(this@MainActivity, "已移动 ${output.name}", Toast.LENGTH_SHORT).show()
+                    }
+
                     LaunchedEffect(archiveState.operation) {
                         val success = archiveState.operation as? com.iamxpp.isaver.archive.ArchiveState.Success
                             ?: return@LaunchedEffect
@@ -205,7 +217,8 @@ class MainActivity : ComponentActivity() {
                                 is HomeDestination.Browser -> transferViewModel.selectTarget(browserState.currentPath)
                                 is HomeDestination.Tab,
                                 is HomeDestination.Archive,
-                                is HomeDestination.ExtractionTarget -> transferViewModel.clearTarget()
+                                is HomeDestination.ExtractionTarget,
+                                is HomeDestination.MoveTarget -> transferViewModel.clearTarget()
                             }
                         }
                     }
@@ -224,6 +237,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     fun handleBrowserBack() {
+                        if (browserState.movingFile) return
                         if (homeViewModel.onBrowserBack(browserViewModel.back()) == HomeBackResult.EXIT_APP) {
                             if (pickerActive) cancelPicker() else finish()
                         }
@@ -252,16 +266,28 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    fun cancelMovePicker() {
+                        if (browserViewModel.cancelMove(restoreSelection = true)) {
+                            homeViewModel.returnFromMove()
+                        }
+                    }
+
                     BackHandler(
-                        enabled = pickerActive || destination !is HomeDestination.Tab,
+                        enabled = pickerActive || movePickerActive || destination !is HomeDestination.Tab,
                     ) {
                         when {
+                            browserState.movingFile -> Unit
+                            movePickerActive && destination is HomeDestination.MoveTarget &&
+                                destination.targetBrowser == null -> cancelMovePicker()
                             pickerActive && destination !is HomeDestination.Browser -> cancelPicker()
                             destination is HomeDestination.Browser -> handleBrowserBack()
                             destination is HomeDestination.Archive -> handleArchiveBack()
                             destination is HomeDestination.ExtractionTarget && destination.targetBrowser != null ->
                                 handleBrowserBack()
                             destination is HomeDestination.ExtractionTarget -> homeViewModel.returnToArchive()
+                            destination is HomeDestination.MoveTarget && destination.targetBrowser != null ->
+                                handleBrowserBack()
+                            destination is HomeDestination.MoveTarget -> cancelMovePicker()
                         }
                     }
                     ISaverHomeScreen(
@@ -270,15 +296,23 @@ class MainActivity : ComponentActivity() {
                         browserState = browserState,
                         displayMode = browserState.displayMode,
                         sortSpec = browserState.sortSpec,
-                        onSelectTab = homeViewModel::selectTab,
-                        onOpenLocation = homeViewModel::openLocation,
+                        onSelectTab = { tab ->
+                            if (!browserState.movingFile) homeViewModel.selectTab(tab)
+                        },
+                        onOpenLocation = { path, title ->
+                            if (!browserState.movingFile) {
+                                homeViewModel.openLocation(path, title)
+                            }
+                        },
                         onAddCustomLocation = locationHomeViewModel::addCustomLocation,
                         onEditCustomLocation = locationHomeViewModel::editCustomLocation,
                         onRemoveCustomLocation = locationHomeViewModel::removeCustomLocation,
                         onRetryLocations = locationHomeViewModel::refresh,
                         onClearLocationError = locationHomeViewModel::clearAddError,
                         onRevalidateCustomLocation = locationHomeViewModel::revalidateCustomLocation,
-                        onEnterDirectory = { browserViewModel.enterDirectory(it) },
+                        onEnterDirectory = { entry ->
+                            !browserState.movingFile && browserViewModel.enterDirectory(entry)
+                        },
                         onBrowserBack = ::handleBrowserBack,
                         onRetryBrowser = browserViewModel::retry,
                         onLoadMore = browserViewModel::loadMore,
@@ -293,6 +327,22 @@ class MainActivity : ComponentActivity() {
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onShareBrowserEntry = browserViewModel::shareEntry,
                         onDismissFileShareError = browserViewModel::dismissFileShareError,
+                        onMoveBrowserEntry = { entry ->
+                            if (!pickerActive && browserViewModel.beginMove(entry)) {
+                                homeViewModel.chooseMoveTarget()
+                            }
+                        },
+                        onMoveHere = {
+                            val move = homeState.destination as? HomeDestination.MoveTarget
+                            if (
+                                move?.targetBrowser != null &&
+                                browserState.canCreateDirectory &&
+                                browserState.currentPath != move.sourceBrowser.path
+                            ) {
+                                browserViewModel.moveTo(browserState.currentPath)
+                            }
+                        },
+                        onDismissFileMoveError = browserViewModel::dismissFileMoveError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
                         onConnectServer = remoteConnectionViewModel::connect,
@@ -383,6 +433,7 @@ internal class BrowserViewModelFactory(
     private val recentRepository: com.iamxpp.isaver.recent.RecentRepository? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val rootExportRepository: com.iamxpp.isaver.export.RootExportRepository? = null,
+    private val fileMoveRepository: com.iamxpp.isaver.fileops.FileMoveRepository? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -413,6 +464,9 @@ internal class BrowserViewModelFactory(
             },
             shareFile = rootExportRepository?.let { repository -> repository::share } ?: { entry ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法分享文件")
+            },
+            moveFile = fileMoveRepository?.let { repository -> repository::move } ?: { _, _, _ ->
+                OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法移动文件")
             },
             revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
         ) as T

@@ -1116,6 +1116,60 @@ class BrowserViewModelTest {
         assertNull(vm.state.value.fileShareError)
     }
 
+    @Test fun `single file move keeps source identity while choosing and emits moved output`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
+        val output = entry("report.txt", EntryType.FILE, path = "${targetDirectory.value}/report.txt")
+        val requests = mutableListOf<Triple<DirectoryEntry, RootPath, RootPath>>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            moveFile = { entry, sourceParent, targetParent ->
+                requests += Triple(entry, sourceParent, targetParent)
+                OperationResult.Success(output)
+            },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(source)
+
+        vm.beginMove(source)
+        assertEquals(BrowserMoveSelection(source, sourceDirectory), vm.state.value.moveSelection)
+
+        vm.moveTo(targetDirectory)
+        advanceUntilIdle()
+
+        assertEquals(listOf(Triple(source, sourceDirectory, targetDirectory)), requests)
+        assertFalse(vm.state.value.movingFile)
+        assertNull(vm.state.value.moveSelection)
+        assertEquals(output, vm.state.value.movedOutput)
+        assertTrue(vm.state.value.selectedEntries.isEmpty())
+    }
+
+    @Test fun `move to source directory stays in picker and never dispatches`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
+        var calls = 0
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            moveFile = { _, _, _ -> calls += 1; error("must not dispatch") },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.beginMove(source)
+
+        vm.moveTo(sourceDirectory)
+        advanceUntilIdle()
+
+        assertEquals(0, calls)
+        assertEquals(ErrorCode.ALREADY_EXISTS, vm.state.value.fileMoveError?.code)
+        assertEquals(BrowserMoveSelection(source, sourceDirectory), vm.state.value.moveSelection)
+    }
+
     @Test fun `long press selection accepts readable files and directories and rejects unsafe entries`() = runTest {
         val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
         val file = entry("file.txt", EntryType.FILE)

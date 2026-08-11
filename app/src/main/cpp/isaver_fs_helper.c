@@ -30,6 +30,7 @@ enum {
     X_SOURCE_CHANGED = 54,
     X_OUTCOME_UNCERTAIN = 55,
     X_OUTPUT_LIMIT = 57,
+    X_CROSS_DEVICE = 58,
     X_USAGE = 64,
 };
 
@@ -1289,6 +1290,114 @@ static int remove_stage(int argc, char **argv) {
     return result;
 }
 
+static int move_noreplace(int argc, char **argv) {
+    if (argc != 13 || !basename_ok(argv[4])) return X_USAGE;
+    unsigned long long source_parent_device;
+    unsigned long long source_parent_inode;
+    unsigned long long source_device;
+    unsigned long long source_inode;
+    unsigned long long target_parent_device;
+    unsigned long long target_parent_inode;
+    if (!parse_identity(argv, 5, &source_parent_device, &source_parent_inode) ||
+        !parse_identity(argv, 7, &source_device, &source_inode) ||
+        !parse_identity(argv, 11, &target_parent_device, &target_parent_inode)) {
+        return X_USAGE;
+    }
+
+    int source_parent_fd = open_parent(
+        argv[2], argv[3], source_parent_device, source_parent_inode
+    );
+    if (source_parent_fd < 0) return -source_parent_fd;
+    int target_parent_fd = open_parent(
+        argv[9], argv[10], target_parent_device, target_parent_inode
+    );
+    if (target_parent_fd < 0) {
+        close(source_parent_fd);
+        return -target_parent_fd;
+    }
+
+    struct stat source_status;
+    if (retry_fstatat(
+        source_parent_fd, argv[4], &source_status, AT_SYMLINK_NOFOLLOW
+    ) != 0) {
+        int result = errno == ENOENT ? X_NOT_FOUND : X_SOURCE_CHANGED;
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return result;
+    }
+    if (!S_ISREG(source_status.st_mode) ||
+        !identity_matches(&source_status, source_device, source_inode)) {
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return X_SOURCE_CHANGED;
+    }
+
+    struct stat target_status;
+    if (retry_fstatat(
+        target_parent_fd, argv[4], &target_status, AT_SYMLINK_NOFOLLOW
+    ) == 0) {
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return X_ALREADY_EXISTS;
+    }
+    if (errno != ENOENT) {
+        int result = write_errno(errno);
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return result;
+    }
+    if ((unsigned long long) source_status.st_dev != target_parent_device) {
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return X_CROSS_DEVICE;
+    }
+
+    long renamed = syscall(
+        SYS_renameat2,
+        source_parent_fd,
+        argv[4],
+        target_parent_fd,
+        argv[4],
+        RENAME_NOREPLACE
+    );
+    if (renamed != 0) {
+        int error = errno;
+        int result = error == EXDEV ? X_CROSS_DEVICE : write_errno(error);
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return result;
+    }
+
+    struct stat moved_status;
+    struct stat stale_source;
+    int source_absent = retry_fstatat(
+        source_parent_fd, argv[4], &stale_source, AT_SYMLINK_NOFOLLOW
+    ) != 0 && errno == ENOENT;
+    if (retry_fstatat(
+        target_parent_fd, argv[4], &moved_status, AT_SYMLINK_NOFOLLOW
+    ) != 0 || !S_ISREG(moved_status.st_mode) ||
+        !identity_matches(&moved_status, source_device, source_inode) || !source_absent) {
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if ((fsync(source_parent_fd) != 0 && errno != EINVAL && errno != EROFS) ||
+        (fsync(target_parent_fd) != 0 && errno != EINVAL && errno != EROFS)) {
+        close(target_parent_fd);
+        close(source_parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+
+    printf(
+        "%llu:%llu\n",
+        (unsigned long long) moved_status.st_dev,
+        (unsigned long long) moved_status.st_ino
+    );
+    close(target_parent_fd);
+    close(source_parent_fd);
+    return 0;
+}
+
 static int prepare_extraction_stage(int argc, char **argv) {
     if (argc != 7 || !extraction_stage_name_ok(argv[4])) return X_USAGE;
     unsigned long long parent_device;
@@ -1629,6 +1738,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);
+    if (strcmp(argv[1], "move-noreplace") == 0) return move_noreplace(argc, argv);
     if (strcmp(argv[1], "prepare-extract-stage") == 0) return prepare_extraction_stage(argc, argv);
     if (strcmp(argv[1], "mkdir-extract") == 0) return mkdir_extract(argc, argv);
     if (strcmp(argv[1], "copy-extract-stdin") == 0) return copy_extract_stdin(argc, argv);

@@ -56,6 +56,9 @@ fun ISaverHomeScreen(
     onDismissFileOpenError: () -> Unit = {},
     onShareBrowserEntry: (DirectoryEntry) -> Unit = {},
     onDismissFileShareError: () -> Unit = {},
+    onMoveBrowserEntry: ((DirectoryEntry) -> Unit)? = null,
+    onMoveHere: () -> Unit = {},
+    onDismissFileMoveError: () -> Unit = {},
     onCompress: (String) -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
@@ -102,6 +105,17 @@ fun ISaverHomeScreen(
             enabled = it.targetBrowser != null && browserState.canCreateDirectory,
             onSave = onExtractHere,
             label = "解压到此处",
+        )
+    }
+    val moveDestination = homeState.destination as? HomeDestination.MoveTarget
+    val moveAction = moveDestination?.let {
+        FilesSaveAction(
+            enabled = it.targetBrowser != null &&
+                browserState.canCreateDirectory &&
+                browserState.currentPath != it.sourceBrowser.path &&
+                !browserState.movingFile,
+            onSave = onMoveHere,
+            label = if (browserState.movingFile) "正在移动" else "移动到这里",
         )
     }
 
@@ -151,6 +165,8 @@ fun ISaverHomeScreen(
                 onDismissFileOpenError = onDismissFileOpenError,
                 onShareEntry = onShareBrowserEntry,
                 onDismissFileShareError = onDismissFileShareError,
+                onMoveEntry = if (saveMode) null else onMoveBrowserEntry,
+                onDismissFileMoveError = onDismissFileMoveError,
                 onCompress = onCompress,
                 onDismissCompressionMessage = onDismissCompressionMessage,
                 onConnectServer = onConnectServer,
@@ -214,6 +230,50 @@ fun ISaverHomeScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
+            is HomeDestination.MoveTarget -> if (
+                homeState.selectedTab == HomeTab.BROWSE && moveDestination?.targetBrowser != null
+            ) {
+                BrowserScreen(
+                    state = browserState,
+                    onEnterDirectory = onEnterDirectory,
+                    onBack = onBrowserBack,
+                    onRetry = onRetryBrowser,
+                    onLoadMore = onLoadMore,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onDisplayModeChange = onDisplayModeChange,
+                    onSortChange = onSortChange,
+                    onCreateDirectory = onCreateDirectory,
+                    onDismissFileMoveError = onDismissFileMoveError,
+                    fileActionsEnabled = false,
+                    saveAction = moveAction,
+                    modifier = Modifier.weight(1f),
+                )
+            } else if (homeState.selectedTab == HomeTab.RECENT) {
+                RecentScreen(
+                    state = recentState,
+                    displayMode = displayMode,
+                    onOpen = onOpenRecent,
+                    onRefresh = onRefreshRecent,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                LocationHomeScreen(
+                    state = locationState,
+                    displayMode = displayMode,
+                    onOpenLocation = onOpenLocation,
+                    onAdd = onAddCustomLocation,
+                    onEdit = onEditCustomLocation,
+                    onRemove = onRemoveCustomLocation,
+                    onRetry = onRetryLocations,
+                    onClearAddError = onClearLocationError,
+                    onRevalidate = onRevalidateCustomLocation,
+                    sortSpec = sortSpec,
+                    onDisplayModeChange = onDisplayModeChange,
+                    onSortChange = onSortChange,
+                    saveAction = moveAction,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         if (saveMode) {
             InlineSaveBar(
@@ -226,7 +286,8 @@ fun ISaverHomeScreen(
                         0
                     }
                     is HomeDestination.Archive,
-                    is HomeDestination.ExtractionTarget -> 0
+                    is HomeDestination.ExtractionTarget,
+                    is HomeDestination.MoveTarget -> 0
                 },
                 onStemChange = onStemChange,
                 onExtensionChange = onExtensionChange,

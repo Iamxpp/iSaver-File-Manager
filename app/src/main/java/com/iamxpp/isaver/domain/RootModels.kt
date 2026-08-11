@@ -38,6 +38,7 @@ enum class ErrorCode {
     NOT_WRITABLE,
     ALREADY_EXISTS,
     NO_SPACE,
+    CROSS_DEVICE,
     SOURCE_UNREADABLE,
     COMMAND_FAILED,
     CANCELLED,

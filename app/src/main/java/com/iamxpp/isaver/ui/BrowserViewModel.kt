@@ -45,6 +45,9 @@ class BrowserViewModel(
     private val shareFile: suspend (DirectoryEntry) -> OperationResult<ExternalFileGrant> = {
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法分享文件")
     },
+    private val moveFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry> = { _, _, _ ->
+        OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法移动文件")
+    },
     private val revokeExport: (ExternalFileGrant) -> Unit = {},
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
@@ -58,6 +61,8 @@ class BrowserViewModel(
     private var openFileGeneration = 0L
     private var shareFileJob: Job? = null
     private var shareFileGeneration = 0L
+    private var moveFileJob: Job? = null
+    private var selectionToRestore: BrowserMoveSelection? = null
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
     private var presentedEntries: List<DirectoryEntry> = emptyList()
@@ -219,6 +224,100 @@ class BrowserViewModel(
         mutableState.value = mutableState.value.copy(fileShareError = null)
     }
 
+    fun beginMove(entry: DirectoryEntry): Boolean {
+        if (mutableState.value.movingFile) return false
+        cancelExternalOpen()
+        cancelExternalShare()
+        if (
+            entry.type != EntryType.FILE ||
+            !entry.readable ||
+            entry.symbolicLink ||
+            RootPathRiskPolicy.isProtected(mutableState.value.currentPath)
+        ) {
+            mutableState.value = mutableState.value.copy(
+                fileMoveError = BrowserOperationError(
+                    ErrorCode.SOURCE_UNREADABLE,
+                    "当前仅支持移动单个普通文件",
+                ),
+            )
+            return false
+        }
+        mutableState.value = mutableState.value.copy(
+            moveSelection = BrowserMoveSelection(entry, mutableState.value.currentPath),
+            movedOutput = null,
+            fileMoveError = null,
+        )
+        return true
+    }
+
+    fun moveTo(targetDirectory: RootPath) {
+        val selection = mutableState.value.moveSelection ?: return
+        if (mutableState.value.movingFile) return
+        if (targetDirectory == selection.sourceDirectory) {
+            mutableState.value = mutableState.value.copy(
+                fileMoveError = BrowserOperationError(ErrorCode.ALREADY_EXISTS, "文件已在当前目录"),
+            )
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            movingFile = true,
+            movedOutput = null,
+            fileMoveError = null,
+        )
+        moveFileJob = viewModelScope.launch {
+            try {
+                when (
+                    val result = withContext(ioDispatcher) {
+                        moveFile(selection.entry, selection.sourceDirectory, targetDirectory)
+                    }
+                ) {
+                    is OperationResult.Failure -> mutableState.value = mutableState.value.copy(
+                        movingFile = false,
+                        fileMoveError = BrowserOperationError(result.code, result.userMessage),
+                    )
+                    is OperationResult.Success -> {
+                        mutableState.value = mutableState.value.copy(
+                            selectedEntries = emptySet(),
+                            moveSelection = null,
+                            movingFile = false,
+                            movedOutput = result.value,
+                            fileMoveError = null,
+                        )
+                        recordSuccessfulFileAccess(result.value)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                mutableState.value = mutableState.value.copy(movingFile = false)
+                throw cancelled
+            } catch (_: Exception) {
+                mutableState.value = mutableState.value.copy(
+                    movingFile = false,
+                    fileMoveError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "无法移动文件"),
+                )
+            }
+        }
+    }
+
+    fun cancelMove(restoreSelection: Boolean = false): Boolean {
+        val selection = mutableState.value.moveSelection ?: return true
+        if (mutableState.value.movingFile) return false
+        if (restoreSelection) selectionToRestore = selection
+        mutableState.value = mutableState.value.copy(
+            moveSelection = null,
+            movedOutput = null,
+            fileMoveError = null,
+        )
+        return true
+    }
+
+    fun consumeMovedOutput() {
+        mutableState.value = mutableState.value.copy(movedOutput = null)
+    }
+
+    fun dismissFileMoveError() {
+        mutableState.value = mutableState.value.copy(fileMoveError = null)
+    }
+
     fun compress(outputName: String) {
         val repository = archiveRepository ?: return
         val current = mutableState.value
@@ -370,9 +469,13 @@ class BrowserViewModel(
             ?.presentedEntries
             .orEmpty()
         if (cached != null) presentedEntries = cachedEntries
+        val previousState = mutableState.value
+        val restoredSelection = selectionToRestore
+            ?.takeIf { it.sourceDirectory == path }
+            ?.also { selectionToRestore = null }
         mutableState.value = BrowserUiState(
             currentPath = path,
-            rootTitle = mutableState.value.rootTitle,
+            rootTitle = previousState.rootTitle,
             title = displayTitle(path),
             allEntries = cachedSnapshot?.entries.orEmpty(),
             entries = cachedEntries.take(PAGE_SIZE),
@@ -382,10 +485,14 @@ class BrowserViewModel(
             hasMore = cachedEntries.size > PAGE_SIZE,
             canCreateDirectory = cachedSnapshot?.parentWritable == true && !RootPathRiskPolicy.isProtected(path),
             locationTarget = locationTarget,
-            displayMode = mutableState.value.displayMode,
-            sortSpec = mutableState.value.sortSpec,
-            searchQuery = mutableState.value.searchQuery,
-            selectedEntries = emptySet(),
+            displayMode = previousState.displayMode,
+            sortSpec = previousState.sortSpec,
+            searchQuery = previousState.searchQuery,
+            selectedEntries = restoredSelection?.let { setOf(it.entry) }.orEmpty(),
+            moveSelection = previousState.moveSelection,
+            movingFile = previousState.movingFile,
+            movedOutput = previousState.movedOutput,
+            fileMoveError = previousState.fileMoveError,
             compressionMessage = null,
         )
         val cachedPresentationJob = if (cachedSnapshot != null && cachedEntries.isEmpty()) {

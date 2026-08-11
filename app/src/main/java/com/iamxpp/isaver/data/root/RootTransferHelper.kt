@@ -34,6 +34,29 @@ internal class RootTransferHelper(private val executable:String){
         "remove-stage",original,canonical,stage.name,parentId.device,parentId.inode,
         stage.identity.device,stage.identity.inode,
     )
+    fun moveNoReplace(
+        sourceOriginal: String,
+        sourceCanonical: String,
+        sourceName: EntryName,
+        sourceParentIdentity: RootFileIdentity,
+        sourceIdentity: RootFileIdentity,
+        targetOriginal: String,
+        targetCanonical: String,
+        targetParentIdentity: RootFileIdentity,
+    ) = command(
+        "move-noreplace",
+        sourceOriginal,
+        sourceCanonical,
+        sourceName.value,
+        sourceParentIdentity.device,
+        sourceParentIdentity.inode,
+        sourceIdentity.device,
+        sourceIdentity.inode,
+        targetOriginal,
+        targetCanonical,
+        targetParentIdentity.device,
+        targetParentIdentity.inode,
+    )
     fun prepareExtraction(
         original: String,
         canonical: String,

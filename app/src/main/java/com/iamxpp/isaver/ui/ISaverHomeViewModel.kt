@@ -16,6 +16,22 @@ class ISaverHomeViewModel(
     val state: StateFlow<ISaverHomeUiState> = mutableState.asStateFlow()
 
     fun selectTab(tab: HomeTab) {
+        val move = mutableState.value.destination as? HomeDestination.MoveTarget
+        if (move != null) {
+            transition(
+                mutableState.value.copy(
+                    selectedTab = tab,
+                    destination = move.copy(
+                        targetBrowser = if (tab == HomeTab.BROWSE) {
+                            HomeDestination.Browser(BROWSE_ROOT, BROWSE_TITLE, HomeTab.BROWSE)
+                        } else {
+                            null
+                        },
+                    ),
+                ),
+            )
+            return
+        }
         val extraction = mutableState.value.destination as? HomeDestination.ExtractionTarget
         if (extraction != null) {
             transition(
@@ -50,6 +66,18 @@ class ISaverHomeViewModel(
         source: HomeTab = HomeTab.VIEWS,
         recordAccess: Boolean = true,
     ) {
+        val move = mutableState.value.destination as? HomeDestination.MoveTarget
+        if (move != null) {
+            transition(
+                mutableState.value.copy(
+                    selectedTab = source,
+                    destination = move.copy(
+                        targetBrowser = HomeDestination.Browser(path, displayName, source, recordAccess),
+                    ),
+                ),
+            )
+            return
+        }
         val extraction = mutableState.value.destination as? HomeDestination.ExtractionTarget
         if (extraction != null) {
             transition(
@@ -97,6 +125,37 @@ class ISaverHomeViewModel(
         )
     }
 
+    fun chooseMoveTarget() {
+        val source = mutableState.value.destination as? HomeDestination.Browser ?: return
+        transition(
+            mutableState.value.copy(
+                selectedTab = HomeTab.VIEWS,
+                destination = HomeDestination.MoveTarget(source),
+            ),
+        )
+    }
+
+    fun returnFromMove() {
+        val move = mutableState.value.destination as? HomeDestination.MoveTarget ?: return
+        transition(
+            mutableState.value.copy(
+                selectedTab = move.sourceBrowser.source,
+                destination = move.sourceBrowser,
+            ),
+        )
+    }
+
+    fun completeMove(targetDirectory: RootPath, targetTitle: String) {
+        val move = mutableState.value.destination as? HomeDestination.MoveTarget ?: return
+        val target = move.targetBrowser ?: return
+        transition(
+            mutableState.value.copy(
+                selectedTab = target.source,
+                destination = target.copy(path = targetDirectory, title = targetTitle),
+            ),
+        )
+    }
+
     fun returnToArchive() {
         val extraction = mutableState.value.destination as? HomeDestination.ExtractionTarget ?: return
         transition(
@@ -124,6 +183,16 @@ class ISaverHomeViewModel(
                 mutableState.value.copy(
                     selectedTab = HomeTab.VIEWS,
                     destination = extraction.copy(targetBrowser = null),
+                ),
+            )
+            return HomeBackResult.CONSUMED
+        }
+        val move = mutableState.value.destination as? HomeDestination.MoveTarget
+        if (move?.targetBrowser != null) {
+            transition(
+                mutableState.value.copy(
+                    selectedTab = HomeTab.VIEWS,
+                    destination = move.copy(targetBrowser = null),
                 ),
             )
             return HomeBackResult.CONSUMED
@@ -175,6 +244,15 @@ class ISaverHomeViewModel(
                     savedStateHandle[KEY_TARGET_SOURCE] = browser.source.name
                     savedStateHandle[KEY_TARGET_RECORD_ACCESS] = browser.recordAccess.toString()
                 } ?: clearSavedTarget()
+            }
+            is HomeDestination.MoveTarget -> {
+                savedStateHandle[KEY_SELECTED_TAB] = destination.sourceBrowser.source.name
+                savedStateHandle[KEY_DESTINATION] = DESTINATION_BROWSER
+                savedStateHandle[KEY_PATH] = destination.sourceBrowser.path.value
+                savedStateHandle[KEY_TITLE] = destination.sourceBrowser.title
+                savedStateHandle[KEY_SOURCE] = destination.sourceBrowser.source.name
+                savedStateHandle[KEY_RECORD_ACCESS] = destination.sourceBrowser.recordAccess.toString()
+                clearSavedTarget()
             }
         }
     }

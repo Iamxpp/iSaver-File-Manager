@@ -10,6 +10,55 @@ import org.junit.Test
 
 class ISaverHomeViewModelTest {
     @Test
+    fun `move target reuses tabs and returns to its source browser`() {
+        val source = HomeDestination.Browser(
+            RootPath.parse("/data/local/tmp/source").getOrThrow(),
+            "来源",
+            HomeTab.BROWSE,
+        )
+        val target = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val viewModel = ISaverHomeViewModel(SavedStateHandle())
+        viewModel.openLocation(source.path, source.title, source.source)
+
+        viewModel.chooseMoveTarget()
+        assertEquals(HomeTab.VIEWS, viewModel.state.value.selectedTab)
+        assertEquals(HomeDestination.MoveTarget(source), viewModel.state.value.destination)
+
+        viewModel.selectTab(HomeTab.BROWSE)
+        viewModel.openLocation(target, "目标", HomeTab.BROWSE)
+        val choosing = viewModel.state.value.destination as HomeDestination.MoveTarget
+        assertEquals(HomeDestination.Browser(target, "目标", HomeTab.BROWSE), choosing.targetBrowser)
+
+        val nestedTarget = RootPath.parse("${target.value}/nested").getOrThrow()
+        viewModel.completeMove(nestedTarget, "目标")
+        assertEquals(
+            HomeDestination.Browser(nestedTarget, "目标", HomeTab.BROWSE),
+            viewModel.state.value.destination,
+        )
+
+        viewModel.openLocation(source.path, source.title, source.source)
+        viewModel.chooseMoveTarget()
+
+        viewModel.returnFromMove()
+        assertEquals(source, viewModel.state.value.destination)
+        assertEquals(HomeTab.BROWSE, viewModel.state.value.selectedTab)
+    }
+
+    @Test
+    fun `process recreation safely cancels move target mode at the source browser`() {
+        val handle = SavedStateHandle()
+        val source = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val viewModel = ISaverHomeViewModel(handle)
+        viewModel.openLocation(source, "来源", HomeTab.VIEWS)
+        viewModel.chooseMoveTarget()
+
+        val restored = ISaverHomeViewModel(handle)
+
+        assertEquals(HomeDestination.Browser(source, "来源", HomeTab.VIEWS), restored.state.value.destination)
+        assertEquals(HomeTab.VIEWS, restored.state.value.selectedTab)
+    }
+
+    @Test
     fun `archive destination restores only root path name and source tab`() {
         val handle = SavedStateHandle()
         val source = RootPath.parse("/archives/backup.tar.gz").getOrThrow()

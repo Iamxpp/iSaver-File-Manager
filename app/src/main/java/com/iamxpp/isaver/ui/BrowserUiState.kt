@@ -38,12 +38,21 @@ data class BrowserUiState(
     val sharingFile: Boolean = false,
     val externalFileToShare: ExternalFileGrant? = null,
     val fileShareError: BrowserOperationError? = null,
+    val moveSelection: BrowserMoveSelection? = null,
+    val movingFile: Boolean = false,
+    val movedOutput: DirectoryEntry? = null,
+    val fileMoveError: BrowserOperationError? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {
     val empty: Boolean get() = !loading && !refreshing && errorMessage == null && totalCount == 0
     val selectionMode: Boolean get() = selectedEntries.isNotEmpty()
 }
+
+data class BrowserMoveSelection(
+    val entry: DirectoryEntry,
+    val sourceDirectory: RootPath,
+)
 
 data class BrowserOperationError(
     val code: ErrorCode,
