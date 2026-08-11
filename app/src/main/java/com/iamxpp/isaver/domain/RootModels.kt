@@ -39,6 +39,7 @@ enum class ErrorCode {
     ALREADY_EXISTS,
     NO_SPACE,
     CROSS_DEVICE,
+    MOVE_PARTIAL,
     SOURCE_UNREADABLE,
     COMMAND_FAILED,
     CANCELLED,

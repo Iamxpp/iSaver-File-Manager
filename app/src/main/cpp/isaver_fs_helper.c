@@ -31,6 +31,7 @@ enum {
     X_OUTCOME_UNCERTAIN = 55,
     X_OUTPUT_LIMIT = 57,
     X_CROSS_DEVICE = 58,
+    X_MOVE_PARTIAL = 59,
     X_USAGE = 64,
 };
 
@@ -720,6 +721,20 @@ static int identity_matches(
         (unsigned long long) status->st_ino == inode;
 }
 
+static int regular_file_version_matches(
+    const struct stat *current,
+    const struct stat *initial
+) {
+    return S_ISREG(current->st_mode) &&
+        current->st_dev == initial->st_dev &&
+        current->st_ino == initial->st_ino &&
+        current->st_size == initial->st_size &&
+        current->st_mtim.tv_sec == initial->st_mtim.tv_sec &&
+        current->st_mtim.tv_nsec == initial->st_mtim.tv_nsec &&
+        current->st_ctim.tv_sec == initial->st_ctim.tv_sec &&
+        current->st_ctim.tv_nsec == initial->st_ctim.tv_nsec;
+}
+
 static int is_emulated_storage_fd(int fd) {
     struct statfs file_system;
     if (fstatfs(fd, &file_system) != 0) return 0;
@@ -1357,6 +1372,137 @@ static int copy_file_publish(int argc, char **argv) {
     return result;
 }
 
+static int move_cross_device_noreplace(int argc, char **argv) {
+    if (argc != 18 || !basename_ok(argv[4]) || !stage_name_ok(argv[11]) ||
+        !basename_ok(argv[12])) {
+        return X_USAGE;
+    }
+    unsigned long long source_parent_device;
+    unsigned long long source_parent_inode;
+    unsigned long long source_device;
+    unsigned long long source_inode;
+    unsigned long long target_parent_device;
+    unsigned long long target_parent_inode;
+    unsigned long long stage_device;
+    unsigned long long stage_inode;
+    unsigned long long expected_size;
+    if (!parse_identity(argv, 5, &source_parent_device, &source_parent_inode) ||
+        !parse_identity(argv, 7, &source_device, &source_inode) ||
+        !parse_identity(argv, 13, &target_parent_device, &target_parent_inode) ||
+        !parse_identity(argv, 15, &stage_device, &stage_inode) ||
+        !parse_u64(argv[17], &expected_size)) {
+        return X_USAGE;
+    }
+
+    int target_parent_fd = open_parent(
+        argv[9], argv[10], target_parent_device, target_parent_inode
+    );
+    if (target_parent_fd < 0) return -target_parent_fd;
+    int stage_fd = open_stage(target_parent_fd, argv[11], stage_device, stage_inode);
+    if (stage_fd < 0) {
+        close(target_parent_fd);
+        return -stage_fd;
+    }
+
+    int source_parent_fd = open_parent(
+        argv[2], argv[3], source_parent_device, source_parent_inode
+    );
+    if (source_parent_fd < 0) {
+        int cleanup = finish_stage(target_parent_fd, stage_fd, argv[11]);
+        close(target_parent_fd);
+        return cleanup == 0 ? -source_parent_fd : X_OUTCOME_UNCERTAIN;
+    }
+    int source_fd;
+    do {
+        source_fd = openat(
+            source_parent_fd,
+            argv[4],
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+        );
+    } while (source_fd < 0 && errno == EINTR);
+    if (source_fd < 0) {
+        int source_error = errno == ENOENT ? X_NOT_FOUND : X_SOURCE_UNREADABLE;
+        close(source_parent_fd);
+        int cleanup = finish_stage(target_parent_fd, stage_fd, argv[11]);
+        close(target_parent_fd);
+        return cleanup == 0 ? source_error : X_OUTCOME_UNCERTAIN;
+    }
+
+    struct stat source_initial;
+    if (retry_fstat(source_fd, &source_initial) != 0 ||
+        !S_ISREG(source_initial.st_mode) ||
+        source_initial.st_size < 0 ||
+        !identity_matches(&source_initial, source_device, source_inode) ||
+        (unsigned long long) source_initial.st_size != expected_size) {
+        close(source_fd);
+        close(source_parent_fd);
+        int cleanup = finish_stage(target_parent_fd, stage_fd, argv[11]);
+        close(target_parent_fd);
+        return cleanup == 0 ? X_SOURCE_CHANGED : X_OUTCOME_UNCERTAIN;
+    }
+
+    int result = copy_publish_from_fd(
+        target_parent_fd,
+        stage_fd,
+        argv[11],
+        argv[12],
+        source_fd,
+        expected_size,
+        &source_initial
+    );
+    if (result != 0) {
+        close(source_fd);
+        close(source_parent_fd);
+        return result;
+    }
+
+    struct stat held_after_publish;
+    struct stat path_after_publish;
+    if (retry_fstat(source_fd, &held_after_publish) != 0 ||
+        retry_fstatat(
+            source_parent_fd, argv[4], &path_after_publish, AT_SYMLINK_NOFOLLOW
+        ) != 0 ||
+        !regular_file_version_matches(&held_after_publish, &source_initial) ||
+        !regular_file_version_matches(&path_after_publish, &source_initial)) {
+        close(source_fd);
+        close(source_parent_fd);
+        return X_MOVE_PARTIAL;
+    }
+
+    if (unlinkat(source_parent_fd, argv[4], 0) != 0) {
+        struct stat retained;
+        int source_retained = retry_fstatat(
+            source_parent_fd, argv[4], &retained, AT_SYMLINK_NOFOLLOW
+        ) == 0 && regular_file_version_matches(&retained, &source_initial);
+        close(source_fd);
+        close(source_parent_fd);
+        return source_retained ? X_MOVE_PARTIAL : X_OUTCOME_UNCERTAIN;
+    }
+
+    struct stat source_after_delete;
+    if (retry_fstatat(
+        source_parent_fd, argv[4], &source_after_delete, AT_SYMLINK_NOFOLLOW
+    ) == 0) {
+        if (identity_matches(&source_after_delete, source_device, source_inode)) {
+            close(source_fd);
+            close(source_parent_fd);
+            return X_OUTCOME_UNCERTAIN;
+        }
+    } else if (errno != ENOENT) {
+        close(source_fd);
+        close(source_parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (fsync(source_parent_fd) != 0 && errno != EINVAL && errno != EROFS) {
+        close(source_fd);
+        close(source_parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    close(source_fd);
+    close(source_parent_fd);
+    return 0;
+}
+
 static int remove_stage(int argc, char **argv) {
     if (argc != 9 || !stage_name_ok(argv[4])) return X_USAGE;
     unsigned long long parent_device;
@@ -1847,6 +1993,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
     if (strcmp(argv[1], "copy-file-publish") == 0) return copy_file_publish(argc, argv);
+    if (strcmp(argv[1], "move-cross-device-noreplace") == 0) {
+        return move_cross_device_noreplace(argc, argv);
+    }
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);
     if (strcmp(argv[1], "move-noreplace") == 0) return move_noreplace(argc, argv);
     if (strcmp(argv[1], "prepare-extract-stage") == 0) return prepare_extraction_stage(argc, argv);

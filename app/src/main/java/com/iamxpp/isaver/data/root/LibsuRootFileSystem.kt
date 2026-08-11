@@ -517,6 +517,16 @@ class LibsuRootFileSystem internal constructor(
         ).getOrElse {
             return uncertainMove("Move helper exceeded its bounded deadline or lost its result")
         }
+        if (execution.exitCode == 58) {
+            return moveAcrossDevices(
+                source = source,
+                name = name,
+                sourceParent = preparedSourceParent,
+                sourceIdentity = sourceIdentity.value,
+                targetDirectory = targetDirectory,
+                targetParent = preparedTargetParent,
+            )
+        }
         if (execution.exitCode != 0) {
             return mapExitCode(execution.exitCode, execution.stderr, "无法移动文件", "move-noreplace")
         }
@@ -547,6 +557,129 @@ class LibsuRootFileSystem internal constructor(
             return uncertainMove("Move result could not be fully reconciled")
         }
         return targetAfter
+    }
+
+    private suspend fun moveAcrossDevices(
+        source: DirectoryEntry,
+        name: EntryName,
+        sourceParent: PreparedTransferDirectory,
+        sourceIdentity: RootFileIdentity,
+        targetDirectory: RootPath,
+        targetParent: PreparedTransferDirectory,
+    ): OperationResult<DirectoryEntry> {
+        val expectedSize = source.sizeBytes ?: return invalidMoveSource("Move source size was unavailable")
+        val stageName = stageNameFactory()
+        if (!STAGE_NAME.matches(stageName)) {
+            return failure(ErrorCode.COMMAND_FAILED, "无法准备目标目录", "Invalid generated stage name")
+        }
+        val preparedStage = prepareStage(targetParent, stageName, ::uncertainMove)
+        if (preparedStage !is OperationResult.Success) return preparedStage as OperationResult.Failure
+        val stage = preparedStage.value
+        try {
+            currentCoroutineContext().ensureActive()
+        } catch (cancelled: CancellationException) {
+            cleanupStage(targetParent, stage)
+            throw cancelled
+        }
+
+        val operation = "move-cross-device-noreplace"
+        val command = transferHelper.moveCrossDeviceNoReplace(
+            sourceOriginal = sourceParent.original.value,
+            sourceCanonical = sourceParent.canonical.value,
+            sourceName = name,
+            sourceParentIdentity = sourceParent.identity,
+            sourceIdentity = sourceIdentity,
+            targetOriginal = targetParent.original.value,
+            targetCanonical = targetParent.canonical.value,
+            stage = stage,
+            finalName = name,
+            targetParentIdentity = targetParent.identity,
+            expectedSizeBytes = expectedSize,
+            timeoutMillis = transferDeadlineMillis(expectedSize),
+        )
+        val callerJob = currentCoroutineContext()[Job]
+        val dispatch = awaitTransferExecution(command, callerJob, transferDeadlineMillis(expectedSize))
+        if (!dispatch.dispatched) {
+            cleanupStage(targetParent, stage)
+            throw CancellationException("Cross-device move cancelled before dispatch")
+        }
+        return withContext(NonCancellable) {
+            val execution = dispatch.result.getOrElse { error ->
+                val reason = when {
+                    dispatch.waitTimedOut -> "Cross-device move wait timed out before backend completion"
+                    dispatch.callerCancelled -> "Cross-device move caller was cancelled after dispatch"
+                    error is java.net.SocketTimeoutException -> "Cross-device move backend timed out after dispatch"
+                    else -> "Cross-device move result was lost"
+                }
+                logRootUncertain(operation, reason)
+                return@withContext reconcileLostTransfer(
+                    targetParent, stage, name, reason, ::uncertainMove,
+                )
+            }
+            if (execution.exitCode == 55 || execution.exitCode == 137) {
+                logRootUncertain(operation, "Native helper reported exit ${execution.exitCode}")
+                return@withContext reconcileLostTransfer(
+                    targetParent,
+                    stage,
+                    name,
+                    "Native helper reported an uncertain cross-device move outcome",
+                    ::uncertainMove,
+                )
+            }
+            if (execution.exitCode != 0 && execution.exitCode != 59) {
+                return@withContext mapExitCode(
+                    execution.exitCode,
+                    execution.stderr,
+                    "无法移动文件",
+                    operation,
+                )
+            }
+
+            val published = parsePublishedIdentity(execution.stdout)
+            if (published !is OperationResult.Success || published.value.sizeBytes != expectedSize) {
+                return@withContext uncertainMove("Malformed cross-device move publication identity")
+            }
+            val targetPath = EntryName.join(targetParent.canonical, name)
+            val targetAfter = stat(targetPath)
+            val targetIdentityAfter = readIdentity(targetPath)
+            val sourceParentAfter = canonicalize(sourceParent.original)
+            val targetParentAfter = canonicalize(targetDirectory)
+            if (
+                targetAfter !is OperationResult.Success ||
+                targetAfter.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+                targetAfter.value.symbolicLink ||
+                targetAfter.value.sizeBytes != expectedSize ||
+                targetIdentityAfter !is OperationResult.Success ||
+                targetIdentityAfter.value != published.value.identity ||
+                sourceParentAfter !is OperationResult.Success ||
+                sourceParentAfter.value != sourceParent.canonical ||
+                targetParentAfter !is OperationResult.Success ||
+                targetParentAfter.value != targetParent.canonical
+            ) {
+                return@withContext uncertainMove("Cross-device move target could not be fully reconciled")
+            }
+            if (execution.exitCode == 59) {
+                return@withContext failure(
+                    ErrorCode.MOVE_PARTIAL,
+                    "文件已复制，但来源未删除",
+                    "Cross-device target was published but the selected source was retained",
+                )
+            }
+
+            val sourcePath = EntryName.join(sourceParent.canonical, name)
+            when (val sourceAfter = stat(sourcePath)) {
+                is OperationResult.Success -> {
+                    val currentIdentity = readIdentity(sourcePath)
+                    if (currentIdentity !is OperationResult.Success || currentIdentity.value == sourceIdentity) {
+                        return@withContext uncertainMove("Cross-device move source still referenced the selected identity")
+                    }
+                }
+                is OperationResult.Failure -> if (sourceAfter.code != ErrorCode.NOT_FOUND) {
+                    return@withContext uncertainMove("Cross-device move source could not be reconciled")
+                }
+            }
+            targetAfter
+        }
     }
 
     override suspend fun copyFileNoReplace(
@@ -791,6 +924,7 @@ class LibsuRootFileSystem internal constructor(
             56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
             55 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
             58 -> failure(ErrorCode.CROSS_DEVICE, "暂不支持跨存储移动", "Move crossed a file-system boundary")
+            59 -> failure(ErrorCode.MOVE_PARTIAL, "文件已复制，但来源未删除", "Move target was published but source removal failed")
             137 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
             else -> if (operation in STREAM_COPY_OPERATIONS && stderr.looksLikeContentReadFailure()) {
                 failure(

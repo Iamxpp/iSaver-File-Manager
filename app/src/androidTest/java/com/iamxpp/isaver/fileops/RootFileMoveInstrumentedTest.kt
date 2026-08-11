@@ -15,7 +15,7 @@ import org.junit.Test
 
 class RootFileMoveInstrumentedTest {
     @Test
-    fun sameFilesystemMoveIsAtomicNoReplaceAndCrossFilesystemIsExplicit() = runBlocking {
+    fun sameFilesystemMoveIsAtomicAndCrossFilesystemMovePublishesBeforeDeletingSource() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
         assertEquals(RootStatus.Available, app.rootSession.check())
         resetTargets(app)
@@ -58,9 +58,9 @@ class RootFileMoveInstrumentedTest {
                 path(SOURCE_DIRECTORY),
                 path(SHARED_TARGET_DIRECTORY),
             )
-            assertEquals(ErrorCode.CROSS_DEVICE, (cross as OperationResult.Failure).code)
-            assertEquals("cross-device", root(app, "cat -- ${quote(CROSS_SOURCE_FILE)}"))
-            assertEquals("missing", root(app, "if [ -e ${quote(SHARED_TARGET_FILE)} ]; then echo present; else echo missing; fi"))
+            assertTrue(cross.toString(), cross is OperationResult.Success)
+            assertEquals("missing", root(app, "if [ -e ${quote(CROSS_SOURCE_FILE)} ]; then echo present; else echo missing; fi"))
+            assertEquals("cross-device", root(app, "cat -- ${quote(SHARED_TARGET_FILE)}"))
         } finally {
             cleanupTargets(app)
         }

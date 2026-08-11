@@ -37,7 +37,7 @@ class LibsuRootFileSystemMoveTest {
     }
 
     @Test
-    fun `cross filesystem result is typed and does not claim a move`() = runTest {
+    fun `cross filesystem move copies publishes and removes source`() = runTest {
         val runner = MoveRunner(moveResult = RootCommandResult(58, emptyList(), emptyList()))
         val result = fileSystem(runner, StandardTestDispatcher(testScheduler)).moveFileNoReplace(
             source = source("report.txt"),
@@ -45,8 +45,27 @@ class LibsuRootFileSystemMoveTest {
             targetDirectory = path(TARGET_DIRECTORY),
         )
 
-        assertEquals(result.toString(), ErrorCode.CROSS_DEVICE, (result as OperationResult.Failure).code)
-        assertFalse(runner.moved)
+        assertTrue(result.toString(), result is OperationResult.Success)
+        assertTrue(runner.crossMoveCommand.orEmpty().contains("'move-cross-device-noreplace'"))
+        assertTrue(runner.sourceRemoved)
+    }
+
+    @Test
+    fun `published target with retained source reports partial move`() = runTest {
+        val runner = MoveRunner(
+            moveResult = RootCommandResult(58, emptyList(), emptyList()),
+            crossMoveResult = RootCommandResult(59, listOf("1:30:12"), emptyList()),
+        )
+        val result = fileSystem(runner, StandardTestDispatcher(testScheduler)).moveFileNoReplace(
+            source = source("report.txt"),
+            sourceDirectory = path(SOURCE_DIRECTORY),
+            targetDirectory = path(TARGET_DIRECTORY),
+        )
+
+        assertEquals(result.toString(), ErrorCode.MOVE_PARTIAL, (result as OperationResult.Failure).code)
+        assertEquals("文件已复制，但来源未删除", result.userMessage)
+        assertTrue(runner.published)
+        assertFalse(runner.sourceRemoved)
     }
 
     @Test
@@ -83,12 +102,25 @@ class LibsuRootFileSystemMoveTest {
 
     private inner class MoveRunner(
         private val moveResult: RootCommandResult = RootCommandResult(0, listOf("1:30"), emptyList()),
+        private val crossMoveResult: RootCommandResult = RootCommandResult(0, listOf("1:30:12"), emptyList()),
         private val targetExists: Boolean = false,
     ) : RootCommandRunner, RootTransferCommandRunner {
         var moved = false
         var moveCommand: String? = null
+        var crossMoveCommand: String? = null
+        var published = false
+        var sourceRemoved = false
 
         override suspend fun run(command: String): RootCommandResult {
+            if (command.contains("'move-cross-device-noreplace'")) {
+                crossMoveCommand = command
+                published = crossMoveResult.exitCode == 0 || crossMoveResult.exitCode == 59
+                sourceRemoved = crossMoveResult.exitCode == 0
+                return crossMoveResult
+            }
+            if (command.contains("'prepare-stage'")) {
+                return RootCommandResult(0, listOf("1:70"), emptyList())
+            }
             if (command.contains("'move-noreplace'")) {
                 moveCommand = command
                 if (moveResult.exitCode == 0) moved = true
@@ -114,11 +146,11 @@ class LibsuRootFileSystemMoveTest {
             SOURCE_DIRECTORY -> successRecord("source", target, EntryType.DIRECTORY, null, writable = true)
             TARGET_DIRECTORY -> successRecord("target", target, EntryType.DIRECTORY, null, writable = true)
             "$SOURCE_DIRECTORY/a';\n.txt",
-            "$SOURCE_DIRECTORY/report.txt" -> if (moved) missing() else successRecord(
+            "$SOURCE_DIRECTORY/report.txt" -> if (moved || sourceRemoved) missing() else successRecord(
                 target.substringAfterLast('/'), target, EntryType.FILE, 12L,
             )
             "$TARGET_DIRECTORY/a';\n.txt",
-            "$TARGET_DIRECTORY/report.txt" -> if (moved || targetExists) successRecord(
+            "$TARGET_DIRECTORY/report.txt" -> if (moved || published || targetExists) successRecord(
                 target.substringAfterLast('/'), target, EntryType.FILE, 12L,
             ) else missing()
             else -> error("Unexpected stat target: $target")
