@@ -53,6 +53,30 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun longPressFileOpensActionSheetAndForwardsShare() {
+        val file = entry("report.pdf", EntryType.FILE)
+        var selected: DirectoryEntry? = null
+        var shared: DirectoryEntry? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onSelectEntry = { selected = it },
+                onShareEntry = { shared = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
+        compose.onNodeWithText("文件操作").assertIsDisplayed()
+        compose.onNodeWithText("分享").assertIsDisplayed().performClick()
+
+        compose.runOnIdle {
+            assertEquals(file, selected)
+            assertEquals(file, shared)
+        }
+    }
+
+    @Test
     fun saveModeReplacesBrowserOverflowAndForwardsClick() {
         var saved = false
         compose.setContent {

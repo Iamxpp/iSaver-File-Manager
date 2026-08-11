@@ -42,6 +42,9 @@ class BrowserViewModel(
     private val exportFile: suspend (DirectoryEntry) -> OperationResult<ExternalFileGrant> = {
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法打开文件")
     },
+    private val shareFile: suspend (DirectoryEntry) -> OperationResult<ExternalFileGrant> = {
+        OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法分享文件")
+    },
     private val revokeExport: (ExternalFileGrant) -> Unit = {},
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
@@ -53,6 +56,8 @@ class BrowserViewModel(
     private var createDirectoryJob: Job? = null
     private var openFileJob: Job? = null
     private var openFileGeneration = 0L
+    private var shareFileJob: Job? = null
+    private var shareFileGeneration = 0L
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
     private var presentedEntries: List<DirectoryEntry> = emptyList()
@@ -85,6 +90,7 @@ class BrowserViewModel(
             selectEntry(entry)
             return
         }
+        cancelExternalShare()
         val openRequest = cancelExternalOpen()
         when (entry.type) {
             EntryType.DIRECTORY -> enterDirectory(entry)
@@ -117,6 +123,7 @@ class BrowserViewModel(
     fun toggleSelection(entry: DirectoryEntry) = selectEntry(entry)
 
     fun clearSelection() {
+        cancelExternalShare()
         mutableState.value = mutableState.value.copy(selectedEntries = emptySet())
     }
 
@@ -142,6 +149,74 @@ class BrowserViewModel(
 
     fun dismissFileOpenError() {
         mutableState.value = mutableState.value.copy(fileOpenError = null)
+    }
+
+    fun shareEntry(entry: DirectoryEntry) {
+        val request = cancelExternalShare()
+        cancelExternalOpen()
+        if (entry.type != EntryType.FILE || !entry.readable || entry.symbolicLink) {
+            mutableState.value = mutableState.value.copy(
+                fileShareError = BrowserOperationError(ErrorCode.SOURCE_UNREADABLE, "无法分享此文件"),
+            )
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            sharingFile = true,
+            externalFileToShare = null,
+            fileShareError = null,
+        )
+        shareFileJob = viewModelScope.launch {
+            try {
+                when (val result = shareFile(entry)) {
+                    is OperationResult.Failure -> if (request == shareFileGeneration) {
+                        mutableState.value = mutableState.value.copy(
+                            sharingFile = false,
+                            fileShareError = BrowserOperationError(result.code, result.userMessage),
+                        )
+                    }
+                    is OperationResult.Success -> {
+                        if (request != shareFileGeneration) {
+                            revokeExport(result.value)
+                            return@launch
+                        }
+                        mutableState.value = mutableState.value.copy(
+                            sharingFile = false,
+                            externalFileToShare = result.value,
+                        )
+                        recordSuccessfulFileAccess(entry)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                if (request == shareFileGeneration) {
+                    mutableState.value = mutableState.value.copy(sharingFile = false)
+                }
+                throw cancelled
+            } catch (_: Exception) {
+                if (request == shareFileGeneration) {
+                    mutableState.value = mutableState.value.copy(
+                        sharingFile = false,
+                        fileShareError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "无法分享文件"),
+                    )
+                }
+            }
+        }
+    }
+
+    fun completeExternalShare(grant: ExternalFileGrant, launched: Boolean) {
+        if (mutableState.value.externalFileToShare?.token != grant.token) return
+        if (!launched) revokeExport(grant)
+        mutableState.value = mutableState.value.copy(
+            externalFileToShare = null,
+            selectedEntries = if (launched) emptySet() else mutableState.value.selectedEntries,
+            fileShareError = if (launched) null else BrowserOperationError(
+                ErrorCode.COMMAND_FAILED,
+                "没有可接收此文件的应用",
+            ),
+        )
+    }
+
+    fun dismissFileShareError() {
+        mutableState.value = mutableState.value.copy(fileShareError = null)
     }
 
     fun compress(outputName: String) {
@@ -282,6 +357,7 @@ class BrowserViewModel(
         val request = ++generation
         loadJob?.cancel()
         cancelExternalOpen()
+        cancelExternalShare()
         resetPresentationWindow()
         val cached = snapshotCache.get(path)
         val cachedSnapshot = cached?.snapshot
@@ -499,6 +575,17 @@ class BrowserViewModel(
             externalFileToOpen = null,
         )
         return openFileGeneration
+    }
+
+    private fun cancelExternalShare(): Long {
+        shareFileGeneration += 1L
+        shareFileJob?.cancel()
+        mutableState.value.externalFileToShare?.let(revokeExport)
+        mutableState.value = mutableState.value.copy(
+            sharingFile = false,
+            externalFileToShare = null,
+        )
+        return shareFileGeneration
     }
 
     private fun displayTitle(path: RootPath): String = when {

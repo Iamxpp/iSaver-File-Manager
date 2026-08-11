@@ -75,6 +75,50 @@ class ExternalFileRegistryTest {
         assertTrue(shortToken.issue(cached()).isFailure)
     }
 
+    @Test
+    fun `share grant uses a bounded thirty minute ttl and scheduled cleanup`() {
+        var now = 2_000L
+        var scheduledToken: String? = null
+        var scheduledDelay: Long? = null
+        var scheduledCleanup: (() -> Unit)? = null
+        val discarded = mutableListOf<CachedExportFile>()
+        val cached = cached()
+        val registry = ExternalFileRegistry(
+            authority = "com.iamxpp.isaver.external-file",
+            validate = { true },
+            onDiscard = discarded::add,
+            nowMillis = { now },
+            randomBytes = { ByteArray(32) { 0xcd.toByte() } },
+            scheduleExpiry = { token, delayMillis, cleanup ->
+                scheduledToken = token
+                scheduledDelay = delayMillis
+                scheduledCleanup = cleanup
+            },
+        )
+
+        assertTrue(registry.issue(cached, ttlMillis = 0L).isFailure)
+        val grant = registry.issue(
+            cached,
+            ttlMillis = ExternalFileRegistry.SHARE_TTL_MILLIS,
+        ).getOrThrow()
+
+        assertEquals(grant.token, scheduledToken)
+        assertEquals(ExternalFileRegistry.SHARE_TTL_MILLIS, scheduledDelay)
+        assertSame(cached, registry.peek(grant.token, now + ExternalFileRegistry.SHARE_TTL_MILLIS - 1L))
+
+        now += ExternalFileRegistry.SHARE_TTL_MILLIS
+        scheduledCleanup!!.invoke()
+
+        assertNull(registry.peek(grant.token))
+        assertEquals(listOf(cached), discarded)
+        assertTrue(
+            registry.issue(
+                cached(),
+                ttlMillis = ExternalFileRegistry.MAX_TTL_MILLIS + 1L,
+            ).isFailure,
+        )
+    }
+
     @After
     fun cleanup() {
         roots.forEach(File::deleteRecursively)

@@ -1,6 +1,7 @@
 package com.iamxpp.isaver.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,11 +17,17 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,8 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
@@ -51,11 +60,14 @@ import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.ui.theme.ISaverBackground
 import com.iamxpp.isaver.ui.theme.ISaverBlue
 import com.iamxpp.isaver.ui.theme.ISaverCard
+import com.iamxpp.isaver.ui.theme.ISaverDivider
+import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 import java.text.DateFormat
 import java.util.Date
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun BrowserScreen(
     state: BrowserUiState,
     onEnterDirectory: (DirectoryEntry) -> Unit,
@@ -73,6 +85,8 @@ fun BrowserScreen(
     onClearSelection: () -> Unit = {},
     onDismissFileInfo: () -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
+    onShareEntry: ((DirectoryEntry) -> Unit)? = null,
+    onDismissFileShareError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
@@ -88,6 +102,11 @@ fun BrowserScreen(
     var createDialogVisible by remember { mutableStateOf(false) }
     var compressDialogVisible by remember { mutableStateOf(false) }
     var serverDialogVisible by remember { mutableStateOf(false) }
+    var actionEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
+
+    LaunchedEffect(state.currentPath) {
+        actionEntry = null
+    }
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
         FilesPageHeader(
@@ -169,6 +188,10 @@ fun BrowserScreen(
             onToggleSelection = onToggleSelection,
             onOpenEntry = onOpenEntry,
             onSelectEntry = onSelectEntry,
+            onLongPressEntry = { entry ->
+                if (entry !in state.selectedEntries) onSelectEntry(entry)
+                actionEntry = entry
+            },
             modifier = Modifier.weight(1f),
         )
     }
@@ -200,6 +223,27 @@ fun BrowserScreen(
             },
         )
     }
+    actionEntry?.let { entry ->
+        FileActionsSheet(
+            entry = entry,
+            shareVisible = onShareEntry != null && entry.type == EntryType.FILE,
+            shareEnabled = !state.sharingFile,
+            compressVisible = onCompress != null,
+            onShare = {
+                actionEntry = null
+                onShareEntry?.invoke(entry)
+            },
+            onCompress = {
+                actionEntry = null
+                compressDialogVisible = true
+            },
+            onClearSelection = {
+                actionEntry = null
+                onClearSelection()
+            },
+            onDismiss = { actionEntry = null },
+        )
+    }
     state.createDirectoryError?.let {
         MessageDialog(it.userMessage, "关闭", onDismissCreateError)
     }
@@ -211,6 +255,7 @@ fun BrowserScreen(
     }
     state.fileInfo?.let { FileInfoDialog(it, onDismissFileInfo) }
     state.fileOpenError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileOpenError) }
+    state.fileShareError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileShareError) }
     when (remoteConnectionState) {
         is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
             state = remoteConnectionState,
@@ -237,6 +282,7 @@ internal fun BrowserContent(
     onToggleSelection: (DirectoryEntry) -> Unit = {},
     onOpenEntry: (DirectoryEntry) -> Unit = onToggleSelection,
     onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
+    onLongPressEntry: (DirectoryEntry) -> Unit = onSelectEntry,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize().background(ISaverCard)) {
@@ -262,7 +308,7 @@ internal fun BrowserContent(
                         else if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
                         else onOpenEntry(entry)
                     },
-                    onLongClick = { onSelectEntry(entry) },
+                    onLongClick = { onLongPressEntry(entry) },
                     modifier = targetModifier(state, entry),
                 )
             }
@@ -279,7 +325,7 @@ internal fun BrowserContent(
                             else if (entry.type == EntryType.DIRECTORY) onEnterDirectory(entry)
                             else onOpenEntry(entry)
                         },
-                        onLongClick = { onSelectEntry(entry) },
+                        onLongClick = { onLongPressEntry(entry) },
                         modifier = targetModifier(state, entry),
                     )
                 }
@@ -302,7 +348,90 @@ internal fun BrowserContent(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
             )
         }
+        if (state.sharingFile) {
+            Text(
+                "正在准备分享文件",
+                color = ISaverSecondaryText,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            )
+        }
     }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun FileActionsSheet(
+    entry: DirectoryEntry,
+    shareVisible: Boolean,
+    shareEnabled: Boolean,
+    compressVisible: Boolean,
+    onShare: () -> Unit,
+    onCompress: () -> Unit,
+    onClearSelection: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = ISaverCard,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Text(
+                text = "文件操作",
+                color = ISaverPrimaryText,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            Text(
+                text = entry.name,
+                color = ISaverSecondaryText,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            )
+            HorizontalDivider(color = ISaverDivider)
+            if (shareVisible) {
+                FileActionRow(
+                    title = "分享",
+                    description = "分享到其他应用",
+                    enabled = shareEnabled,
+                    onClick = onShare,
+                )
+            }
+            if (compressVisible) {
+                FileActionRow(
+                    title = "压缩",
+                    description = "在当前目录创建 ZIP",
+                    onClick = onCompress,
+                )
+            }
+            HorizontalDivider(color = ISaverDivider)
+            TextButton(
+                onClick = onClearSelection,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("取消选择")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileActionRow(
+    title: String,
+    description: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(description) },
+        colors = ListItemDefaults.colors(containerColor = ISaverCard),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick),
+    )
 }
 
 private fun targetModifier(state: BrowserUiState, entry: DirectoryEntry): Modifier =

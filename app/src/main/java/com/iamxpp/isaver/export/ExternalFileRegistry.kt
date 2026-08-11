@@ -28,6 +28,7 @@ class ExternalFileRegistry internal constructor(
     private val randomBytes: () -> ByteArray = {
         ByteArray(TOKEN_BYTES).also(SecureRandom()::nextBytes)
     },
+    private val scheduleExpiry: (String, Long, () -> Unit) -> Unit = { _, _, _ -> },
 ) {
     private data class Entry(
         val cached: CachedExportFile,
@@ -37,14 +38,24 @@ class ExternalFileRegistry internal constructor(
     private val lock = Any()
     private val entries = mutableMapOf<String, Entry>()
 
-    fun issue(cached: CachedExportFile): Result<ExternalFileGrant> = runCatching {
+    fun issue(
+        cached: CachedExportFile,
+        ttlMillis: Long = OPEN_TTL_MILLIS,
+    ): Result<ExternalFileGrant> = runCatching {
         require(validate(cached))
+        require(ttlMillis in 1L..MAX_TTL_MILLIS)
         val bytes = randomBytes()
         require(bytes.size == TOKEN_BYTES)
         val token = bytes.toLowerHex()
-        val expiresAtMillis = Math.addExact(nowMillis(), TTL_MILLIS)
+        val expiresAtMillis = Math.addExact(nowMillis(), ttlMillis)
         synchronized(lock) {
             check(entries.putIfAbsent(token, Entry(cached, expiresAtMillis)) == null)
+        }
+        try {
+            scheduleExpiry(token, ttlMillis) { expire(token) }
+        } catch (error: Exception) {
+            synchronized(lock) { entries.remove(token) }?.cached?.let(onDiscard)
+            throw error
         }
         ExternalFileGrant(
             contentUri = "content://$authority/$FILE_SEGMENT/$token",
@@ -63,6 +74,16 @@ class ExternalFileRegistry internal constructor(
     fun revoke(token: String) {
         if (!TOKEN.matches(token)) return
         synchronized(lock) { entries.remove(token) }?.cached?.let(onDiscard)
+    }
+
+    fun expire(token: String, nowMillis: Long = this.nowMillis()) {
+        if (!TOKEN.matches(token)) return
+        val expired = synchronized(lock) {
+            val entry = entries[token] ?: return
+            if (nowMillis < entry.expiresAtMillis) return
+            entries.remove(token)
+        }
+        expired?.cached?.let(onDiscard)
     }
 
     private fun resolve(token: String, nowMillis: Long, consume: Boolean): CachedExportFile? {
@@ -87,7 +108,10 @@ class ExternalFileRegistry internal constructor(
     }
 
     companion object {
-        const val TTL_MILLIS = 60_000L
+        const val OPEN_TTL_MILLIS = 60_000L
+        const val SHARE_TTL_MILLIS = 30L * 60L * 1_000L
+        const val MAX_TTL_MILLIS = 2L * 60L * 60L * 1_000L
+        const val TTL_MILLIS = OPEN_TTL_MILLIS
         const val FILE_SEGMENT = "file"
         private const val TOKEN_BYTES = 32
         private const val HEX = "0123456789abcdef"

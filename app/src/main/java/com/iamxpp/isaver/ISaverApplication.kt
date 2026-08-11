@@ -43,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 import dagger.hilt.android.HiltAndroidApp
@@ -158,6 +159,12 @@ class ISaverApplication : Application() {
             authority = "$packageName.external-file",
             validate = rootExportCache::validateNow,
             onDiscard = rootExportCache::discardNow,
+            scheduleExpiry = { _, delayMillis, cleanup ->
+                applicationScope.launch {
+                    delay(delayMillis)
+                    cleanup()
+                }
+            },
         )
     }
     internal val rootExportRepository: RootExportRepository by lazy {

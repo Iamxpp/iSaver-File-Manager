@@ -35,6 +35,9 @@ data class BrowserUiState(
     val openingFile: Boolean = false,
     val externalFileToOpen: ExternalFileGrant? = null,
     val fileOpenError: BrowserOperationError? = null,
+    val sharingFile: Boolean = false,
+    val externalFileToShare: ExternalFileGrant? = null,
+    val fileShareError: BrowserOperationError? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {

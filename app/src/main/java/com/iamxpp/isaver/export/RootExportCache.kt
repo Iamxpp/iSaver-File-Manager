@@ -166,7 +166,7 @@ class RootExportCache internal constructor(
 
     private fun cacheFailure(): OperationResult.Failure = OperationResult.Failure(
         ErrorCode.COMMAND_FAILED,
-        "无法准备文件打开缓存",
+        "无法准备文件缓存",
     )
 
     private companion object {

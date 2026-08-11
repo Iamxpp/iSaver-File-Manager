@@ -1055,6 +1055,67 @@ class BrowserViewModelTest {
         assertEquals(ErrorCode.SOURCE_UNREADABLE, vm.state.value.fileOpenError?.code)
     }
 
+    @Test fun `single file share emits a dedicated grant and clears selection after chooser launch`() = runTest {
+        val file = entry("report.pdf", EntryType.FILE)
+        val grant = ExternalFileGrant(
+            contentUri = "content://com.iamxpp.isaver.external-file/file/${"12".repeat(32)}",
+            token = "12".repeat(32),
+            displayName = file.name,
+            mimeType = "application/pdf",
+        )
+        val shared = mutableListOf<DirectoryEntry>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            shareFile = { entry ->
+                shared += entry
+                OperationResult.Success(grant)
+            },
+        )
+        vm.selectEntry(file)
+
+        vm.shareEntry(file)
+        advanceUntilIdle()
+
+        assertEquals(listOf(file), shared)
+        assertEquals(grant, vm.state.value.externalFileToShare)
+        assertFalse(vm.state.value.sharingFile)
+
+        vm.completeExternalShare(grant, launched = true)
+
+        assertNull(vm.state.value.externalFileToShare)
+        assertTrue(vm.state.value.selectedEntries.isEmpty())
+        assertNull(vm.state.value.fileShareError)
+    }
+
+    @Test fun `failed share chooser launch revokes grant and reports an error`() = runTest {
+        val file = entry("report.pdf", EntryType.FILE)
+        val grant = ExternalFileGrant(
+            contentUri = "content://com.iamxpp.isaver.external-file/file/${"34".repeat(32)}",
+            token = "34".repeat(32),
+            displayName = file.name,
+            mimeType = "application/pdf",
+        )
+        val revoked = mutableListOf<ExternalFileGrant>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            shareFile = { OperationResult.Success(grant) },
+            revokeExport = revoked::add,
+        )
+
+        vm.shareEntry(file)
+        advanceUntilIdle()
+        vm.completeExternalShare(grant, launched = false)
+
+        assertEquals(listOf(grant), revoked)
+        assertEquals("没有可接收此文件的应用", vm.state.value.fileShareError?.userMessage)
+        vm.dismissFileShareError()
+        assertNull(vm.state.value.fileShareError)
+    }
+
     @Test fun `long press selection accepts readable files and directories and rejects unsafe entries`() = runTest {
         val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
         val file = entry("file.txt", EntryType.FILE)

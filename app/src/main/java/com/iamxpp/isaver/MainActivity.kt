@@ -18,6 +18,7 @@ import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.export.ExternalOpenIntentFactory
+import com.iamxpp.isaver.export.ExternalShareIntentFactory
 import kotlinx.coroutines.CoroutineDispatcher
 import com.iamxpp.isaver.ui.RootGateScreen
 import com.iamxpp.isaver.ui.RootGateViewModel
@@ -168,6 +169,24 @@ class MainActivity : ComponentActivity() {
                         browserViewModel.completeExternalOpen(grant, launched)
                     }
 
+                    LaunchedEffect(browserState.externalFileToShare) {
+                        val grant = browserState.externalFileToShare ?: return@LaunchedEffect
+                        val launched = try {
+                            startActivity(
+                                Intent.createChooser(
+                                    ExternalShareIntentFactory.create(grant),
+                                    "分享文件",
+                                ),
+                            )
+                            true
+                        } catch (_: ActivityNotFoundException) {
+                            false
+                        } catch (_: SecurityException) {
+                            false
+                        }
+                        browserViewModel.completeExternalShare(grant, launched)
+                    }
+
                     LaunchedEffect(archiveState.operation) {
                         val success = archiveState.operation as? com.iamxpp.isaver.archive.ArchiveState.Success
                             ?: return@LaunchedEffect
@@ -272,6 +291,8 @@ class MainActivity : ComponentActivity() {
                         onClearBrowserSelection = browserViewModel::clearSelection,
                         onDismissFileInfo = browserViewModel::dismissFileInfo,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
+                        onShareBrowserEntry = browserViewModel::shareEntry,
+                        onDismissFileShareError = browserViewModel::dismissFileShareError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
                         onConnectServer = remoteConnectionViewModel::connect,
@@ -389,6 +410,9 @@ internal class BrowserViewModelFactory(
             },
             exportFile = rootExportRepository?.let { repository -> repository::export } ?: { entry ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法打开文件")
+            },
+            shareFile = rootExportRepository?.let { repository -> repository::share } ?: { entry ->
+                OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法分享文件")
             },
             revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
         ) as T
