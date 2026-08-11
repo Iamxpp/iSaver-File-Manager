@@ -89,6 +89,8 @@ fun BrowserScreen(
     onDismissFileShareError: () -> Unit = {},
     onMoveEntry: ((DirectoryEntry) -> Unit)? = null,
     onDismissFileMoveError: () -> Unit = {},
+    onCopyEntry: ((DirectoryEntry) -> Unit)? = null,
+    onDismissFileCopyError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
@@ -235,6 +237,8 @@ fun BrowserScreen(
             shareEnabled = !state.sharingFile,
             moveVisible = onMoveEntry != null && entry.type == EntryType.FILE,
             moveEnabled = !state.movingFile,
+            copyVisible = onCopyEntry != null && entry.type == EntryType.FILE,
+            copyEnabled = !state.copyingFile,
             compressVisible = onCompress != null,
             onShare = {
                 actionEntry = null
@@ -247,6 +251,10 @@ fun BrowserScreen(
             onMove = {
                 actionEntry = null
                 onMoveEntry?.invoke(entry)
+            },
+            onCopy = {
+                actionEntry = null
+                onCopyEntry?.invoke(entry)
             },
             onClearSelection = {
                 actionEntry = null
@@ -268,6 +276,7 @@ fun BrowserScreen(
     state.fileOpenError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileOpenError) }
     state.fileShareError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileShareError) }
     state.fileMoveError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileMoveError) }
+    state.fileCopyError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileCopyError) }
     when (remoteConnectionState) {
         is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
             state = remoteConnectionState,
@@ -385,10 +394,13 @@ private fun FileActionsSheet(
     shareEnabled: Boolean,
     moveVisible: Boolean,
     moveEnabled: Boolean,
+    copyVisible: Boolean,
+    copyEnabled: Boolean,
     compressVisible: Boolean,
     onShare: () -> Unit,
     onCompress: () -> Unit,
     onMove: () -> Unit,
+    onCopy: () -> Unit,
     onClearSelection: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -427,6 +439,14 @@ private fun FileActionsSheet(
                     description = "选择新的文件夹",
                     enabled = moveEnabled,
                     onClick = onMove,
+                )
+            }
+            if (copyVisible) {
+                FileActionRow(
+                    title = "复制到",
+                    description = "复制到其他文件夹",
+                    enabled = copyEnabled,
+                    onClick = onCopy,
                 )
             }
             if (compressVisible) {

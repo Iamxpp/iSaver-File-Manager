@@ -44,6 +44,12 @@ interface RootFileSystem {
         targetDirectory: RootPath,
     ): OperationResult<DirectoryEntry> = unsupportedMove()
 
+    suspend fun copyFileNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+    ): OperationResult<DirectoryEntry> = unsupportedCopy()
+
     suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> =
         unsupportedExtraction()
 
@@ -80,6 +86,12 @@ private fun unsupportedMove(): OperationResult.Failure = OperationResult.Failure
     ErrorCode.COMMAND_FAILED,
     "不支持安全移动",
     "Same-filesystem move primitive unsupported",
+)
+
+private fun unsupportedCopy(): OperationResult.Failure = OperationResult.Failure(
+    ErrorCode.COMMAND_FAILED,
+    "不支持安全复制",
+    "File copy primitive unsupported",
 )
 
 private fun <T> unsupportedExtraction(): OperationResult<T> = OperationResult.Failure(

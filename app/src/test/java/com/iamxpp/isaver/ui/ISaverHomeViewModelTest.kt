@@ -10,6 +10,41 @@ import org.junit.Test
 
 class ISaverHomeViewModelTest {
     @Test
+    fun `copy target reuses tabs and returns to its source browser`() {
+        val source = HomeDestination.Browser(
+            RootPath.parse("/data/local/tmp/source").getOrThrow(),
+            "来源",
+            HomeTab.BROWSE,
+        )
+        val target = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val viewModel = ISaverHomeViewModel(SavedStateHandle())
+        viewModel.openLocation(source.path, source.title, source.source)
+
+        viewModel.chooseCopyTarget()
+        assertEquals(HomeTab.VIEWS, viewModel.state.value.selectedTab)
+        assertEquals(HomeDestination.CopyTarget(source), viewModel.state.value.destination)
+
+        viewModel.selectTab(HomeTab.BROWSE)
+        viewModel.openLocation(target, "目标", HomeTab.BROWSE)
+        val choosing = viewModel.state.value.destination as HomeDestination.CopyTarget
+        assertEquals(HomeDestination.Browser(target, "目标", HomeTab.BROWSE), choosing.targetBrowser)
+
+        val nestedTarget = RootPath.parse("${target.value}/nested").getOrThrow()
+        viewModel.completeCopy(nestedTarget, "目标")
+        assertEquals(
+            HomeDestination.Browser(nestedTarget, "目标", HomeTab.BROWSE),
+            viewModel.state.value.destination,
+        )
+
+        viewModel.openLocation(source.path, source.title, source.source)
+        viewModel.chooseCopyTarget()
+        viewModel.returnFromCopy()
+
+        assertEquals(source, viewModel.state.value.destination)
+        assertEquals(HomeTab.BROWSE, viewModel.state.value.selectedTab)
+    }
+
+    @Test
     fun `move target reuses tabs and returns to its source browser`() {
         val source = HomeDestination.Browser(
             RootPath.parse("/data/local/tmp/source").getOrThrow(),

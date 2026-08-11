@@ -34,6 +34,11 @@ sealed interface HomeDestination {
         val sourceBrowser: Browser,
         val targetBrowser: Browser? = null,
     ) : HomeDestination
+
+    data class CopyTarget(
+        val sourceBrowser: Browser,
+        val targetBrowser: Browser? = null,
+    ) : HomeDestination
 }
 
 data class ISaverHomeUiState(

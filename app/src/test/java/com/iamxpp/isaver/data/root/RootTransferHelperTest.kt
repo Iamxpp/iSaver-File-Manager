@@ -53,7 +53,7 @@ class RootTransferHelperTest {
     }
 
     @Test
-    fun `native helper allowlists only stdin publication`() {
+    fun `native helper allowlists fixed stream and file publication commands`() {
         val sourceFile = listOf(
             File("app/src/main/cpp/isaver_fs_helper.c"),
             File("src/main/cpp/isaver_fs_helper.c"),
@@ -63,6 +63,7 @@ class RootTransferHelperTest {
             .substringBeforeLast("}")
 
         assertTrue(main.contains("copy-publish-stdin"))
+        assertTrue(main.contains("copy-file-publish"))
         assertFalse(main.contains("strcmp(argv[1], \"copy-publish\")"))
     }
 
@@ -91,6 +92,35 @@ class RootTransferHelperTest {
         assertTrue(command.contains("'a'\\'';\n.txt' '1' '2' '3' '4'"))
         assertTrue(command.endsWith("'/target original' '/target canonical' '5' '6'"))
         assertFalse(command.contains(" mv "))
+        assertFalse(command.contains("sh -c"))
+    }
+
+    @Test
+    fun `file copy command carries source target and stage identities`() {
+        val command = helper.copyFilePublish(
+            sourceOriginal = "/source original",
+            sourceCanonical = "/source canonical",
+            sourceName = com.iamxpp.isaver.domain.EntryName.parse("a';\n.txt").getOrThrow(),
+            sourceParentIdentity = RootFileIdentity(1L, 2L),
+            sourceIdentity = RootFileIdentity(3L, 4L),
+            targetOriginal = "/target original",
+            targetCanonical = "/target canonical",
+            stage = TransferStage(
+                ".isaver-stage-123e4567-e89b-12d3-a456-426614174000",
+                RootFileIdentity(7L, 8L),
+            ),
+            finalName = com.iamxpp.isaver.domain.EntryName.parse("a';\n.txt").getOrThrow(),
+            targetParentIdentity = RootFileIdentity(5L, 6L),
+            expectedSizeBytes = 12L,
+            timeoutMillis = 1_250L,
+        )
+
+        assertTrue(command.startsWith("'/system/bin/timeout' '-s' 'KILL' '1.250'"))
+        assertTrue(command.contains("'copy-file-publish' '/source original' '/source canonical'"))
+        assertTrue(command.contains("'a'\\'';\n.txt' '1' '2' '3' '4'"))
+        assertTrue(command.contains("'/target original' '/target canonical'"))
+        assertTrue(command.endsWith("'5' '6' '7' '8' '12'"))
+        assertFalse(command.contains(" cp "))
         assertFalse(command.contains("sh -c"))
     }
 

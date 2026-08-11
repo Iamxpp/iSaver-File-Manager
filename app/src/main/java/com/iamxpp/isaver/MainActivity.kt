@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             app.recentRepository,
             rootExportRepository = app.rootExportRepository,
             fileMoveRepository = app.fileMoveRepository,
+            fileCopyRepository = app.fileCopyRepository,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -113,6 +114,8 @@ class MainActivity : ComponentActivity() {
                     val destination = homeState.destination
                     val pickerActive = transferState != TransferUiState.Idle
                     val movePickerActive = browserState.moveSelection != null
+                    val copyPickerActive = browserState.copySelection != null
+                    val fileOperationInFlight = browserState.movingFile || browserState.copyingFile
 
                     LaunchedEffect(pickerActive) {
                         if (pickerActive) homeViewModel.selectTab(HomeTab.VIEWS)
@@ -147,6 +150,9 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             is HomeDestination.MoveTarget -> destination.targetBrowser?.let { browser ->
+                                browserViewModel.openRoot(browser.path, browser.title, browser.recordAccess)
+                            }
+                            is HomeDestination.CopyTarget -> destination.targetBrowser?.let { browser ->
                                 browserViewModel.openRoot(browser.path, browser.title, browser.recordAccess)
                             }
                             is HomeDestination.Tab -> Unit
@@ -199,6 +205,13 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(this@MainActivity, "已移动 ${output.name}", Toast.LENGTH_SHORT).show()
                     }
 
+                    LaunchedEffect(browserState.copiedOutput) {
+                        val output = browserState.copiedOutput ?: return@LaunchedEffect
+                        homeViewModel.completeCopy(browserState.currentPath, browserState.rootTitle)
+                        browserViewModel.consumeCopiedOutput()
+                        Toast.makeText(this@MainActivity, "已复制 ${output.name}", Toast.LENGTH_SHORT).show()
+                    }
+
                     LaunchedEffect(archiveState.operation) {
                         val success = archiveState.operation as? com.iamxpp.isaver.archive.ArchiveState.Success
                             ?: return@LaunchedEffect
@@ -218,7 +231,8 @@ class MainActivity : ComponentActivity() {
                                 is HomeDestination.Tab,
                                 is HomeDestination.Archive,
                                 is HomeDestination.ExtractionTarget,
-                                is HomeDestination.MoveTarget -> transferViewModel.clearTarget()
+                                is HomeDestination.MoveTarget,
+                                is HomeDestination.CopyTarget -> transferViewModel.clearTarget()
                             }
                         }
                     }
@@ -237,7 +251,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     fun handleBrowserBack() {
-                        if (browserState.movingFile) return
+                        if (fileOperationInFlight) return
                         if (homeViewModel.onBrowserBack(browserViewModel.back()) == HomeBackResult.EXIT_APP) {
                             if (pickerActive) cancelPicker() else finish()
                         }
@@ -272,11 +286,20 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    fun cancelCopyPicker() {
+                        if (browserViewModel.cancelCopy(restoreSelection = true)) {
+                            homeViewModel.returnFromCopy()
+                        }
+                    }
+
                     BackHandler(
-                        enabled = pickerActive || movePickerActive || destination !is HomeDestination.Tab,
+                        enabled = pickerActive || movePickerActive || copyPickerActive ||
+                            destination !is HomeDestination.Tab,
                     ) {
                         when {
-                            browserState.movingFile -> Unit
+                            fileOperationInFlight -> Unit
+                            copyPickerActive && destination is HomeDestination.CopyTarget &&
+                                destination.targetBrowser == null -> cancelCopyPicker()
                             movePickerActive && destination is HomeDestination.MoveTarget &&
                                 destination.targetBrowser == null -> cancelMovePicker()
                             pickerActive && destination !is HomeDestination.Browser -> cancelPicker()
@@ -288,6 +311,9 @@ class MainActivity : ComponentActivity() {
                             destination is HomeDestination.MoveTarget && destination.targetBrowser != null ->
                                 handleBrowserBack()
                             destination is HomeDestination.MoveTarget -> cancelMovePicker()
+                            destination is HomeDestination.CopyTarget && destination.targetBrowser != null ->
+                                handleBrowserBack()
+                            destination is HomeDestination.CopyTarget -> cancelCopyPicker()
                         }
                     }
                     ISaverHomeScreen(
@@ -297,10 +323,10 @@ class MainActivity : ComponentActivity() {
                         displayMode = browserState.displayMode,
                         sortSpec = browserState.sortSpec,
                         onSelectTab = { tab ->
-                            if (!browserState.movingFile) homeViewModel.selectTab(tab)
+                            if (!fileOperationInFlight) homeViewModel.selectTab(tab)
                         },
                         onOpenLocation = { path, title ->
-                            if (!browserState.movingFile) {
+                            if (!fileOperationInFlight) {
                                 homeViewModel.openLocation(path, title)
                             }
                         },
@@ -311,7 +337,7 @@ class MainActivity : ComponentActivity() {
                         onClearLocationError = locationHomeViewModel::clearAddError,
                         onRevalidateCustomLocation = locationHomeViewModel::revalidateCustomLocation,
                         onEnterDirectory = { entry ->
-                            !browserState.movingFile && browserViewModel.enterDirectory(entry)
+                            !fileOperationInFlight && browserViewModel.enterDirectory(entry)
                         },
                         onBrowserBack = ::handleBrowserBack,
                         onRetryBrowser = browserViewModel::retry,
@@ -343,6 +369,22 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onDismissFileMoveError = browserViewModel::dismissFileMoveError,
+                        onCopyBrowserEntry = { entry ->
+                            if (!pickerActive && !movePickerActive && browserViewModel.beginCopy(entry)) {
+                                homeViewModel.chooseCopyTarget()
+                            }
+                        },
+                        onCopyHere = {
+                            val copy = homeState.destination as? HomeDestination.CopyTarget
+                            if (
+                                copy?.targetBrowser != null &&
+                                browserState.canCreateDirectory &&
+                                browserState.currentPath != copy.sourceBrowser.path
+                            ) {
+                                browserViewModel.copyTo(browserState.currentPath)
+                            }
+                        },
+                        onDismissFileCopyError = browserViewModel::dismissFileCopyError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
                         onConnectServer = remoteConnectionViewModel::connect,
@@ -434,6 +476,7 @@ internal class BrowserViewModelFactory(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val rootExportRepository: com.iamxpp.isaver.export.RootExportRepository? = null,
     private val fileMoveRepository: com.iamxpp.isaver.fileops.FileMoveRepository? = null,
+    private val fileCopyRepository: com.iamxpp.isaver.fileops.FileCopyRepository? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -467,6 +510,9 @@ internal class BrowserViewModelFactory(
             },
             moveFile = fileMoveRepository?.let { repository -> repository::move } ?: { _, _, _ ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法移动文件")
+            },
+            copyFile = fileCopyRepository?.let { repository -> repository::copy } ?: { _, _, _ ->
+                OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法复制文件")
             },
             revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
         ) as T

@@ -59,6 +59,9 @@ fun ISaverHomeScreen(
     onMoveBrowserEntry: ((DirectoryEntry) -> Unit)? = null,
     onMoveHere: () -> Unit = {},
     onDismissFileMoveError: () -> Unit = {},
+    onCopyBrowserEntry: ((DirectoryEntry) -> Unit)? = null,
+    onCopyHere: () -> Unit = {},
+    onDismissFileCopyError: () -> Unit = {},
     onCompress: (String) -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
@@ -118,6 +121,17 @@ fun ISaverHomeScreen(
             label = if (browserState.movingFile) "正在移动" else "移动到这里",
         )
     }
+    val copyDestination = homeState.destination as? HomeDestination.CopyTarget
+    val copyAction = copyDestination?.let {
+        FilesSaveAction(
+            enabled = it.targetBrowser != null &&
+                browserState.canCreateDirectory &&
+                browserState.currentPath != it.sourceBrowser.path &&
+                !browserState.copyingFile,
+            onSave = onCopyHere,
+            label = if (browserState.copyingFile) "正在复制" else "复制到这里",
+        )
+    }
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
         when (homeState.destination) {
@@ -167,6 +181,8 @@ fun ISaverHomeScreen(
                 onDismissFileShareError = onDismissFileShareError,
                 onMoveEntry = if (saveMode) null else onMoveBrowserEntry,
                 onDismissFileMoveError = onDismissFileMoveError,
+                onCopyEntry = if (saveMode) null else onCopyBrowserEntry,
+                onDismissFileCopyError = onDismissFileCopyError,
                 onCompress = onCompress,
                 onDismissCompressionMessage = onDismissCompressionMessage,
                 onConnectServer = onConnectServer,
@@ -274,6 +290,50 @@ fun ISaverHomeScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
+            is HomeDestination.CopyTarget -> if (
+                homeState.selectedTab == HomeTab.BROWSE && copyDestination?.targetBrowser != null
+            ) {
+                BrowserScreen(
+                    state = browserState,
+                    onEnterDirectory = onEnterDirectory,
+                    onBack = onBrowserBack,
+                    onRetry = onRetryBrowser,
+                    onLoadMore = onLoadMore,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onDisplayModeChange = onDisplayModeChange,
+                    onSortChange = onSortChange,
+                    onCreateDirectory = onCreateDirectory,
+                    onDismissFileCopyError = onDismissFileCopyError,
+                    fileActionsEnabled = false,
+                    saveAction = copyAction,
+                    modifier = Modifier.weight(1f),
+                )
+            } else if (homeState.selectedTab == HomeTab.RECENT) {
+                RecentScreen(
+                    state = recentState,
+                    displayMode = displayMode,
+                    onOpen = onOpenRecent,
+                    onRefresh = onRefreshRecent,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                LocationHomeScreen(
+                    state = locationState,
+                    displayMode = displayMode,
+                    onOpenLocation = onOpenLocation,
+                    onAdd = onAddCustomLocation,
+                    onEdit = onEditCustomLocation,
+                    onRemove = onRemoveCustomLocation,
+                    onRetry = onRetryLocations,
+                    onClearAddError = onClearLocationError,
+                    onRevalidate = onRevalidateCustomLocation,
+                    sortSpec = sortSpec,
+                    onDisplayModeChange = onDisplayModeChange,
+                    onSortChange = onSortChange,
+                    saveAction = copyAction,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         if (saveMode) {
             InlineSaveBar(
@@ -288,6 +348,7 @@ fun ISaverHomeScreen(
                     is HomeDestination.Archive,
                     is HomeDestination.ExtractionTarget,
                     is HomeDestination.MoveTarget -> 0
+                    is HomeDestination.CopyTarget -> 0
                 },
                 onStemChange = onStemChange,
                 onExtensionChange = onExtensionChange,

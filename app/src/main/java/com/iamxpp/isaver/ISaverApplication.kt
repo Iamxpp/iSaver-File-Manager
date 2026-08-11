@@ -36,6 +36,7 @@ import com.iamxpp.isaver.export.MimeResolver
 import com.iamxpp.isaver.export.RootExportCache
 import com.iamxpp.isaver.export.RootExportRepository
 import com.iamxpp.isaver.fileops.FileMoveRepository
+import com.iamxpp.isaver.fileops.FileCopyRepository
 import com.iamxpp.isaver.remote.KeystoreCredentialStore
 import com.iamxpp.isaver.remote.RemoteFileSystemFactory
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
@@ -177,6 +178,9 @@ class ISaverApplication : Application() {
     }
     internal val fileMoveRepository: FileMoveRepository by lazy {
         FileMoveRepository(rootFileSystem)
+    }
+    internal val fileCopyRepository: FileCopyRepository by lazy {
+        FileCopyRepository(rootFileSystem)
     }
     internal val remoteCredentialStore by lazy { KeystoreCredentialStore(this) }
     internal val remoteFileSystemFactory by lazy { RemoteFileSystemFactory(remoteCredentialStore) }

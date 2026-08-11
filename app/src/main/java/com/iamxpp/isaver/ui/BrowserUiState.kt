@@ -42,6 +42,10 @@ data class BrowserUiState(
     val movingFile: Boolean = false,
     val movedOutput: DirectoryEntry? = null,
     val fileMoveError: BrowserOperationError? = null,
+    val copySelection: BrowserCopySelection? = null,
+    val copyingFile: Boolean = false,
+    val copiedOutput: DirectoryEntry? = null,
+    val fileCopyError: BrowserOperationError? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {
@@ -50,6 +54,11 @@ data class BrowserUiState(
 }
 
 data class BrowserMoveSelection(
+    val entry: DirectoryEntry,
+    val sourceDirectory: RootPath,
+)
+
+data class BrowserCopySelection(
     val entry: DirectoryEntry,
     val sourceDirectory: RootPath,
 )

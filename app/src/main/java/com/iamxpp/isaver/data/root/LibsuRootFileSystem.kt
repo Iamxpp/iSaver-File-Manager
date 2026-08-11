@@ -325,6 +325,9 @@ class LibsuRootFileSystem internal constructor(
         targetDirectory: RootPath,
         finalName: EntryName,
         expectedSizeBytes: Long,
+        failureMessage: String = "无法完成保存",
+        operation: String = "copy-publish",
+        uncertainResult: (String) -> OperationResult.Failure = ::uncertainTransfer,
         copyCommand: (PreparedTransferDirectory, TransferStage) -> String,
     ):OperationResult<DirectoryEntry>{
         if(expectedSizeBytes<0)return failure(ErrorCode.SOURCE_UNREADABLE,"无法读取来源文件","Negative source size")
@@ -334,7 +337,7 @@ class LibsuRootFileSystem internal constructor(
         val stageName=stageNameFactory()
         if(!STAGE_NAME.matches(stageName))return failure(ErrorCode.COMMAND_FAILED,"无法准备目标目录","Invalid generated stage name")
 
-        val preparedStage=prepareStage(directory,stageName)
+        val preparedStage=prepareStage(directory,stageName,uncertainResult)
         if(preparedStage !is OperationResult.Success)return preparedStage as OperationResult.Failure
         val stage=preparedStage.value
         try{
@@ -360,33 +363,41 @@ class LibsuRootFileSystem internal constructor(
                     error is java.net.SocketTimeoutException->"Copy-publish backend timed out after dispatch"
                     else->"Copy-publish result was lost"
                 }
-                logRootUncertain("copy-publish", reason)
-                return@withContext reconcileLostTransfer(directory,stage,finalName,reason)
+                logRootUncertain(operation, reason)
+                return@withContext reconcileLostTransfer(
+                    directory, stage, finalName, reason, uncertainResult,
+                )
             }
             if(execution.exitCode!=0){
                 if(execution.exitCode==55||execution.exitCode==137){
-                    logRootUncertain("copy-publish", "Native helper reported exit ${execution.exitCode}")
-                    return@withContext reconcileLostTransfer(directory,stage,finalName,"Native helper reported an uncertain outcome")
+                    logRootUncertain(operation, "Native helper reported exit ${execution.exitCode}")
+                    return@withContext reconcileLostTransfer(
+                        directory,
+                        stage,
+                        finalName,
+                        "Native helper reported an uncertain outcome",
+                        uncertainResult,
+                    )
                 }
                 return@withContext mapExitCode(
                     execution.exitCode,
                     execution.stderr,
-                    "无法完成保存",
-                    "copy-publish",
+                    failureMessage,
+                    operation,
                 )
             }
             val published=parsePublishedIdentity(execution.stdout)
-            if(published !is OperationResult.Success)return@withContext uncertainTransfer("Malformed copy-publish result")
-            if(published.value.sizeBytes!=expectedSizeBytes)return@withContext uncertainTransfer("Published size did not match source")
+            if(published !is OperationResult.Success)return@withContext uncertainResult("Malformed copy-publish result")
+            if(published.value.sizeBytes!=expectedSizeBytes)return@withContext uncertainResult("Published size did not match source")
             val finalPath=EntryName.join(directory.canonical,finalName)
             val finalEntry=stat(finalPath)
-            if(finalEntry !is OperationResult.Success)return@withContext uncertainTransfer("Published file could not be verified")
+            if(finalEntry !is OperationResult.Success)return@withContext uncertainResult("Published file could not be verified")
             if(finalEntry.value.type!=com.iamxpp.isaver.domain.EntryType.FILE||finalEntry.value.symbolicLink||finalEntry.value.sizeBytes!=expectedSizeBytes){
-                return@withContext uncertainTransfer("Published path was not the expected regular file")
+                return@withContext uncertainResult("Published path was not the expected regular file")
             }
             val finalIdentity=readIdentity(finalPath)
             if(finalIdentity !is OperationResult.Success||finalIdentity.value!=published.value.identity){
-                return@withContext uncertainTransfer("Published file identity changed")
+                return@withContext uncertainResult("Published file identity changed")
             }
             finalEntry
         }
@@ -538,17 +549,105 @@ class LibsuRootFileSystem internal constructor(
         return targetAfter
     }
 
-    private suspend fun prepareStage(directory:PreparedTransferDirectory,stageName:String):OperationResult<TransferStage>{
+    override suspend fun copyFileNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+    ): OperationResult<DirectoryEntry> {
+        val name = EntryName.parse(source.name).getOrElse { return invalidCopySource() }
+        val expectedSize = source.sizeBytes
+        if (
+            source.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            source.symbolicLink ||
+            !source.readable ||
+            expectedSize == null ||
+            expectedSize < 0L ||
+            source.path != EntryName.join(sourceDirectory, name)
+        ) {
+            return invalidCopySource()
+        }
+        if (sourceDirectory == targetDirectory) {
+            return failure(ErrorCode.ALREADY_EXISTS, "文件已在当前目录", "Copy target matched source parent")
+        }
+        if (RootPathRiskPolicy.isProtected(targetDirectory)) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览", "Protected copy target")
+        }
+
+        val sourceParent = prepareReadableDirectory(sourceDirectory)
+        if (sourceParent !is OperationResult.Success) return sourceParent as OperationResult.Failure
+        val targetParent = prepareWritableDirectory(targetDirectory)
+        if (targetParent !is OperationResult.Success) return targetParent as OperationResult.Failure
+        val preparedSourceParent = sourceParent.value
+        val preparedTargetParent = targetParent.value
+
+        val expectedCanonicalSource = EntryName.join(preparedSourceParent.canonical, name)
+        val currentSource = stat(source.path)
+        if (
+            currentSource !is OperationResult.Success ||
+            currentSource.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            currentSource.value.symbolicLink ||
+            !currentSource.value.readable ||
+            currentSource.value.sizeBytes != expectedSize
+        ) {
+            return invalidCopySource()
+        }
+        val canonicalSource = canonicalize(source.path)
+        if (canonicalSource !is OperationResult.Success || canonicalSource.value != expectedCanonicalSource) {
+            return invalidCopySource("Source no longer mapped to its selected parent")
+        }
+        val sourceIdentity = readIdentity(expectedCanonicalSource)
+        if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
+
+        val targetPath = EntryName.join(preparedTargetParent.canonical, name)
+        when (val target = stat(targetPath)) {
+            is OperationResult.Success -> return failure(
+                ErrorCode.ALREADY_EXISTS,
+                "目标位置已存在同名文件",
+                "Copy target already existed",
+            )
+            is OperationResult.Failure -> if (target.code != ErrorCode.NOT_FOUND) return target
+        }
+
+        return transfer(
+            targetDirectory = targetDirectory,
+            finalName = name,
+            expectedSizeBytes = expectedSize,
+            failureMessage = "无法复制文件",
+            operation = "copy-file-publish",
+            uncertainResult = ::uncertainCopy,
+        ) { directory, stage ->
+            transferHelper.copyFilePublish(
+                sourceOriginal = preparedSourceParent.original.value,
+                sourceCanonical = preparedSourceParent.canonical.value,
+                sourceName = name,
+                sourceParentIdentity = preparedSourceParent.identity,
+                sourceIdentity = sourceIdentity.value,
+                targetOriginal = directory.original.value,
+                targetCanonical = directory.canonical.value,
+                stage = stage,
+                finalName = name,
+                targetParentIdentity = directory.identity,
+                expectedSizeBytes = expectedSize,
+                timeoutMillis = transferDeadlineMillis(expectedSize),
+            )
+        }
+    }
+
+    private suspend fun prepareStage(
+        directory:PreparedTransferDirectory,
+        stageName:String,
+        uncertainResult: (String) -> OperationResult.Failure,
+    ):OperationResult<TransferStage>{
         val command=transferHelper.prepare(
             directory.original.value,directory.canonical.value,stageName,directory.identity,
         )
         val result=runHelperBounded(command,helperOperationTimeoutMillis).getOrElse{
-            return uncertainTransfer("Prepare-stage exceeded its bounded deadline or lost its result")
+            return uncertainResult("Prepare-stage exceeded its bounded deadline or lost its result")
         }
         if(result.exitCode!=0)return mapExitCode(result.exitCode,result.stderr,"无法准备目标目录","prepare-stage")
         return RootFileIdentity.parse(result.stdout).fold(
             onSuccess={OperationResult.Success(TransferStage(stageName,it))},
-            onFailure={uncertainTransfer("Malformed prepare-stage identity")},
+            onFailure={uncertainResult("Malformed prepare-stage identity")},
         )
     }
 
@@ -573,26 +672,39 @@ class LibsuRootFileSystem internal constructor(
         stage:TransferStage,
         finalName:EntryName,
         reason:String,
+        uncertainResult: (String) -> OperationResult.Failure,
     ):OperationResult.Failure = withContext(NonCancellable){
         val finalPath=EntryName.join(directory.canonical,finalName)
         val finalState=stat(finalPath)
         if(finalState is OperationResult.Failure&&finalState.code==ErrorCode.NOT_FOUND){
             cleanupStage(directory,stage)
         }
-        uncertainTransfer(reason)
+        uncertainResult(reason)
     }
 
-    private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<PreparedTransferDirectory>{
-        if(original.value.length>1&&original.value.endsWith('/'))return failure(ErrorCode.COMMAND_FAILED,"目标目录路径无效","Trailing slash is not accepted for secure transfer")
+    private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<PreparedTransferDirectory> =
+        prepareDirectory(original, requireWritable = true)
+
+    private suspend fun prepareReadableDirectory(original:RootPath):OperationResult<PreparedTransferDirectory> =
+        prepareDirectory(original, requireWritable = false)
+
+    private suspend fun prepareDirectory(
+        original: RootPath,
+        requireWritable: Boolean,
+    ):OperationResult<PreparedTransferDirectory>{
+        val role = if (requireWritable) "目标目录" else "来源目录"
+        if(original.value.length>1&&original.value.endsWith('/'))return failure(ErrorCode.COMMAND_FAILED,"${role}路径无效","Trailing slash is not accepted for secure transfer")
         val first=stat(original);if(first !is OperationResult.Success)return first as OperationResult.Failure
-        if(first.value.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"目标目录不能是符号链接","Parent symlink")
+        if(first.value.symbolicLink)return failure(ErrorCode.COMMAND_FAILED,"${role}不能是符号链接","Parent symlink")
         if(first.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY)return failure(ErrorCode.NOT_DIRECTORY,"路径不是目录","Parent was not directory")
         if(!first.value.readable)return failure(ErrorCode.NOT_READABLE,"目录不可读","Parent not readable")
-        if(!first.value.writable)return failure(ErrorCode.NOT_WRITABLE,"目录不可写","Parent not writable")
+        if(requireWritable&&!first.value.writable)return failure(ErrorCode.NOT_WRITABLE,"目录不可写","Parent not writable")
         val canonical=canonicalize(original);if(canonical !is OperationResult.Success)return canonical as OperationResult.Failure
-        if(canonical.value.value.length>1&&canonical.value.value.endsWith('/'))return failure(ErrorCode.COMMAND_FAILED,"目标目录路径无效","Canonical path had trailing slash")
+        if(canonical.value.value.length>1&&canonical.value.value.endsWith('/'))return failure(ErrorCode.COMMAND_FAILED,"${role}路径无效","Canonical path had trailing slash")
         val canonicalStat=stat(canonical.value);if(canonicalStat !is OperationResult.Success)return canonicalStat as OperationResult.Failure
-        if(canonicalStat.value.symbolicLink||canonicalStat.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY)return failure(ErrorCode.COMMAND_FAILED,"目标目录无效","Canonical parent was not a plain directory")
+        if(canonicalStat.value.symbolicLink||canonicalStat.value.type!=com.iamxpp.isaver.domain.EntryType.DIRECTORY)return failure(ErrorCode.COMMAND_FAILED,"${role}无效","Canonical parent was not a plain directory")
+        if(!canonicalStat.value.readable)return failure(ErrorCode.NOT_READABLE,"目录不可读","Canonical parent not readable")
+        if(requireWritable&&!canonicalStat.value.writable)return failure(ErrorCode.NOT_WRITABLE,"目录不可写","Canonical parent not writable")
         val originalIdentity=readIdentity(original);if(originalIdentity !is OperationResult.Success)return originalIdentity as OperationResult.Failure
         val canonicalIdentity=readIdentity(canonical.value);if(canonicalIdentity !is OperationResult.Success)return canonicalIdentity as OperationResult.Failure
         if(originalIdentity.value!=canonicalIdentity.value)return failure(ErrorCode.COMMAND_FAILED,"目标目录已变化","Original and canonical parent identities differed")
@@ -913,6 +1025,8 @@ private fun uncertainTransfer(technical:String)=failure(ErrorCode.OUTCOME_UNCERT
 private fun uncertainExtraction(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"解压结果不确定，请刷新目标目录核对",technical)
 private fun uncertainMove(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"移动结果不确定，请刷新来源和目标目录核对",technical)
 private fun invalidMoveSource(technical:String="Move source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法移动此文件",technical)
+private fun uncertainCopy(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"复制结果不确定，请刷新目标目录核对",technical)
+private fun invalidCopySource(technical:String="Copy source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法复制此文件",technical)
 
 private fun failure(code: ErrorCode, userMessage: String, technicalMessage: String) =
     OperationResult.Failure(code, userMessage, technicalMessage)

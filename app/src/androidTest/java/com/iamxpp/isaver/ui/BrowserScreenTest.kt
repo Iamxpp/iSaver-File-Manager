@@ -95,6 +95,24 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun longPressFileForwardsCopyFromActionSheet() {
+        val file = entry("report.pdf", EntryType.FILE)
+        var copied: DirectoryEntry? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onCopyEntry = { copied = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
+        compose.onNodeWithText("复制到").assertIsDisplayed().performClick()
+
+        compose.runOnIdle { assertEquals(file, copied) }
+    }
+
+    @Test
     fun saveModeReplacesBrowserOverflowAndForwardsClick() {
         var saved = false
         compose.setContent {

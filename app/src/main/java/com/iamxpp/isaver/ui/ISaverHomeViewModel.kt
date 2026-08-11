@@ -16,6 +16,22 @@ class ISaverHomeViewModel(
     val state: StateFlow<ISaverHomeUiState> = mutableState.asStateFlow()
 
     fun selectTab(tab: HomeTab) {
+        val copy = mutableState.value.destination as? HomeDestination.CopyTarget
+        if (copy != null) {
+            transition(
+                mutableState.value.copy(
+                    selectedTab = tab,
+                    destination = copy.copy(
+                        targetBrowser = if (tab == HomeTab.BROWSE) {
+                            HomeDestination.Browser(BROWSE_ROOT, BROWSE_TITLE, HomeTab.BROWSE)
+                        } else {
+                            null
+                        },
+                    ),
+                ),
+            )
+            return
+        }
         val move = mutableState.value.destination as? HomeDestination.MoveTarget
         if (move != null) {
             transition(
@@ -66,6 +82,18 @@ class ISaverHomeViewModel(
         source: HomeTab = HomeTab.VIEWS,
         recordAccess: Boolean = true,
     ) {
+        val copy = mutableState.value.destination as? HomeDestination.CopyTarget
+        if (copy != null) {
+            transition(
+                mutableState.value.copy(
+                    selectedTab = source,
+                    destination = copy.copy(
+                        targetBrowser = HomeDestination.Browser(path, displayName, source, recordAccess),
+                    ),
+                ),
+            )
+            return
+        }
         val move = mutableState.value.destination as? HomeDestination.MoveTarget
         if (move != null) {
             transition(
@@ -135,6 +163,37 @@ class ISaverHomeViewModel(
         )
     }
 
+    fun chooseCopyTarget() {
+        val source = mutableState.value.destination as? HomeDestination.Browser ?: return
+        transition(
+            mutableState.value.copy(
+                selectedTab = HomeTab.VIEWS,
+                destination = HomeDestination.CopyTarget(source),
+            ),
+        )
+    }
+
+    fun returnFromCopy() {
+        val copy = mutableState.value.destination as? HomeDestination.CopyTarget ?: return
+        transition(
+            mutableState.value.copy(
+                selectedTab = copy.sourceBrowser.source,
+                destination = copy.sourceBrowser,
+            ),
+        )
+    }
+
+    fun completeCopy(targetDirectory: RootPath, targetTitle: String) {
+        val copy = mutableState.value.destination as? HomeDestination.CopyTarget ?: return
+        val target = copy.targetBrowser ?: return
+        transition(
+            mutableState.value.copy(
+                selectedTab = target.source,
+                destination = target.copy(path = targetDirectory, title = targetTitle),
+            ),
+        )
+    }
+
     fun returnFromMove() {
         val move = mutableState.value.destination as? HomeDestination.MoveTarget ?: return
         transition(
@@ -197,6 +256,16 @@ class ISaverHomeViewModel(
             )
             return HomeBackResult.CONSUMED
         }
+        val copy = mutableState.value.destination as? HomeDestination.CopyTarget
+        if (copy?.targetBrowser != null) {
+            transition(
+                mutableState.value.copy(
+                    selectedTab = HomeTab.VIEWS,
+                    destination = copy.copy(targetBrowser = null),
+                ),
+            )
+            return HomeBackResult.CONSUMED
+        }
         val browser = mutableState.value.destination as? HomeDestination.Browser ?: return HomeBackResult.CONSUMED
         if (browser.source == HomeTab.BROWSE) return HomeBackResult.EXIT_APP
         transition(
@@ -246,6 +315,15 @@ class ISaverHomeViewModel(
                 } ?: clearSavedTarget()
             }
             is HomeDestination.MoveTarget -> {
+                savedStateHandle[KEY_SELECTED_TAB] = destination.sourceBrowser.source.name
+                savedStateHandle[KEY_DESTINATION] = DESTINATION_BROWSER
+                savedStateHandle[KEY_PATH] = destination.sourceBrowser.path.value
+                savedStateHandle[KEY_TITLE] = destination.sourceBrowser.title
+                savedStateHandle[KEY_SOURCE] = destination.sourceBrowser.source.name
+                savedStateHandle[KEY_RECORD_ACCESS] = destination.sourceBrowser.recordAccess.toString()
+                clearSavedTarget()
+            }
+            is HomeDestination.CopyTarget -> {
                 savedStateHandle[KEY_SELECTED_TAB] = destination.sourceBrowser.source.name
                 savedStateHandle[KEY_DESTINATION] = DESTINATION_BROWSER
                 savedStateHandle[KEY_PATH] = destination.sourceBrowser.path.value
