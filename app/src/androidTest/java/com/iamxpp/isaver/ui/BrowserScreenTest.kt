@@ -23,6 +23,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesSaveAction
@@ -35,6 +36,30 @@ import org.junit.Rule
 import org.junit.Test
 
 class BrowserScreenTest {
+    @Test fun conflictDialogForwardsSingleAndTaskWideDecisions() {
+        val decisions = mutableListOf<Pair<ConflictAction, Boolean>>()
+        val prompt = BrowserConflictPrompt(
+            operation = BrowserConflictOperation.COPY,
+            entryName = "报告.txt",
+            completedCount = 1,
+            totalCount = 3,
+        )
+        compose.setContent {
+            BrowserScreen(
+                state = state().copy(conflictPrompt = prompt),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onResolveConflict = { action, applyToAll -> decisions += action to applyToAll },
+            )
+        }
+
+        compose.onNodeWithText("目标位置存在同名项目").assertIsDisplayed()
+        compose.onNodeWithText("报告.txt").assertIsDisplayed()
+        compose.onNodeWithText("已复制 1/3 项").assertIsDisplayed()
+        compose.onNodeWithText("全部保留两者").performClick()
+
+        assertEquals(listOf(ConflictAction.KEEP_BOTH to true), decisions)
+    }
+
     @get:Rule val compose = createComposeRule()
 
     @Test

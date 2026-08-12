@@ -48,6 +48,18 @@ interface RootFileSystem {
         targetDirectory: RootPath,
     ): OperationResult<DirectoryEntry> = unsupportedMove()
 
+    suspend fun moveFileAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> =
+        if (targetName.value == source.name) {
+            moveFileNoReplace(source, sourceDirectory, targetDirectory)
+        } else {
+            unsupportedMove()
+        }
+
     suspend fun renameFileNoReplace(
         source: DirectoryEntry,
         sourceDirectory: RootPath,
@@ -59,6 +71,18 @@ interface RootFileSystem {
         sourceDirectory: RootPath,
         targetDirectory: RootPath,
     ): OperationResult<DirectoryEntry> = unsupportedCopy()
+
+    suspend fun copyFileAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> =
+        if (targetName.value == source.name) {
+            copyFileNoReplace(source, sourceDirectory, targetDirectory)
+        } else {
+            unsupportedCopy()
+        }
 
     suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> =
         unsupportedExtraction()

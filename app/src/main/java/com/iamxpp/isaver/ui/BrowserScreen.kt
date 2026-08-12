@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
+import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.remote.RemoteConnectionDraft
 import com.iamxpp.isaver.remote.RemoteConnectionUiState
 import com.iamxpp.isaver.remote.RemoteProtocol
@@ -96,6 +97,7 @@ fun BrowserScreen(
     onCopyEntry: ((DirectoryEntry) -> Unit)? = null,
     onCopySelection: (() -> Unit)? = null,
     onDismissFileCopyError: () -> Unit = {},
+    onResolveConflict: (ConflictAction, Boolean) -> Unit = { _, _ -> },
     onRenameEntry: ((DirectoryEntry, String) -> Unit)? = null,
     onDismissFileRenameError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
@@ -340,8 +342,12 @@ fun BrowserScreen(
     state.fileInfo?.let { FileInfoDialog(it, onDismissFileInfo) }
     state.fileOpenError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileOpenError) }
     state.fileShareError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileShareError) }
-    state.fileMoveError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileMoveError) }
-    state.fileCopyError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileCopyError) }
+    state.conflictPrompt?.let { prompt ->
+        ConflictDialog(prompt, onResolveConflict)
+    } ?: run {
+        state.fileMoveError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileMoveError) }
+        state.fileCopyError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileCopyError) }
+    }
     state.fileRenameError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileRenameError) }
     renameDialogEntry?.let { entry ->
         RenameDialog(
@@ -689,6 +695,35 @@ private fun MessageDialog(message: String, button: String, onDismiss: () -> Unit
         onDismissRequest = onDismiss,
         text = { Text(message) },
         confirmButton = { TextButton(onClick = onDismiss) { Text(button) } },
+    )
+}
+
+@Composable
+private fun ConflictDialog(
+    prompt: BrowserConflictPrompt,
+    onResolve: (ConflictAction, Boolean) -> Unit,
+) {
+    val operation = if (prompt.operation == BrowserConflictOperation.MOVE) "移动" else "复制"
+    AlertDialog(
+        onDismissRequest = { onResolve(ConflictAction.CANCEL, false) },
+        title = { Text("目标位置存在同名项目") },
+        text = {
+            Column {
+                Text(prompt.entryName, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "已$operation ${prompt.completedCount}/${prompt.totalCount} 项",
+                    color = ISaverSecondaryText,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                TextButton(onClick = { onResolve(ConflictAction.KEEP_BOTH, false) }) { Text("保留两者") }
+                TextButton(onClick = { onResolve(ConflictAction.SKIP, false) }) { Text("跳过") }
+                if (prompt.totalCount > 1) {
+                    TextButton(onClick = { onResolve(ConflictAction.KEEP_BOTH, true) }) { Text("全部保留两者") }
+                    TextButton(onClick = { onResolve(ConflictAction.SKIP, true) }) { Text("全部跳过") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onResolve(ConflictAction.CANCEL, false) }) { Text("取消") } },
     )
 }
 

@@ -71,6 +71,21 @@ class RootTransferHelperTest {
     }
 
     @Test
+    fun `same filesystem move renames selected source to the explicit target name`() {
+        val sourceFile = listOf(
+            File("app/src/main/cpp/isaver_fs_helper.c"),
+            File("src/main/cpp/isaver_fs_helper.c"),
+        ).first(File::isFile)
+        val move = sourceFile.readText()
+            .substringAfter("static int move_noreplace")
+            .substringBefore("static int rename_noreplace")
+        val renameCall = move.substringAfter("SYS_renameat2").substringBefore("RENAME_NOREPLACE")
+
+        assertTrue(renameCall.contains("source_parent_fd,\n        argv[4]"))
+        assertTrue(renameCall.contains("target_parent_fd,\n        argv[13]"))
+    }
+
+    @Test
     fun `read file command uses fixed base64 stdout helper`() {
         val command = helper.readFile("/data/user/0/com.iamxpp.isaver/files/report with space.bin")
         assertTrue(command.contains("'read-file-stdout' '/data/user/0/com.iamxpp.isaver/files/report with space.bin'"))
@@ -104,11 +119,12 @@ class RootTransferHelperTest {
             targetOriginal = "/target original",
             targetCanonical = "/target canonical",
             targetParentIdentity = RootFileIdentity(5L, 6L),
+            targetName = com.iamxpp.isaver.domain.EntryName.parse("renamed';\n.txt").getOrThrow(),
         )
 
         assertTrue(command.contains("'move-noreplace' '/source original' '/source canonical'"))
         assertTrue(command.contains("'a'\\'';\n.txt' '1' '2' '3' '4'"))
-        assertTrue(command.endsWith("'/target original' '/target canonical' '5' '6'"))
+        assertTrue(command.endsWith("'/target original' '/target canonical' '5' '6' 'renamed'\\'';\n.txt'"))
         assertFalse(command.contains(" mv "))
         assertFalse(command.contains("sh -c"))
     }

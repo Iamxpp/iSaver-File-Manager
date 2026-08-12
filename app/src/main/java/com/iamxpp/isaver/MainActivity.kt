@@ -434,6 +434,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onDismissFileCopyError = browserViewModel::dismissFileCopyError,
+                        onResolveBrowserConflict = browserViewModel::resolveConflict,
                         onRenameBrowserEntry = browserViewModel::renameEntry,
                         onDismissFileRenameError = browserViewModel::dismissFileRenameError,
                         onCompress = browserViewModel::compress,
@@ -560,10 +561,18 @@ internal class BrowserViewModelFactory(
             shareFile = rootExportRepository?.let { repository -> repository::share } ?: { entry ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法分享文件")
             },
-            moveFile = fileMoveRepository?.let { repository -> repository::move } ?: { _, _, _ ->
+            moveFile = fileMoveRepository?.let { repository ->
+                { entry, sourceDirectory, targetDirectory, conflictAction ->
+                    repository.move(entry, sourceDirectory, targetDirectory, conflictAction)
+                }
+            } ?: { _, _, _, _ ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法移动文件")
             },
-            copyFile = fileCopyRepository?.let { repository -> repository::copy } ?: { _, _, _ ->
+            copyFile = fileCopyRepository?.let { repository ->
+                { entry, sourceDirectory, targetDirectory, conflictAction ->
+                    repository.copy(entry, sourceDirectory, targetDirectory, conflictAction)
+                }
+            } ?: { _, _, _, _ ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法复制文件")
             },
             renameFile = fileRenameRepository?.let { repository -> repository::rename } ?: { _, _, _ ->

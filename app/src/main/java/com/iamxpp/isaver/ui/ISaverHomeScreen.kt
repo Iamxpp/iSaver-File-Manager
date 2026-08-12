@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.remote.RemoteConnectionDraft
@@ -69,6 +70,7 @@ fun ISaverHomeScreen(
     onCopyBrowserSelection: (() -> Unit)? = null,
     onCopyHere: () -> Unit = {},
     onDismissFileCopyError: () -> Unit = {},
+    onResolveBrowserConflict: (ConflictAction, Boolean) -> Unit = { _, _ -> },
     onRenameBrowserEntry: ((DirectoryEntry, String) -> Unit)? = null,
     onDismissFileRenameError: () -> Unit = {},
     onCompress: (String) -> Unit = {},
@@ -199,6 +201,7 @@ fun ISaverHomeScreen(
                 onCopyEntry = if (saveMode) null else onCopyBrowserEntry,
                 onCopySelection = if (saveMode) null else onCopyBrowserSelection,
                 onDismissFileCopyError = onDismissFileCopyError,
+                onResolveConflict = onResolveBrowserConflict,
                 onRenameEntry = if (saveMode) null else onRenameBrowserEntry,
                 onDismissFileRenameError = onDismissFileRenameError,
                 onCompress = onCompress,
@@ -278,6 +281,7 @@ fun ISaverHomeScreen(
                     onSortChange = onSortChange,
                     onCreateDirectory = onCreateDirectory,
                     onDismissFileMoveError = onDismissFileMoveError,
+                    onResolveConflict = onResolveBrowserConflict,
                     fileActionsEnabled = false,
                     saveAction = moveAction,
                     modifier = Modifier.weight(1f),
@@ -322,6 +326,7 @@ fun ISaverHomeScreen(
                     onSortChange = onSortChange,
                     onCreateDirectory = onCreateDirectory,
                     onDismissFileCopyError = onDismissFileCopyError,
+                    onResolveConflict = onResolveBrowserConflict,
                     fileActionsEnabled = false,
                     saveAction = copyAction,
                     modifier = Modifier.weight(1f),

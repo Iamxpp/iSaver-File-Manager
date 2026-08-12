@@ -44,6 +44,18 @@ class RootFileCopyInstrumentedTest {
             assertEquals("changed-source", root(app, "cat -- ${quote(SOURCE_FILE)}"))
             assertEquals("first", root(app, "cat -- ${quote(TARGET_FILE)}"))
 
+            val keptBoth = app.fileCopyRepository.copy(
+                conflictingSource,
+                path(SOURCE_DIRECTORY),
+                path(TARGET_DIRECTORY),
+                ConflictAction.KEEP_BOTH,
+            )
+            assertTrue(keptBoth.toString(), keptBoth is OperationResult.Success)
+            assertEquals("report (1).txt", (keptBoth as OperationResult.Success).value.name)
+            assertEquals("changed-source", root(app, "cat -- ${quote(SOURCE_FILE)}"))
+            assertEquals("changed-source", root(app, "cat -- ${quote(TARGET_KEEP_BOTH_FILE)}"))
+            assertEquals("first", root(app, "cat -- ${quote(TARGET_FILE)}"))
+
             root(app, "printf %s cross-device > ${quote(CROSS_SOURCE_FILE)}")
             val crossSource = stat(app, CROSS_SOURCE_FILE)
             val cross = app.fileCopyRepository.copy(
@@ -98,6 +110,7 @@ class RootFileCopyInstrumentedTest {
         const val TARGET_DIRECTORY = "$ROOT_TARGET/target"
         const val SOURCE_FILE = "$SOURCE_DIRECTORY/report.txt"
         const val TARGET_FILE = "$TARGET_DIRECTORY/report.txt"
+        const val TARGET_KEEP_BOTH_FILE = "$TARGET_DIRECTORY/report (1).txt"
         const val CROSS_SOURCE_FILE = "$SOURCE_DIRECTORY/cross.txt"
         const val SHARED_TARGET_DIRECTORY = "/storage/emulated/0/isaver-test/copy-target"
         const val SHARED_TARGET_FILE = "$SHARED_TARGET_DIRECTORY/cross.txt"

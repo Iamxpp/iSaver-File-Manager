@@ -4,6 +4,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.export.ExternalFileGrant
+import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
@@ -54,6 +55,7 @@ data class BrowserUiState(
     val copyTotalCount: Int = 0,
     val copiedOutput: DirectoryEntry? = null,
     val fileCopyError: BrowserOperationError? = null,
+    val conflictPrompt: BrowserConflictPrompt? = null,
     val renamingFile: Boolean = false,
     val renamedOutput: DirectoryEntry? = null,
     val fileRenameError: BrowserOperationError? = null,
@@ -82,4 +84,18 @@ data class BrowserCopySelection(
 data class BrowserOperationError(
     val code: ErrorCode,
     val userMessage: String,
+)
+
+enum class BrowserConflictOperation { MOVE, COPY }
+
+data class BrowserConflictPrompt(
+    val operation: BrowserConflictOperation,
+    val entryName: String,
+    val completedCount: Int,
+    val totalCount: Int,
+    val availableActions: Set<ConflictAction> = setOf(
+        ConflictAction.CANCEL,
+        ConflictAction.SKIP,
+        ConflictAction.KEEP_BOTH,
+    ),
 )

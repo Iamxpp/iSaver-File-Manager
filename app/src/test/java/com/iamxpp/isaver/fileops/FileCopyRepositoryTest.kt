@@ -5,12 +5,65 @@ import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.transfer.TargetNameResolver
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FileCopyRepositoryTest {
+    @Test
+    fun `keep both retries only explicit conflicts with generated target names`() = runTest {
+        val sourceDirectory = path("/data/local/tmp/source")
+        val targetDirectory = path("/data/local/tmp/target")
+        val source = entry("report.txt", sourceDirectory)
+        val targetNames = mutableListOf<String>()
+        val repository = FileCopyRepository(
+            copyFileAs = { _, _, _, targetName ->
+                targetNames += targetName.value
+                if (targetNames.size < 3) {
+                    OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+                } else {
+                    OperationResult.Success(entry(targetName.value, targetDirectory))
+                }
+            },
+            nameResolver = TargetNameResolver(4),
+        )
+
+        val result = repository.copy(
+            source,
+            sourceDirectory,
+            targetDirectory,
+            ConflictAction.KEEP_BOTH,
+        )
+
+        assertEquals(listOf("report.txt", "report (1).txt", "report (2).txt"), targetNames)
+        assertEquals("report (2).txt", (result as OperationResult.Success).value.name)
+    }
+
+    @Test
+    fun `keep both never retries an uncertain copy result`() = runTest {
+        var calls = 0
+        val sourceDirectory = path("/data/local/tmp/source")
+        val repository = FileCopyRepository(
+            copyFileAs = { _, _, _, _ ->
+                calls += 1
+                OperationResult.Failure(ErrorCode.OUTCOME_UNCERTAIN, "复制结果不确定")
+            },
+            nameResolver = TargetNameResolver(4),
+        )
+
+        val result = repository.copy(
+            entry("report.txt", sourceDirectory),
+            sourceDirectory,
+            path("/data/local/tmp/target"),
+            ConflictAction.KEEP_BOTH,
+        )
+
+        assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
+        assertEquals(1, calls)
+    }
+
     @Test
     fun `copies one readable regular file through the typed root operation`() = runTest {
         val sourceDirectory = path("/data/local/tmp/source")

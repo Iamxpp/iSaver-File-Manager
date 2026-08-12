@@ -56,6 +56,7 @@ internal class RootTransferHelper(private val executable:String){
         targetOriginal: String,
         targetCanonical: String,
         targetParentIdentity: RootFileIdentity,
+        targetName: EntryName,
     ) = command(
         "move-noreplace",
         sourceOriginal,
@@ -69,6 +70,7 @@ internal class RootTransferHelper(private val executable:String){
         targetCanonical,
         targetParentIdentity.device,
         targetParentIdentity.inode,
+        targetName.value,
     )
     fun renameNoReplace(
         original: String,

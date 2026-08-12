@@ -1546,7 +1546,7 @@ static int remove_stage(int argc, char **argv) {
 }
 
 static int move_noreplace(int argc, char **argv) {
-    if (argc != 13 || !basename_ok(argv[4])) return X_USAGE;
+    if (argc != 14 || !basename_ok(argv[4]) || !basename_ok(argv[13])) return X_USAGE;
     unsigned long long source_parent_device;
     unsigned long long source_parent_inode;
     unsigned long long source_device;
@@ -1589,7 +1589,7 @@ static int move_noreplace(int argc, char **argv) {
 
     struct stat target_status;
     if (retry_fstatat(
-        target_parent_fd, argv[4], &target_status, AT_SYMLINK_NOFOLLOW
+        target_parent_fd, argv[13], &target_status, AT_SYMLINK_NOFOLLOW
     ) == 0) {
         close(target_parent_fd);
         close(source_parent_fd);
@@ -1612,7 +1612,7 @@ static int move_noreplace(int argc, char **argv) {
         source_parent_fd,
         argv[4],
         target_parent_fd,
-        argv[4],
+        argv[13],
         RENAME_NOREPLACE
     );
     if (renamed != 0) {
@@ -1629,7 +1629,7 @@ static int move_noreplace(int argc, char **argv) {
         source_parent_fd, argv[4], &stale_source, AT_SYMLINK_NOFOLLOW
     ) != 0 && errno == ENOENT;
     if (retry_fstatat(
-        target_parent_fd, argv[4], &moved_status, AT_SYMLINK_NOFOLLOW
+        target_parent_fd, argv[13], &moved_status, AT_SYMLINK_NOFOLLOW
     ) != 0 || !S_ISREG(moved_status.st_mode) ||
         !identity_matches(&moved_status, source_device, source_inode) || !source_absent) {
         close(target_parent_fd);

@@ -16,6 +16,7 @@ import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.export.ExternalFileGrant
+import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -46,10 +47,10 @@ class BrowserViewModel(
     private val shareFile: suspend (DirectoryEntry) -> OperationResult<ExternalFileGrant> = {
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法分享文件")
     },
-    private val moveFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry> = { _, _, _ ->
+    private val moveFile: suspend (DirectoryEntry, RootPath, RootPath, ConflictAction) -> OperationResult<DirectoryEntry> = { _, _, _, _ ->
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法移动文件")
     },
-    private val copyFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry> = { _, _, _ ->
+    private val copyFile: suspend (DirectoryEntry, RootPath, RootPath, ConflictAction) -> OperationResult<DirectoryEntry> = { _, _, _, _ ->
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法复制文件")
     },
     private val renameFile: suspend (DirectoryEntry, RootPath, String) -> OperationResult<DirectoryEntry> = { _, _, _ ->
@@ -74,6 +75,7 @@ class BrowserViewModel(
     private var copyFileJob: Job? = null
     private var renameFileJob: Job? = null
     private var copySelectionToRestore: BrowserCopySelection? = null
+    private var pendingConflict: PendingConflict? = null
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
     private var presentedEntries: List<DirectoryEntry> = emptyList()
@@ -325,16 +327,67 @@ class BrowserViewModel(
             movedOutput = null,
             fileMoveError = null,
         )
+        launchMove(selection, targetDirectory, 0, emptyList(), null, ConflictAction.CANCEL)
+    }
+
+    private fun launchMove(
+        selection: BrowserMoveSelection,
+        targetDirectory: RootPath,
+        startIndex: Int,
+        completedBefore: List<DirectoryEntry>,
+        persistentAction: ConflictAction?,
+        currentAction: ConflictAction,
+    ) {
+        mutableState.value = mutableState.value.copy(movingFile = true, conflictPrompt = null)
         moveFileJob = viewModelScope.launch {
             try {
-                val completed = mutableListOf<DirectoryEntry>()
-                for (entry in selection.entries) {
+                val completed = completedBefore.toMutableList()
+                for (index in startIndex until selection.entries.size) {
+                    val entry = selection.entries[index]
+                    val action = if (index == startIndex) currentAction else ConflictAction.CANCEL
                     when (
                         val result = withContext(ioDispatcher) {
-                            moveFile(entry, selection.sourceDirectory, targetDirectory)
+                            moveFile(entry, selection.sourceDirectory, targetDirectory, action)
                         }
                     ) {
                         is OperationResult.Failure -> {
+                            if (result.code == ErrorCode.ALREADY_EXISTS && persistentAction == ConflictAction.SKIP) {
+                                continue
+                            }
+                            if (result.code == ErrorCode.ALREADY_EXISTS && persistentAction == ConflictAction.KEEP_BOTH) {
+                                when (
+                                    val kept = withContext(ioDispatcher) {
+                                        moveFile(entry, selection.sourceDirectory, targetDirectory, ConflictAction.KEEP_BOTH)
+                                    }
+                                ) {
+                                    is OperationResult.Success -> {
+                                        completed += kept.value
+                                        mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
+                                        recordSuccessfulFileAccess(kept.value)
+                                        continue
+                                    }
+                                    is OperationResult.Failure -> {
+                                        mutableState.value = mutableState.value.copy(
+                                            movingFile = false,
+                                            fileMoveError = BrowserOperationError(kept.code, kept.userMessage),
+                                        )
+                                        return@launch
+                                    }
+                                }
+                            }
+                            if (result.code == ErrorCode.ALREADY_EXISTS && action == ConflictAction.CANCEL) {
+                                pendingConflict = PendingConflict.Move(
+                                    selection, targetDirectory, index, completed, persistentAction,
+                                )
+                                mutableState.value = mutableState.value.copy(
+                                    movingFile = false,
+                                    movedOutput = completed.lastOrNull(),
+                                    conflictPrompt = BrowserConflictPrompt(
+                                        BrowserConflictOperation.MOVE, entry.name, completed.size, selection.entries.size,
+                                    ),
+                                )
+                                return@launch
+                            }
                             mutableState.value = if (completed.isEmpty()) {
                                 mutableState.value.copy(
                                     movingFile = false,
@@ -365,7 +418,7 @@ class BrowserViewModel(
                     selectedEntries = emptySet(),
                     moveSelection = null,
                     movingFile = false,
-                    movedOutput = completed.last(),
+                    movedOutput = completed.lastOrNull(),
                     fileMoveError = null,
                 )
             } catch (cancelled: CancellationException) {
@@ -388,7 +441,9 @@ class BrowserViewModel(
             moveSelection = null,
             movedOutput = null,
             fileMoveError = null,
+            conflictPrompt = null,
         )
+        pendingConflict = null
         return true
     }
 
@@ -448,16 +503,67 @@ class BrowserViewModel(
             copiedOutput = null,
             fileCopyError = null,
         )
+        launchCopy(selection, targetDirectory, 0, emptyList(), null, ConflictAction.CANCEL)
+    }
+
+    private fun launchCopy(
+        selection: BrowserCopySelection,
+        targetDirectory: RootPath,
+        startIndex: Int,
+        completedBefore: List<DirectoryEntry>,
+        persistentAction: ConflictAction?,
+        currentAction: ConflictAction,
+    ) {
+        mutableState.value = mutableState.value.copy(copyingFile = true, conflictPrompt = null)
         copyFileJob = viewModelScope.launch {
             try {
-                val completed = mutableListOf<DirectoryEntry>()
-                for (entry in selection.entries) {
+                val completed = completedBefore.toMutableList()
+                for (index in startIndex until selection.entries.size) {
+                    val entry = selection.entries[index]
+                    val action = if (index == startIndex) currentAction else ConflictAction.CANCEL
                     when (
                         val result = withContext(ioDispatcher) {
-                            copyFile(entry, selection.sourceDirectory, targetDirectory)
+                            copyFile(entry, selection.sourceDirectory, targetDirectory, action)
                         }
                     ) {
                         is OperationResult.Failure -> {
+                            if (result.code == ErrorCode.ALREADY_EXISTS && persistentAction == ConflictAction.SKIP) {
+                                continue
+                            }
+                            if (result.code == ErrorCode.ALREADY_EXISTS && persistentAction == ConflictAction.KEEP_BOTH) {
+                                when (
+                                    val kept = withContext(ioDispatcher) {
+                                        copyFile(entry, selection.sourceDirectory, targetDirectory, ConflictAction.KEEP_BOTH)
+                                    }
+                                ) {
+                                    is OperationResult.Success -> {
+                                        completed += kept.value
+                                        mutableState.value = mutableState.value.copy(copyCompletedCount = completed.size)
+                                        recordSuccessfulFileAccess(kept.value)
+                                        continue
+                                    }
+                                    is OperationResult.Failure -> {
+                                        mutableState.value = mutableState.value.copy(
+                                            copyingFile = false,
+                                            fileCopyError = BrowserOperationError(kept.code, kept.userMessage),
+                                        )
+                                        return@launch
+                                    }
+                                }
+                            }
+                            if (result.code == ErrorCode.ALREADY_EXISTS && action == ConflictAction.CANCEL) {
+                                pendingConflict = PendingConflict.Copy(
+                                    selection, targetDirectory, index, completed, persistentAction,
+                                )
+                                mutableState.value = mutableState.value.copy(
+                                    copyingFile = false,
+                                    copiedOutput = completed.lastOrNull(),
+                                    conflictPrompt = BrowserConflictPrompt(
+                                        BrowserConflictOperation.COPY, entry.name, completed.size, selection.entries.size,
+                                    ),
+                                )
+                                return@launch
+                            }
                             mutableState.value = if (completed.isEmpty()) {
                                 mutableState.value.copy(
                                     copyingFile = false,
@@ -488,7 +594,7 @@ class BrowserViewModel(
                     selectedEntries = emptySet(),
                     copySelection = null,
                     copyingFile = false,
-                    copiedOutput = completed.last(),
+                    copiedOutput = completed.lastOrNull(),
                     fileCopyError = null,
                 )
             } catch (cancelled: CancellationException) {
@@ -511,7 +617,9 @@ class BrowserViewModel(
             copySelection = null,
             copiedOutput = null,
             fileCopyError = null,
+            conflictPrompt = null,
         )
+        pendingConflict = null
         return true
     }
 
@@ -521,6 +629,41 @@ class BrowserViewModel(
 
     fun dismissFileCopyError() {
         mutableState.value = mutableState.value.copy(fileCopyError = null)
+    }
+
+    fun resolveConflict(action: ConflictAction, applyToAll: Boolean = false) {
+        val pending = pendingConflict ?: return
+        if (action == ConflictAction.CANCEL) {
+            pendingConflict = null
+            val message = if (pending.completed.isEmpty()) "操作已取消" else "已完成 ${pending.completed.size}/${pending.totalCount} 项；其余操作已取消"
+            mutableState.value = when (pending) {
+                is PendingConflict.Move -> mutableState.value.copy(
+                    selectedEntries = emptySet(), moveSelection = null, conflictPrompt = null,
+                    fileMoveError = BrowserOperationError(ErrorCode.ALREADY_EXISTS, message),
+                )
+                is PendingConflict.Copy -> mutableState.value.copy(
+                    selectedEntries = emptySet(), copySelection = null, conflictPrompt = null,
+                    fileCopyError = BrowserOperationError(ErrorCode.ALREADY_EXISTS, message),
+                )
+            }
+            return
+        }
+        pendingConflict = null
+        val persistent = if (applyToAll) action else pending.persistentAction
+        when (pending) {
+            is PendingConflict.Move -> launchMove(
+                pending.selection, pending.targetDirectory,
+                if (action == ConflictAction.SKIP) pending.index + 1 else pending.index,
+                pending.completed, persistent,
+                if (action == ConflictAction.SKIP) ConflictAction.CANCEL else action,
+            )
+            is PendingConflict.Copy -> launchCopy(
+                pending.selection, pending.targetDirectory,
+                if (action == ConflictAction.SKIP) pending.index + 1 else pending.index,
+                pending.completed, persistent,
+                if (action == ConflictAction.SKIP) ConflictAction.CANCEL else action,
+            )
+        }
     }
 
     fun renameEntry(entry: DirectoryEntry, newName: String) {
@@ -1112,6 +1255,33 @@ class BrowserViewModel(
         const val INITIAL_PATH = "/storage/emulated/0"
         const val PAGE_SIZE = 200
         const val LOADING_INDICATOR_DELAY_MILLIS = 120L
+    }
+}
+
+private sealed class PendingConflict {
+    abstract val index: Int
+    abstract val completed: List<DirectoryEntry>
+    abstract val persistentAction: ConflictAction?
+    abstract val totalCount: Int
+
+    data class Move(
+        val selection: BrowserMoveSelection,
+        val targetDirectory: RootPath,
+        override val index: Int,
+        override val completed: List<DirectoryEntry>,
+        override val persistentAction: ConflictAction?,
+    ) : PendingConflict() {
+        override val totalCount: Int get() = selection.entries.size
+    }
+
+    data class Copy(
+        val selection: BrowserCopySelection,
+        val targetDirectory: RootPath,
+        override val index: Int,
+        override val completed: List<DirectoryEntry>,
+        override val persistentAction: ConflictAction?,
+    ) : PendingConflict() {
+        override val totalCount: Int get() = selection.entries.size
     }
 }
 

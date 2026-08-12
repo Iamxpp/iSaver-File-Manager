@@ -8,16 +8,28 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
+import com.iamxpp.isaver.transfer.OutputNameDraft
+import com.iamxpp.isaver.transfer.TargetNameResolver
 
 class FileMoveRepository internal constructor(
-    private val moveFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>,
+    private val moveFileAs: suspend (DirectoryEntry, RootPath, RootPath, EntryName) -> OperationResult<DirectoryEntry>,
+    private val nameResolver: TargetNameResolver = TargetNameResolver(),
 ) {
-    constructor(fileSystem: RootFileSystem) : this(fileSystem::moveFileNoReplace)
+    internal constructor(
+        moveFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>,
+    ) : this(
+        moveFileAs = { source, sourceDirectory, targetDirectory, _ ->
+            moveFile(source, sourceDirectory, targetDirectory)
+        },
+    )
+
+    constructor(fileSystem: RootFileSystem) : this(fileSystem::moveFileAsNoReplace)
 
     suspend fun move(
         source: DirectoryEntry,
         sourceDirectory: RootPath,
         targetDirectory: RootPath,
+        conflictAction: ConflictAction = ConflictAction.CANCEL,
     ): OperationResult<DirectoryEntry> {
         val name = EntryName.parse(source.name).getOrElse { return sourceUnreadable() }
         if (
@@ -37,7 +49,22 @@ class FileMoveRepository internal constructor(
         ) {
             return OperationResult.Failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览")
         }
-        return moveFile(source, sourceDirectory, targetDirectory)
+        val draft = OutputNameDraft.fromDisplayName(source.name)
+        var attempt = 0
+        while (true) {
+            val targetName = nameResolver.resolve(draft, attempt).getOrElse {
+                return OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "同名文件过多")
+            }
+            when (val result = moveFileAs(source, sourceDirectory, targetDirectory, targetName)) {
+                is OperationResult.Success -> return result
+                is OperationResult.Failure -> {
+                    if (result.code != ErrorCode.ALREADY_EXISTS || conflictAction != ConflictAction.KEEP_BOTH) {
+                        return result
+                    }
+                    attempt += 1
+                }
+            }
+        }
     }
 
     private fun sourceUnreadable() = OperationResult.Failure(

@@ -5,12 +5,42 @@ import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.transfer.TargetNameResolver
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FileMoveRepositoryTest {
+    @Test
+    fun `keep both passes a generated target name to the typed move`() = runTest {
+        val sourceDirectory = path("/data/local/tmp/source")
+        val targetDirectory = path("/data/local/tmp/target")
+        val source = entry("archive.tar.gz", sourceDirectory)
+        val targetNames = mutableListOf<String>()
+        val repository = FileMoveRepository(
+            moveFileAs = { _, _, _, targetName ->
+                targetNames += targetName.value
+                if (targetNames.size == 1) {
+                    OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+                } else {
+                    OperationResult.Success(entry(targetName.value, targetDirectory))
+                }
+            },
+            nameResolver = TargetNameResolver(3),
+        )
+
+        val result = repository.move(
+            source,
+            sourceDirectory,
+            targetDirectory,
+            ConflictAction.KEEP_BOTH,
+        )
+
+        assertEquals(listOf("archive.tar.gz", "archive.tar (1).gz"), targetNames)
+        assertEquals("archive.tar (1).gz", (result as OperationResult.Success).value.name)
+    }
+
     @Test
     fun `moves one readable regular file through the typed root operation`() = runTest {
         val sourceDirectory = path("/data/local/tmp/source")

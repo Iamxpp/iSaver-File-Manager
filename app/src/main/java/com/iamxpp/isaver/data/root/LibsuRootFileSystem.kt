@@ -500,6 +500,16 @@ class LibsuRootFileSystem internal constructor(
         sourceDirectory: RootPath,
         targetDirectory: RootPath,
     ): OperationResult<DirectoryEntry> {
+        val targetName = EntryName.parse(source.name).getOrElse { return invalidMoveSource() }
+        return moveFileAsNoReplace(source, sourceDirectory, targetDirectory, targetName)
+    }
+
+    override suspend fun moveFileAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> {
         val name = EntryName.parse(source.name).getOrElse { return invalidMoveSource() }
         if (
             source.type != com.iamxpp.isaver.domain.EntryType.FILE ||
@@ -544,7 +554,7 @@ class LibsuRootFileSystem internal constructor(
         val sourceIdentity = readIdentity(expectedCanonicalSource)
         if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
 
-        val targetPath = EntryName.join(preparedTargetParent.canonical, name)
+        val targetPath = EntryName.join(preparedTargetParent.canonical, targetName)
         when (val target = stat(targetPath)) {
             is OperationResult.Success -> return failure(
                 ErrorCode.ALREADY_EXISTS,
@@ -565,6 +575,7 @@ class LibsuRootFileSystem internal constructor(
                 targetOriginal = preparedTargetParent.original.value,
                 targetCanonical = preparedTargetParent.canonical.value,
                 targetParentIdentity = preparedTargetParent.identity,
+                targetName = targetName,
             ),
             helperOperationTimeoutMillis,
         ).getOrElse {
@@ -576,6 +587,7 @@ class LibsuRootFileSystem internal constructor(
                 name = name,
                 sourceParent = preparedSourceParent,
                 sourceIdentity = sourceIdentity.value,
+                targetName = targetName,
                 targetDirectory = targetDirectory,
                 targetParent = preparedTargetParent,
             )
@@ -691,6 +703,7 @@ class LibsuRootFileSystem internal constructor(
         name: EntryName,
         sourceParent: PreparedTransferDirectory,
         sourceIdentity: RootFileIdentity,
+        targetName: EntryName,
         targetDirectory: RootPath,
         targetParent: PreparedTransferDirectory,
     ): OperationResult<DirectoryEntry> {
@@ -719,7 +732,7 @@ class LibsuRootFileSystem internal constructor(
             targetOriginal = targetParent.original.value,
             targetCanonical = targetParent.canonical.value,
             stage = stage,
-            finalName = name,
+            finalName = targetName,
             targetParentIdentity = targetParent.identity,
             expectedSizeBytes = expectedSize,
             timeoutMillis = transferDeadlineMillis(expectedSize),
@@ -740,7 +753,7 @@ class LibsuRootFileSystem internal constructor(
                 }
                 logRootUncertain(operation, reason)
                 return@withContext reconcileLostTransfer(
-                    targetParent, stage, name, reason, ::uncertainMove,
+                    targetParent, stage, targetName, reason, ::uncertainMove,
                 )
             }
             if (execution.exitCode == 55 || execution.exitCode == 137) {
@@ -748,7 +761,7 @@ class LibsuRootFileSystem internal constructor(
                 return@withContext reconcileLostTransfer(
                     targetParent,
                     stage,
-                    name,
+                    targetName,
                     "Native helper reported an uncertain cross-device move outcome",
                     ::uncertainMove,
                 )
@@ -766,7 +779,7 @@ class LibsuRootFileSystem internal constructor(
             if (published !is OperationResult.Success || published.value.sizeBytes != expectedSize) {
                 return@withContext uncertainMove("Malformed cross-device move publication identity")
             }
-            val targetPath = EntryName.join(targetParent.canonical, name)
+            val targetPath = EntryName.join(targetParent.canonical, targetName)
             val targetAfter = stat(targetPath)
             val targetIdentityAfter = readIdentity(targetPath)
             val sourceParentAfter = canonicalize(sourceParent.original)
@@ -814,6 +827,16 @@ class LibsuRootFileSystem internal constructor(
         sourceDirectory: RootPath,
         targetDirectory: RootPath,
     ): OperationResult<DirectoryEntry> {
+        val targetName = EntryName.parse(source.name).getOrElse { return invalidCopySource() }
+        return copyFileAsNoReplace(source, sourceDirectory, targetDirectory, targetName)
+    }
+
+    override suspend fun copyFileAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> {
         val name = EntryName.parse(source.name).getOrElse { return invalidCopySource() }
         val expectedSize = source.sizeBytes
         if (
@@ -858,7 +881,7 @@ class LibsuRootFileSystem internal constructor(
         val sourceIdentity = readIdentity(expectedCanonicalSource)
         if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
 
-        val targetPath = EntryName.join(preparedTargetParent.canonical, name)
+        val targetPath = EntryName.join(preparedTargetParent.canonical, targetName)
         when (val target = stat(targetPath)) {
             is OperationResult.Success -> return failure(
                 ErrorCode.ALREADY_EXISTS,
@@ -870,7 +893,7 @@ class LibsuRootFileSystem internal constructor(
 
         return transfer(
             targetDirectory = targetDirectory,
-            finalName = name,
+            finalName = targetName,
             expectedSizeBytes = expectedSize,
             failureMessage = "无法复制文件",
             operation = "copy-file-publish",
@@ -885,7 +908,7 @@ class LibsuRootFileSystem internal constructor(
                 targetOriginal = directory.original.value,
                 targetCanonical = directory.canonical.value,
                 stage = stage,
-                finalName = name,
+                finalName = targetName,
                 targetParentIdentity = directory.identity,
                 expectedSizeBytes = expectedSize,
                 timeoutMillis = transferDeadlineMillis(expectedSize),

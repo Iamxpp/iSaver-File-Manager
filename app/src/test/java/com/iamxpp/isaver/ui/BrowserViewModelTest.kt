@@ -1293,7 +1293,7 @@ class BrowserViewModelTest {
             FakeFileSystem { OperationResult.Success(emptyList()) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
-            moveFile = { entry, sourceParent, targetParent ->
+            moveFile = { entry, sourceParent, targetParent, _ ->
                 requests += Triple(entry, sourceParent, targetParent)
                 OperationResult.Success(output)
             },
@@ -1323,7 +1323,7 @@ class BrowserViewModelTest {
             FakeFileSystem { OperationResult.Success(emptyList()) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
-            moveFile = { _, _, _ -> calls += 1; error("must not dispatch") },
+            moveFile = { _, _, _, _ -> calls += 1; error("must not dispatch") },
         )
         vm.openRoot(sourceDirectory, "来源")
         advanceUntilIdle()
@@ -1351,7 +1351,7 @@ class BrowserViewModelTest {
             FakeFileSystem { OperationResult.Success(listOf(first, second)) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
-            moveFile = { selected, _, _ ->
+            moveFile = { selected, _, _, _ ->
                 requests += selected
                 OperationResult.Success(outputs[requests.lastIndex])
             },
@@ -1373,7 +1373,7 @@ class BrowserViewModelTest {
         assertNull(vm.state.value.fileMoveError)
     }
 
-    @Test fun `multiple move partial failure reports completed count without replay`() = runTest {
+    @Test fun `multiple move conflict pauses and keep both resumes without replay`() = runTest {
         val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
         val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
         val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
@@ -1384,10 +1384,15 @@ class BrowserViewModelTest {
             FakeFileSystem { OperationResult.Success(listOf(first, second)) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
-            moveFile = { _, _, _ ->
+            moveFile = { selected, _, _, action ->
                 calls += 1
-                if (calls == 1) OperationResult.Success(output)
-                else OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+                when {
+                    selected == first -> OperationResult.Success(output)
+                    action == com.iamxpp.isaver.fileops.ConflictAction.KEEP_BOTH -> OperationResult.Success(
+                        entry("second (1).txt", EntryType.FILE, path = "${targetDirectory.value}/second (1).txt"),
+                    )
+                    else -> OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+                }
             },
         )
         vm.openRoot(sourceDirectory, "来源")
@@ -1400,9 +1405,59 @@ class BrowserViewModelTest {
         advanceUntilIdle()
 
         assertEquals(2, calls)
-        assertNull(vm.state.value.moveSelection)
+        assertEquals("second.txt", vm.state.value.conflictPrompt?.entryName)
+        assertEquals(1, vm.state.value.moveCompletedCount)
         assertEquals(output, vm.state.value.movedOutput)
-        assertEquals("已移动 1/2 项；目标位置已存在同名文件", vm.state.value.fileMoveError?.userMessage)
+
+        vm.resolveConflict(com.iamxpp.isaver.fileops.ConflictAction.KEEP_BOTH, applyToAll = true)
+        advanceUntilIdle()
+
+        assertEquals(3, calls)
+        assertNull(vm.state.value.conflictPrompt)
+        assertNull(vm.state.value.moveSelection)
+        assertEquals(2, vm.state.value.moveCompletedCount)
+        assertNull(vm.state.value.fileMoveError)
+    }
+
+    @Test fun `skip all skips only later conflicts and still processes non conflicting files`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
+        val second = entry("second.txt", EntryType.FILE, path = "${sourceDirectory.value}/second.txt")
+        val third = entry("third.txt", EntryType.FILE, path = "${sourceDirectory.value}/third.txt")
+        val calls = mutableListOf<String>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second, third)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            copyFile = { selected, _, _, _ ->
+                calls += selected.name
+                when (selected) {
+                    first -> OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+                    second -> OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+                    else -> OperationResult.Success(
+                        entry(selected.name, EntryType.FILE, path = "${targetDirectory.value}/${selected.name}"),
+                    )
+                }
+            },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+        vm.selectEntry(third)
+
+        vm.beginCopySelection()
+        vm.copyTo(targetDirectory)
+        advanceUntilIdle()
+        vm.resolveConflict(com.iamxpp.isaver.fileops.ConflictAction.SKIP, applyToAll = true)
+        advanceUntilIdle()
+
+        assertEquals(listOf("first.txt", "second.txt", "third.txt"), calls)
+        assertEquals(1, vm.state.value.copyCompletedCount)
+        assertEquals("third.txt", vm.state.value.copiedOutput?.name)
+        assertNull(vm.state.value.conflictPrompt)
+        assertNull(vm.state.value.fileCopyError)
     }
 
     @Test fun `single file rename emits renamed output and refreshes the current directory`() = runTest {
@@ -1460,7 +1515,7 @@ class BrowserViewModelTest {
             FakeFileSystem { OperationResult.Success(emptyList()) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
-            copyFile = { selected, sourceParent, targetParent ->
+            copyFile = { selected, sourceParent, targetParent, _ ->
                 requests += Triple(selected, sourceParent, targetParent)
                 OperationResult.Success(output)
             },
@@ -1513,7 +1568,7 @@ class BrowserViewModelTest {
             FakeFileSystem { OperationResult.Success(emptyList()) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
-            copyFile = { _, _, _ -> calls += 1; error("must not dispatch") },
+            copyFile = { _, _, _, _ -> calls += 1; error("must not dispatch") },
         )
         vm.openRoot(sourceDirectory, "来源")
         advanceUntilIdle()
