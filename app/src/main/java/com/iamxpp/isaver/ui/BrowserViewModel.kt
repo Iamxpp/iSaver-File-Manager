@@ -2,6 +2,8 @@ package com.iamxpp.isaver.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.iamxpp.isaver.bookmarks.Bookmark
+import com.iamxpp.isaver.bookmarks.BookmarkRepository
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
@@ -73,10 +75,12 @@ class BrowserViewModel(
     private val checksumFile: suspend (DirectoryEntry) -> OperationResult<String> = {
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法计算校验和")
     },
+    private val bookmarkRepository: BookmarkRepository? = null,
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
     private val stack = ArrayDeque<RootPath>()
+    private val forwardStack = ArrayDeque<RootPath>()
     private val mutableState = MutableStateFlow(BrowserUiState(currentPath = initialPath))
     private var loadJob: Job? = null
     private var presentationJob: Job? = null
@@ -116,11 +120,22 @@ class BrowserViewModel(
                 if (sortChanged) refreshPresentation()
             }
         }
+        bookmarkRepository?.let { repository ->
+            viewModelScope.launch {
+                repository.bookmarks.collect { bookmarks ->
+                    mutableState.value = mutableState.value.copy(
+                        bookmarks = bookmarks,
+                        currentPathBookmarked = bookmarks.any { it.path == mutableState.value.currentPath },
+                    )
+                }
+            }
+        }
     }
 
     fun enterDirectory(entry: DirectoryEntry): Boolean {
         if (entry.type != EntryType.DIRECTORY) return false
         stack.addLast(mutableState.value.currentPath)
+        forwardStack.clear()
         load(entry.path)
         return true
     }
@@ -1161,6 +1176,7 @@ class BrowserViewModel(
 
     fun openRoot(path: RootPath, title: String, recordAccess: Boolean = true) {
         stack.clear()
+        forwardStack.clear()
         selectedRootPath = path
         mutableState.value = mutableState.value.copy(rootTitle = title)
         load(path, recordAccess = recordAccess)
@@ -1168,8 +1184,32 @@ class BrowserViewModel(
 
     fun back(): BrowserBackResult {
         val previous = stack.removeLastOrNull() ?: return BrowserBackResult.RETURN_HOME
+        forwardStack.addLast(mutableState.value.currentPath)
         load(previous)
         return BrowserBackResult.NAVIGATED
+    }
+
+    fun forward(): Boolean {
+        val next = forwardStack.removeLastOrNull() ?: return false
+        stack.addLast(mutableState.value.currentPath)
+        load(next)
+        return true
+    }
+
+    fun toggleCurrentBookmark() {
+        val repository = bookmarkRepository ?: return
+        val current = mutableState.value
+        viewModelScope.launch {
+            current.bookmarks.firstOrNull { it.path == current.currentPath }?.let { repository.remove(it) }
+                ?: repository.add(
+                    current.currentPath,
+                    if (current.currentPath == selectedRootPath) current.rootTitle else current.title,
+                )
+        }
+    }
+
+    fun openBookmark(bookmark: Bookmark) {
+        openRoot(bookmark.path, bookmark.displayName)
     }
 
     fun retry() = load(mutableState.value.currentPath)
@@ -1288,12 +1328,15 @@ class BrowserViewModel(
             totalCount = cachedEntries.size,
             refreshing = true,
             canGoBack = stack.isNotEmpty(),
+            canGoForward = forwardStack.isNotEmpty(),
             hasMore = cachedEntries.size > PAGE_SIZE,
             canCreateDirectory = cachedSnapshot?.parentWritable == true && !RootPathRiskPolicy.isProtected(path),
             locationTarget = locationTarget,
             displayMode = previousState.displayMode,
             sortSpec = previousState.sortSpec,
             searchQuery = previousState.searchQuery,
+            bookmarks = previousState.bookmarks,
+            currentPathBookmarked = previousState.bookmarks.any { it.path == path },
             selectedEntries = restoredSelection?.entries?.toSet()
                 ?: restoredCopySelection?.entries?.toSet()
                 ?: emptySet(),

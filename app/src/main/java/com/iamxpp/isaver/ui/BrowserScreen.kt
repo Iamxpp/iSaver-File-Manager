@@ -80,6 +80,9 @@ fun BrowserScreen(
     state: BrowserUiState,
     onEnterDirectory: (DirectoryEntry) -> Unit,
     onBack: () -> Unit,
+    onForward: () -> Unit = {},
+    onToggleCurrentBookmark: () -> Unit = {},
+    onOpenBookmark: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit = {},
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
@@ -144,6 +147,7 @@ fun BrowserScreen(
     var batchRenameDialogVisible by remember { mutableStateOf(false) }
     var taskCenterVisible by remember { mutableStateOf(false) }
     var trashVisible by remember { mutableStateOf(false) }
+    var bookmarksVisible by remember { mutableStateOf(false) }
     var deleteEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
 
     LaunchedEffect(state.currentPath) {
@@ -220,6 +224,21 @@ fun BrowserScreen(
                     onOpenTrash = {
                         menuExpanded = false
                         trashVisible = true
+                    },
+                    onGoForward = if (state.canGoForward) {
+                        {
+                            menuExpanded = false
+                            onForward()
+                        }
+                    } else null,
+                    onToggleBookmark = {
+                        menuExpanded = false
+                        onToggleCurrentBookmark()
+                    },
+                    currentPathBookmarked = state.currentPathBookmarked,
+                    onOpenBookmarks = {
+                        menuExpanded = false
+                        bookmarksVisible = true
                     },
                 )
             },
@@ -470,6 +489,16 @@ fun BrowserScreen(
             onRestore = onRestoreTrashItem,
             onDelete = onDeleteTrashItemPermanently,
             onDismiss = { trashVisible = false },
+        )
+    }
+    if (bookmarksVisible) {
+        BookmarkDialog(
+            bookmarks = state.bookmarks,
+            onOpen = {
+                bookmarksVisible = false
+                onOpenBookmark(it)
+            },
+            onDismiss = { bookmarksVisible = false },
         )
     }
     when (remoteConnectionState) {
@@ -1050,6 +1079,36 @@ private fun TrashDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") } },
+    )
+}
+
+@Composable
+private fun BookmarkDialog(
+    bookmarks: List<com.iamxpp.isaver.bookmarks.Bookmark>,
+    onOpen: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("书签") },
+        text = {
+            if (bookmarks.isEmpty()) {
+                Text("暂无书签")
+            } else {
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(bookmarks, key = { it.path.value }) { bookmark ->
+                        ListItem(
+                            headlineContent = { Text(bookmark.displayName) },
+                            supportingContent = {
+                                Text(bookmark.path.value, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            },
+                            modifier = Modifier.clickable { onOpen(bookmark) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
     )
 }
 

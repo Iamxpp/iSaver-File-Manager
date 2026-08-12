@@ -6,8 +6,11 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CustomLocationEntity::class, RecentItemEntity::class, OperationTaskEntity::class, TrashItemEntity::class],
-    version = 5,
+    entities = [
+        CustomLocationEntity::class, RecentItemEntity::class, OperationTaskEntity::class,
+        TrashItemEntity::class, BookmarkEntity::class,
+    ],
+    version = 6,
     exportSchema = true,
 )
 abstract class ISaverDatabase : RoomDatabase() {
@@ -15,6 +18,7 @@ abstract class ISaverDatabase : RoomDatabase() {
     abstract fun recentItemDao(): RecentItemDao
     abstract fun operationTaskDao(): OperationTaskDao
     abstract fun trashItemDao(): TrashItemDao
+    abstract fun bookmarkDao(): BookmarkDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -102,6 +106,21 @@ abstract class ISaverDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE `operation_tasks` ADD COLUMN `totalBytes` INTEGER")
                 database.execSQL(
                     "ALTER TABLE `operation_tasks` ADD COLUMN `completedBytes` INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `bookmarks` (
+                        `absolutePath` TEXT NOT NULL,
+                        `displayName` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`absolutePath`)
+                    )
+                    """.trimIndent(),
                 )
             }
         }

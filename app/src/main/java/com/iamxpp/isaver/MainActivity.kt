@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
             operationTaskStore = app.operationTaskRepository,
             trashRepository = app.trashRepository,
             checksumFile = app.fileChecksumRepository::sha256,
+            bookmarkRepository = app.bookmarkRepository,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -377,6 +378,9 @@ class MainActivity : ComponentActivity() {
                             !fileOperationInFlight && browserViewModel.enterDirectory(entry)
                         },
                         onBrowserBack = ::handleBrowserBack,
+                        onBrowserForward = { browserViewModel.forward() },
+                        onToggleCurrentBookmark = browserViewModel::toggleCurrentBookmark,
+                        onOpenBookmark = browserViewModel::openBookmark,
                         onRetryBrowser = browserViewModel::retry,
                         onLoadMore = browserViewModel::loadMore,
                         onSearchQueryChange = browserViewModel::setSearchQuery,
@@ -549,6 +553,7 @@ internal class BrowserViewModelFactory(
     private val fileRenameRepository: com.iamxpp.isaver.fileops.FileRenameRepository? = null,
     private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
     private val trashRepository: com.iamxpp.isaver.trash.TrashRepository? = null,
+    private val bookmarkRepository: com.iamxpp.isaver.bookmarks.BookmarkRepository? = null,
     private val checksumFile: suspend (com.iamxpp.isaver.domain.DirectoryEntry) -> OperationResult<String> = {
         OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法计算校验和")
     },
@@ -604,6 +609,7 @@ internal class BrowserViewModelFactory(
             operationTaskStore = operationTaskStore,
             trashRepository = trashRepository,
             checksumFile = checksumFile,
+            bookmarkRepository = bookmarkRepository,
         ) as T
     }
 }

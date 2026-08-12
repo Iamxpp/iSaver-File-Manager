@@ -12,6 +12,7 @@ import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.ui.files.SortSpec
+import com.iamxpp.isaver.bookmarks.Bookmark
 
 data class BrowserUiState(
     val currentPath: RootPath,
@@ -24,6 +25,7 @@ data class BrowserUiState(
     val refreshing: Boolean = false,
     val errorMessage: String? = null,
     val canGoBack: Boolean = false,
+    val canGoForward: Boolean = false,
     val hasMore: Boolean = false,
     val canCreateDirectory: Boolean = false,
     val creatingDirectory: Boolean = false,
@@ -41,6 +43,8 @@ data class BrowserUiState(
     val checksumRunning: Boolean = false,
     val checksumValue: String? = null,
     val checksumError: BrowserOperationError? = null,
+    val bookmarks: List<Bookmark> = emptyList(),
+    val currentPathBookmarked: Boolean = false,
     val archiveToOpen: DirectoryEntry? = null,
     val openingFile: Boolean = false,
     val externalFileToOpen: ExternalFileGrant? = null,

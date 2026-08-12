@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsNode
+import com.iamxpp.isaver.bookmarks.Bookmark
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
@@ -33,7 +34,6 @@ import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskType
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.trash.TrashItemState
-import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesSaveAction
 import com.iamxpp.isaver.ui.files.SortDirection
@@ -45,6 +45,43 @@ import org.junit.Rule
 import org.junit.Test
 
 class BrowserScreenTest {
+    @Test fun bookmarkAndForwardMenuActionsAreWired() {
+        val bookmark = Bookmark(
+            path = RootPath.parse("/data/local/tmp/work").getOrThrow(),
+            displayName = "工作目录",
+            createdAt = 10L,
+        )
+        var forwarded = false
+        var toggled = false
+        var opened: Bookmark? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state().copy(
+                    canGoForward = true,
+                    currentPathBookmarked = true,
+                    bookmarks = listOf(bookmark),
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onForward = { forwarded = true },
+                onToggleCurrentBookmark = { toggled = true },
+                onOpenBookmark = { opened = it },
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-overflow").performClick()
+        compose.onNodeWithText("前进").performClick()
+        assertTrue(forwarded)
+
+        compose.onNodeWithTag("files-top-bar-overflow").performClick()
+        compose.onNodeWithText("取消收藏当前路径").performClick()
+        assertTrue(toggled)
+
+        compose.onNodeWithTag("files-top-bar-overflow").performClick()
+        compose.onNodeWithText("书签").performClick()
+        compose.onNodeWithText("工作目录").assertIsDisplayed().performClick()
+        assertEquals(bookmark, opened)
+    }
+
     @Test fun conflictDialogForwardsSingleAndTaskWideDecisions() {
         val decisions = mutableListOf<Pair<ConflictAction, Boolean>>()
         val prompt = BrowserConflictPrompt(
@@ -717,25 +754,16 @@ class BrowserScreenTest {
         assertEquals("archive.zip", output)
     }
 
-    @Test fun serverMenuOpensSecureSftpDraftDialog() {
-        var draft: com.iamxpp.isaver.remote.RemoteConnectionDraft? = null
+    @Test fun releaseBrowserDoesNotExposeFrozenRemoteServerEntry() {
         compose.setContent {
             BrowserScreen(
                 state = state(),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
-                onConnectServer = { draft = it },
+                onConnectServer = {},
             )
         }
         compose.onNodeWithContentDescription("更多操作").performClick()
-        compose.onNodeWithText("连接服务器").performClick()
-        compose.onNodeWithText("SFTP").assertIsDisplayed()
-        compose.onNodeWithContentDescription("服务器地址").performTextInput("example.test")
-        compose.onNodeWithContentDescription("用户名").performTextInput("user")
-        compose.onNodeWithContentDescription("密码").performTextInput("secret")
-        compose.onNodeWithContentDescription("安全指纹").performTextInput("SHA256:key")
-        compose.onNodeWithText("连接").performClick()
-        assertEquals(RemoteProtocol.SFTP, draft?.protocol)
-        assertEquals("example.test", draft?.host)
+        compose.onAllNodesWithText("连接服务器").assertCountEquals(0)
     }
 
     @Test fun listGridEntriesProgressAndLocationTargetAreVisible() {

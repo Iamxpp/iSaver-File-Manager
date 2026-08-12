@@ -89,6 +89,18 @@ class ISaverDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration5To6CreatesBookmarks() {
+        migrationHelper.createDatabase(TEST_DATABASE, 5).close()
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            TEST_DATABASE, 6, true, ISaverDatabase.MIGRATION_5_6,
+        )
+        migrated.query("SELECT absolutePath, displayName, createdAt FROM bookmarks").use { cursor ->
+            assertEquals(3, cursor.columnCount)
+            assertEquals(0, cursor.count)
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "isaver-migration-test"
     }

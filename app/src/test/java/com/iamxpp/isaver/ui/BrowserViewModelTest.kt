@@ -2,6 +2,9 @@ package com.iamxpp.isaver.ui
 
 import com.iamxpp.isaver.data.local.BrowserPreferences
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.bookmarks.BookmarkRepository
+import com.iamxpp.isaver.data.local.BookmarkDao
+import com.iamxpp.isaver.data.local.BookmarkEntity
 import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
@@ -26,6 +29,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.withContext
@@ -881,6 +885,70 @@ class BrowserViewModelTest {
         assertFalse(vm.state.value.canGoBack)
         assertEquals(BrowserBackResult.RETURN_HOME, vm.back())
         assertEquals("/data/local/tmp", fs.readDirectories.last())
+    }
+
+    @Test fun `back and forward preserve history while new navigation clears forward`() = runTest {
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+        vm.openInitial()
+        advanceUntilIdle()
+        val first = entry("first", EntryType.DIRECTORY, "/storage/emulated/0/first")
+        val second = entry("second", EntryType.DIRECTORY, "/storage/emulated/0/first/second")
+        vm.enterDirectory(first)
+        advanceUntilIdle()
+        vm.enterDirectory(second)
+        advanceUntilIdle()
+
+        assertEquals(BrowserBackResult.NAVIGATED, vm.back())
+        advanceUntilIdle()
+        assertEquals(first.path, vm.state.value.currentPath)
+        assertTrue(vm.state.value.canGoForward)
+
+        assertTrue(vm.forward())
+        advanceUntilIdle()
+        assertEquals(second.path, vm.state.value.currentPath)
+        assertFalse(vm.state.value.canGoForward)
+
+        vm.back()
+        advanceUntilIdle()
+        vm.enterDirectory(entry("other", EntryType.DIRECTORY, "/storage/emulated/0/first/other"))
+        advanceUntilIdle()
+        assertFalse(vm.state.value.canGoForward)
+        assertFalse(vm.forward())
+    }
+
+    @Test fun `toggles current path bookmark and reopens it as a new root`() = runTest {
+        val repository = BookmarkRepository(FakeBookmarkDao()) { 123L }
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            bookmarkRepository = repository,
+        )
+        val path = RootPath.parse("/data/local/tmp/bookmarked").getOrThrow()
+        vm.openRoot(path, "收藏目录")
+        advanceUntilIdle()
+
+        vm.toggleCurrentBookmark()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.currentPathBookmarked)
+        assertEquals(path, vm.state.value.bookmarks.single().path)
+
+        vm.openInitial()
+        advanceUntilIdle()
+        vm.openBookmark(vm.state.value.bookmarks.single())
+        advanceUntilIdle()
+        assertEquals(path, vm.state.value.currentPath)
+        assertEquals("收藏目录", vm.state.value.rootTitle)
+        assertFalse(vm.state.value.canGoBack)
+
+        vm.toggleCurrentBookmark()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.currentPathBookmarked)
+        assertTrue(vm.state.value.bookmarks.isEmpty())
     }
 
     @Test fun `back at an opened location root requests the locations home`() = runTest {
@@ -2097,6 +2165,29 @@ class BrowserViewModelTest {
             sortWrites += sortSpec
         }
         fun emit(value: BrowserPreferences) { preferences.value = value }
+    }
+
+    private class FakeBookmarkDao : BookmarkDao {
+        private val rows = linkedMapOf<String, BookmarkEntity>()
+        private val flow = MutableStateFlow<List<BookmarkEntity>>(emptyList())
+
+        override fun observeAll(): Flow<List<BookmarkEntity>> = flow
+
+        override suspend fun upsert(entity: BookmarkEntity) {
+            rows[entity.absolutePath] = entity
+            emit()
+        }
+
+        override suspend fun delete(entity: BookmarkEntity) {
+            rows.remove(entity.absolutePath)
+            emit()
+        }
+
+        private fun emit() {
+            flow.value = rows.values.sortedWith(
+                compareByDescending<BookmarkEntity> { it.createdAt }.thenBy { it.absolutePath },
+            )
+        }
     }
 
     private class RecordingOperationTaskStore : OperationTaskStore {

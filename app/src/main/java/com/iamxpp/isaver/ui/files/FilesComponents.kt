@@ -415,6 +415,10 @@ fun FilesOverflowMenu(
     onAddLocation: (() -> Unit)? = null,
     onOpenTasks: (() -> Unit)? = null,
     onOpenTrash: (() -> Unit)? = null,
+    onGoForward: (() -> Unit)? = null,
+    onToggleBookmark: (() -> Unit)? = null,
+    currentPathBookmarked: Boolean = false,
+    onOpenBookmarks: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     DropdownMenu(
@@ -448,6 +452,18 @@ fun FilesOverflowMenu(
         }
         if (onOpenTrash != null) {
             FilesMenuItem(text = "回收站", onClick = onOpenTrash)
+        }
+        if (onGoForward != null) {
+            FilesMenuItem(text = "前进", onClick = onGoForward)
+        }
+        if (onToggleBookmark != null) {
+            FilesMenuItem(
+                text = if (currentPathBookmarked) "取消收藏当前路径" else "收藏当前路径",
+                onClick = onToggleBookmark,
+            )
+        }
+        if (onOpenBookmarks != null) {
+            FilesMenuItem(text = "书签", onClick = onOpenBookmarks)
         }
         FilesMenuItem(
             text = "压缩文件",
