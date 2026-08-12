@@ -78,6 +78,29 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun multipleSelectionForwardsShareFromSelectionBar() {
+        val first = entry("first.txt", EntryType.FILE)
+        val second = entry("second.pdf", EntryType.FILE)
+        var shared = false
+        compose.setContent {
+            BrowserScreen(
+                state = state(
+                    entries = listOf(first, second),
+                    allEntries = listOf(first, second),
+                    selectedEntries = setOf(first, second),
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onShareSelection = { shared = true },
+            )
+        }
+
+        compose.onNodeWithText("已选择 2 项").assertIsDisplayed()
+        compose.onNodeWithText("分享").assertIsDisplayed().performClick()
+
+        compose.runOnIdle { assertTrue(shared) }
+    }
+
+    @Test
     fun longPressFileForwardsMoveFromActionSheet() {
         val file = entry("report.pdf", EntryType.FILE)
         var moved: DirectoryEntry? = null

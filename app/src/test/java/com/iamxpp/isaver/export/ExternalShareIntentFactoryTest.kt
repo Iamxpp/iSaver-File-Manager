@@ -34,4 +34,34 @@ class ExternalShareIntentFactoryTest {
         assertTrue((intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
         assertFalse((intent.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0)
     }
+
+    @Test
+    fun `multiple file share intent carries all streams and read grant`() {
+        val grants = listOf(
+            ExternalFileGrant(
+                contentUri = "content://com.iamxpp.isaver.external-file/file/${"ab".repeat(32)}",
+                token = "ab".repeat(32),
+                displayName = "one.txt",
+                mimeType = "text/plain",
+            ),
+            ExternalFileGrant(
+                contentUri = "content://com.iamxpp.isaver.external-file/file/${"cd".repeat(32)}",
+                token = "cd".repeat(32),
+                displayName = "two.pdf",
+                mimeType = "application/pdf",
+            ),
+        )
+
+        val intent = ExternalShareIntentFactory.create(grants)
+
+        assertEquals(Intent.ACTION_SEND_MULTIPLE, intent.action)
+        assertEquals("*/*", intent.type)
+        assertEquals(
+            grants.map { Uri.parse(it.contentUri) },
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java),
+        )
+        assertEquals(2, intent.clipData?.itemCount)
+        assertTrue((intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
+        assertFalse((intent.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0)
+    }
 }

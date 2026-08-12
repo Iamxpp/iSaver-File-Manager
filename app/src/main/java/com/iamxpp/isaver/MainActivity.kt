@@ -181,13 +181,18 @@ class MainActivity : ComponentActivity() {
                         browserViewModel.completeExternalOpen(grant, launched)
                     }
 
-                    LaunchedEffect(browserState.externalFileToShare) {
-                        val grant = browserState.externalFileToShare ?: return@LaunchedEffect
+                    LaunchedEffect(browserState.externalFilesToShare) {
+                        val grants = browserState.externalFilesToShare.takeIf { it.isNotEmpty() }
+                            ?: return@LaunchedEffect
                         val launched = try {
                             startActivity(
                                 Intent.createChooser(
-                                    ExternalShareIntentFactory.create(grant),
-                                    "分享文件",
+                                    if (grants.size == 1) {
+                                        ExternalShareIntentFactory.create(grants.single())
+                                    } else {
+                                        ExternalShareIntentFactory.create(grants)
+                                    },
+                                    if (grants.size == 1) "分享文件" else "分享 ${grants.size} 个文件",
                                 ),
                             )
                             true
@@ -196,7 +201,7 @@ class MainActivity : ComponentActivity() {
                         } catch (_: SecurityException) {
                             false
                         }
-                        browserViewModel.completeExternalShare(grant, launched)
+                        browserViewModel.completeExternalShare(grants, launched)
                     }
 
                     LaunchedEffect(browserState.movedOutput) {
@@ -359,6 +364,7 @@ class MainActivity : ComponentActivity() {
                         onDismissFileInfo = browserViewModel::dismissFileInfo,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onShareBrowserEntry = browserViewModel::shareEntry,
+                        onShareBrowserSelection = browserViewModel::shareSelection,
                         onDismissFileShareError = browserViewModel::dismissFileShareError,
                         onMoveBrowserEntry = { entry ->
                             if (!pickerActive && browserViewModel.beginMove(entry)) {

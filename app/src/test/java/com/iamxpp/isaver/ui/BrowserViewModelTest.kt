@@ -1116,6 +1116,87 @@ class BrowserViewModelTest {
         assertNull(vm.state.value.fileShareError)
     }
 
+    @Test fun `multiple file share prepares every grant and clears selection after launch`() = runTest {
+        val first = entry("first.txt", EntryType.FILE)
+        val second = entry("second.pdf", EntryType.FILE)
+        val grants = listOf(
+            ExternalFileGrant("content://test/first", "ab".repeat(32), first.name, "text/plain"),
+            ExternalFileGrant("content://test/second", "cd".repeat(32), second.name, "application/pdf"),
+        )
+        val shared = mutableListOf<DirectoryEntry>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            shareFile = { selected ->
+                shared += selected
+                OperationResult.Success(grants[shared.lastIndex])
+            },
+        )
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+
+        vm.shareSelection()
+        advanceUntilIdle()
+
+        assertEquals(listOf(first, second), shared)
+        assertEquals(grants, vm.state.value.externalFilesToShare)
+        vm.completeExternalShare(grants, launched = true)
+        assertTrue(vm.state.value.selectedEntries.isEmpty())
+        assertTrue(vm.state.value.externalFilesToShare.isEmpty())
+    }
+
+    @Test fun `multiple share rejects directories before export`() = runTest {
+        val file = entry("first.txt", EntryType.FILE)
+        val directory = entry("folder", EntryType.DIRECTORY)
+        var exportCalls = 0
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            shareFile = {
+                exportCalls += 1
+                error("must not export")
+            },
+        )
+        vm.selectEntry(file)
+        vm.selectEntry(directory)
+
+        vm.shareSelection()
+        advanceUntilIdle()
+
+        assertEquals(0, exportCalls)
+        assertEquals(ErrorCode.SOURCE_UNREADABLE, vm.state.value.fileShareError?.code)
+    }
+
+    @Test fun `multiple share failure revokes grants prepared before the failure`() = runTest {
+        val first = entry("first.txt", EntryType.FILE)
+        val second = entry("second.pdf", EntryType.FILE)
+        val grant = ExternalFileGrant("content://test/first", "ef".repeat(32), first.name, "text/plain")
+        val revoked = mutableListOf<ExternalFileGrant>()
+        var calls = 0
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            shareFile = {
+                calls += 1
+                if (calls == 1) OperationResult.Success(grant)
+                else OperationResult.Failure(ErrorCode.SOURCE_UNREADABLE, "无法分享文件")
+            },
+            revokeExport = revoked::add,
+        )
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+
+        vm.shareSelection()
+        advanceUntilIdle()
+
+        assertEquals(listOf(grant), revoked)
+        assertTrue(vm.state.value.externalFilesToShare.isEmpty())
+        assertEquals(ErrorCode.SOURCE_UNREADABLE, vm.state.value.fileShareError?.code)
+    }
+
     @Test fun `single file move keeps source identity while choosing and emits moved output`() = runTest {
         val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
         val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()

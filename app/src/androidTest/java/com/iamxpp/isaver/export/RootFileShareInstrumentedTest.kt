@@ -74,6 +74,45 @@ class RootFileShareInstrumentedTest {
         }
     }
 
+    @Test
+    fun multipleRootFilesExportForActionSendMultipleAndEachGrantIsSingleUse() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        resetTarget(app)
+        try {
+            root(app, "printf %s first-share > ${quote(FIRST_SOURCE)}")
+            root(app, "printf %s second-share > ${quote(SECOND_SOURCE)}")
+            val entries = listOf(FIRST_SOURCE, SECOND_SOURCE).map { source ->
+                val path = RootPath.parse(source).getOrThrow()
+                (app.rootFileSystem.stat(path) as OperationResult.Success).value
+            }
+            val grants = entries.map { entry ->
+                (app.rootExportRepository.share(entry) as OperationResult.Success).value
+            }
+
+            val intent = ExternalShareIntentFactory.create(grants)
+
+            assertEquals(Intent.ACTION_SEND_MULTIPLE, intent.action)
+            assertEquals(2, intent.clipData?.itemCount)
+            grants.forEachIndexed { index, grant ->
+                val uri = Uri.parse(grant.contentUri)
+                assertEquals(uri, intent.clipData?.getItemAt(index)?.uri)
+                val bytes = app.contentResolver.openFileDescriptor(uri, "r")!!.use {
+                    ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
+                }
+                assertArrayEquals(
+                    if (index == 0) "first-share".toByteArray() else "second-share".toByteArray(),
+                    bytes,
+                )
+                assertThrows(FileNotFoundException::class.java) {
+                    app.contentResolver.openFileDescriptor(uri, "r")
+                }
+            }
+        } finally {
+            root(app, "rm -rf -- ${quote(TARGET)}")
+        }
+    }
+
     private suspend fun resetTarget(app: ISaverApplication) {
         root(app, "rm -rf -- ${quote(TARGET)}; mkdir -p -- ${quote(TARGET)}")
     }
@@ -90,5 +129,7 @@ class RootFileShareInstrumentedTest {
     private companion object {
         const val TARGET = "/data/local/tmp/isaver-test/share"
         const val SOURCE = "$TARGET/report.txt"
+        const val FIRST_SOURCE = "$TARGET/first.txt"
+        const val SECOND_SOURCE = "$TARGET/second.txt"
     }
 }

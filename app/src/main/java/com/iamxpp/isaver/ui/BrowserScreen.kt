@@ -86,6 +86,7 @@ fun BrowserScreen(
     onDismissFileInfo: () -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
+    onShareSelection: (() -> Unit)? = null,
     onDismissFileShareError: () -> Unit = {},
     onMoveEntry: ((DirectoryEntry) -> Unit)? = null,
     onDismissFileMoveError: () -> Unit = {},
@@ -185,6 +186,12 @@ fun BrowserScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("已选择 ${state.selectedEntries.size} 项", modifier = Modifier.weight(1f))
+                if (onShareSelection != null) {
+                    TextButton(
+                        enabled = !state.sharingFile,
+                        onClick = onShareSelection,
+                    ) { Text("分享") }
+                }
                 TextButton(onClick = onClearSelection) { Text("清除") }
             }
         }

@@ -166,46 +166,70 @@ class BrowserViewModel(
     }
 
     fun shareEntry(entry: DirectoryEntry) {
+        shareEntries(listOf(entry))
+    }
+
+    fun shareSelection() {
+        shareEntries(mutableState.value.selectedEntries.toList())
+    }
+
+    private fun shareEntries(entries: List<DirectoryEntry>) {
         val request = cancelExternalShare()
         cancelExternalOpen()
-        if (entry.type != EntryType.FILE || !entry.readable || entry.symbolicLink) {
+        if (
+            entries.isEmpty() ||
+            entries.any { it.type != EntryType.FILE || !it.readable || it.symbolicLink }
+        ) {
             mutableState.value = mutableState.value.copy(
-                fileShareError = BrowserOperationError(ErrorCode.SOURCE_UNREADABLE, "无法分享此文件"),
+                fileShareError = BrowserOperationError(
+                    ErrorCode.SOURCE_UNREADABLE,
+                    if (entries.size > 1) "多文件分享不能包含目录或不可读项目" else "无法分享此文件",
+                ),
             )
             return
         }
         mutableState.value = mutableState.value.copy(
             sharingFile = true,
-            externalFileToShare = null,
+            externalFilesToShare = emptyList(),
             fileShareError = null,
         )
         shareFileJob = viewModelScope.launch {
+            val grants = mutableListOf<ExternalFileGrant>()
             try {
-                when (val result = shareFile(entry)) {
-                    is OperationResult.Failure -> if (request == shareFileGeneration) {
-                        mutableState.value = mutableState.value.copy(
-                            sharingFile = false,
-                            fileShareError = BrowserOperationError(result.code, result.userMessage),
-                        )
-                    }
-                    is OperationResult.Success -> {
-                        if (request != shareFileGeneration) {
-                            revokeExport(result.value)
+                for (entry in entries) {
+                    when (val result = shareFile(entry)) {
+                        is OperationResult.Failure -> {
+                            grants.forEach(revokeExport)
+                            if (request == shareFileGeneration) {
+                                mutableState.value = mutableState.value.copy(
+                                    sharingFile = false,
+                                    fileShareError = BrowserOperationError(result.code, result.userMessage),
+                                )
+                            }
                             return@launch
                         }
-                        mutableState.value = mutableState.value.copy(
-                            sharingFile = false,
-                            externalFileToShare = result.value,
-                        )
-                        recordSuccessfulFileAccess(entry)
+                        is OperationResult.Success -> grants += result.value
                     }
                 }
+                if (request != shareFileGeneration) {
+                    grants.forEach(revokeExport)
+                    return@launch
+                }
+                mutableState.value = mutableState.value.copy(
+                    sharingFile = false,
+                    externalFilesToShare = grants,
+                )
+                entries.forEach(::recordSuccessfulFileAccess)
             } catch (cancelled: CancellationException) {
+                if (mutableState.value.externalFilesToShare.map { it.token } != grants.map { it.token }) {
+                    grants.forEach(revokeExport)
+                }
                 if (request == shareFileGeneration) {
                     mutableState.value = mutableState.value.copy(sharingFile = false)
                 }
                 throw cancelled
             } catch (_: Exception) {
+                grants.forEach(revokeExport)
                 if (request == shareFileGeneration) {
                     mutableState.value = mutableState.value.copy(
                         sharingFile = false,
@@ -217,10 +241,14 @@ class BrowserViewModel(
     }
 
     fun completeExternalShare(grant: ExternalFileGrant, launched: Boolean) {
-        if (mutableState.value.externalFileToShare?.token != grant.token) return
-        if (!launched) revokeExport(grant)
+        completeExternalShare(listOf(grant), launched)
+    }
+
+    fun completeExternalShare(grants: List<ExternalFileGrant>, launched: Boolean) {
+        if (mutableState.value.externalFilesToShare.map { it.token } != grants.map { it.token }) return
+        if (!launched) grants.forEach(revokeExport)
         mutableState.value = mutableState.value.copy(
-            externalFileToShare = null,
+            externalFilesToShare = emptyList(),
             selectedEntries = if (launched) emptySet() else mutableState.value.selectedEntries,
             fileShareError = if (launched) null else BrowserOperationError(
                 ErrorCode.COMMAND_FAILED,
@@ -846,10 +874,10 @@ class BrowserViewModel(
     private fun cancelExternalShare(): Long {
         shareFileGeneration += 1L
         shareFileJob?.cancel()
-        mutableState.value.externalFileToShare?.let(revokeExport)
+        mutableState.value.externalFilesToShare.forEach(revokeExport)
         mutableState.value = mutableState.value.copy(
             sharingFile = false,
-            externalFileToShare = null,
+            externalFilesToShare = emptyList(),
         )
         return shareFileGeneration
     }

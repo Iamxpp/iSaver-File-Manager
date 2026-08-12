@@ -36,7 +36,7 @@ data class BrowserUiState(
     val externalFileToOpen: ExternalFileGrant? = null,
     val fileOpenError: BrowserOperationError? = null,
     val sharingFile: Boolean = false,
-    val externalFileToShare: ExternalFileGrant? = null,
+    val externalFilesToShare: List<ExternalFileGrant> = emptyList(),
     val fileShareError: BrowserOperationError? = null,
     val moveSelection: BrowserMoveSelection? = null,
     val movingFile: Boolean = false,
@@ -54,6 +54,7 @@ data class BrowserUiState(
 ) {
     val empty: Boolean get() = !loading && !refreshing && errorMessage == null && totalCount == 0
     val selectionMode: Boolean get() = selectedEntries.isNotEmpty()
+    val externalFileToShare: ExternalFileGrant? get() = externalFilesToShare.singleOrNull()
 }
 
 data class BrowserMoveSelection(
