@@ -8,6 +8,9 @@ internal data class TransferStage(val name:String,val identity:RootFileIdentity)
 internal class RootTransferHelper(private val executable:String){
     fun listDirectory(path:String)=command("list-dir",path)
     fun readFile(path:String)=command("read-file-stdout",path)
+    fun readFileRange(path: String, offset: Long, count: Long) =
+        command("read-file-range", path, offset, count)
+    fun fileMetadata(path: String) = command("file-metadata", path)
     fun createFileNoReplace(
         original: String,
         canonical: String,

@@ -6,6 +6,7 @@ import com.iamxpp.isaver.bookmarks.BookmarkRepository
 import com.iamxpp.isaver.data.local.BookmarkDao
 import com.iamxpp.isaver.data.local.BookmarkEntity
 import com.iamxpp.isaver.data.root.DirectorySnapshot
+import com.iamxpp.isaver.data.root.RootFileMetadata
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryName
@@ -14,6 +15,7 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.RootEntryIdentity
 import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.BatchRenameMode
 import com.iamxpp.isaver.fileops.BatchRenameRule
@@ -1796,6 +1798,38 @@ class BrowserViewModelTest {
         assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
     }
 
+    @Test fun `file info only exposes metadata while path identity still matches`() = runTest {
+        val file = entry("value.txt", EntryType.FILE, path = "/data/local/tmp/value.txt")
+        val metadata = RootFileMetadata(0x1A0, 1000, 1001, 12, 34)
+        val matching = FakeFileSystem(
+            metadataBlock = { OperationResult.Success(metadata) },
+            identityBlock = { OperationResult.Success(RootEntryIdentity(12, 34)) },
+        ) { OperationResult.Success(listOf(file)) }
+        val matchingVm = BrowserViewModel(
+            matching, StandardTestDispatcher(testScheduler), defaultPreferences(),
+        )
+
+        matchingVm.showFileInfo(file)
+        advanceUntilIdle()
+
+        assertEquals(metadata, matchingVm.state.value.fileMetadata)
+        assertNull(matchingVm.state.value.fileMetadataError)
+
+        val changed = FakeFileSystem(
+            metadataBlock = { OperationResult.Success(metadata) },
+            identityBlock = { OperationResult.Success(RootEntryIdentity(12, 35)) },
+        ) { OperationResult.Success(listOf(file)) }
+        val changedVm = BrowserViewModel(
+            changed, StandardTestDispatcher(testScheduler), defaultPreferences(),
+        )
+
+        changedVm.showFileInfo(file)
+        advanceUntilIdle()
+
+        assertNull(changedVm.state.value.fileMetadata)
+        assertEquals("文件已变化，请刷新核对", changedVm.state.value.fileMetadataError)
+    }
+
     @Test fun `closing info cancels checksum and clears late result`() = runTest {
         val file = entry("value.txt", EntryType.FILE, path = "/data/local/tmp/value.txt")
         val release = CompletableDeferred<Unit>()
@@ -2122,6 +2156,12 @@ class BrowserViewModelTest {
         val createFileBlock: suspend (RootPath, EntryName) -> OperationResult<DirectoryEntry> = { _, _ -> error("unused") },
         val snapshotBlock: (suspend (RootPath) -> OperationResult<DirectorySnapshot>)? = null,
         val canonicalBlock: suspend (RootPath) -> OperationResult<RootPath> = { OperationResult.Success(it) },
+        val metadataBlock: suspend (RootPath) -> OperationResult<RootFileMetadata> = {
+            OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法读取文件属性")
+        },
+        val identityBlock: suspend (RootPath) -> OperationResult<RootEntryIdentity> = {
+            OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法读取文件身份")
+        },
         val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>,
     ) : RootFileSystem {
         val listed = mutableListOf<String>()
@@ -2145,6 +2185,8 @@ class BrowserViewModelTest {
         override suspend fun list(path: RootPath): OperationResult<List<DirectoryEntry>> { listed += path.value; return listBlock(path) }
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = statBlock(path)
         override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = canonicalBlock(path)
+        override suspend fun metadata(source: RootPath): OperationResult<RootFileMetadata> = metadataBlock(source)
+        override suspend fun identity(path: RootPath): OperationResult<RootEntryIdentity> = identityBlock(path)
         override suspend fun createDirectory(parent: RootPath, name: FolderName): OperationResult<DirectoryEntry> = createBlock(parent, name)
         override suspend fun createFileNoReplace(parent: RootPath, name: EntryName): OperationResult<DirectoryEntry> =
             createFileBlock(parent, name)

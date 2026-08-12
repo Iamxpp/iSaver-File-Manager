@@ -13,6 +13,7 @@ import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.bookmarks.Bookmark
+import com.iamxpp.isaver.data.root.RootFileMetadata
 
 data class BrowserUiState(
     val currentPath: RootPath,
@@ -40,6 +41,9 @@ data class BrowserUiState(
     val presentationError: String? = null,
     val selectedEntries: Set<DirectoryEntry> = emptySet(),
     val fileInfo: DirectoryEntry? = null,
+    val fileMetadata: RootFileMetadata? = null,
+    val fileMetadataLoading: Boolean = false,
+    val fileMetadataError: String? = null,
     val checksumRunning: Boolean = false,
     val checksumValue: String? = null,
     val checksumError: BrowserOperationError? = null,

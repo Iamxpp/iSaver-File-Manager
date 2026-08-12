@@ -428,6 +428,9 @@ fun BrowserScreen(
     state.fileInfo?.let {
         FileInfoDialog(
             entry = it,
+            metadata = state.fileMetadata,
+            metadataLoading = state.fileMetadataLoading,
+            metadataError = state.fileMetadataError,
             checksumRunning = state.checksumRunning,
             checksumValue = state.checksumValue,
             checksumError = state.checksumError?.userMessage,

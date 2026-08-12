@@ -225,6 +225,39 @@ class LibsuRootFileSystem internal constructor(
         return RootFileReadProtocol.decode(result.stdout, output, expectedSize)
     }
 
+    override suspend fun readRange(
+        source: RootPath,
+        offset: Long,
+        count: Long,
+    ): OperationResult<RootFileChunk> {
+        if (offset < 0 || count < 0 || count > RootFileRangeProtocol.MAX_RANGE_BYTES) {
+            return failure(ErrorCode.COMMAND_FAILED, "读取范围无效", "Invalid typed root file range")
+        }
+        val result = runHelperBounded(
+            transferHelper.readFileRange(source.value, offset, count),
+            maxOf(helperOperationTimeoutMillis, timeoutMillis),
+        ).getOrElse {
+            return failure(ErrorCode.COMMAND_FAILED, "无法读取来源文件", "Root range read exceeded deadline")
+        }
+        if (result.exitCode != 0) {
+            return mapExitCode(result.exitCode, result.stderr, "无法读取来源文件", "read-file-range")
+        }
+        return RootFileRangeProtocol.decode(result.stdout, offset, count)
+    }
+
+    override suspend fun metadata(source: RootPath): OperationResult<RootFileMetadata> {
+        val result = runHelperBounded(
+            transferHelper.fileMetadata(source.value),
+            helperOperationTimeoutMillis,
+        ).getOrElse {
+            return failure(ErrorCode.COMMAND_FAILED, "无法读取文件属性", "Root metadata read exceeded deadline")
+        }
+        if (result.exitCode != 0) {
+            return mapExitCode(result.exitCode, result.stderr, "无法读取文件属性", "file-metadata")
+        }
+        return RootFileMetadataProtocol.parse(result.stdout)
+    }
+
     override suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> {
         val prepared = prepareWritableDirectory(parent)
         if (prepared !is OperationResult.Success) return prepared as OperationResult.Failure
@@ -1299,11 +1332,19 @@ class LibsuRootFileSystem internal constructor(
                 if (operation == "prepare-stage") "目标目录临时文件受系统限制，请换个文件夹再试" else failureMessage,
                 "Stage directory did not pass safety checks",
             )
-            54 -> failure(
-                ErrorCode.SOURCE_UNREADABLE,
-                if (operation.isDirectoryOperation()) "无法读取来源目录" else "无法读取来源文件",
-                "Source identity or contents changed",
-            )
+            54 -> if (operation == "read-file-range") {
+                failure(
+                    ErrorCode.OUTCOME_UNCERTAIN,
+                    "文件读取结果需要核对",
+                    "Source changed during range read",
+                )
+            } else {
+                failure(
+                    ErrorCode.SOURCE_UNREADABLE,
+                    if (operation.isDirectoryOperation()) "无法读取来源目录" else "无法读取来源文件",
+                    "Source identity or contents changed",
+                )
+            }
             56 -> failure(
                 ErrorCode.SOURCE_UNREADABLE,
                 if (operation.isDirectoryOperation()) "无法读取来源目录" else "无法读取来源文件",

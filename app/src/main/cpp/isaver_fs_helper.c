@@ -52,6 +52,7 @@ enum {
 static const size_t LIST_MAX_FIELD_BYTES = 1048576U;
 static const size_t LIST_MAX_PROTOCOL_BYTES = 67108864U;
 static const unsigned long long READ_FILE_MAX_BYTES = 268435456ULL;
+static const unsigned long long READ_RANGE_MAX_BYTES = 4194304ULL;
 static const unsigned long long DIRECTORY_MAX_BYTES = 17592186044416ULL;
 static const size_t DIRECTORY_MAX_PATH_BYTES = 4096U;
 static const size_t READ_FILE_CHUNK_BYTES = 49152U;
@@ -723,6 +724,119 @@ static int identity_matches(
 ) {
     return (unsigned long long) status->st_dev == device &&
         (unsigned long long) status->st_ino == inode;
+}
+
+static int parse_decimal_u64(const char *text, unsigned long long *value) {
+    if (text == NULL || text[0] == '\0' || text[0] == '-') return 0;
+    errno = 0;
+    char *end = NULL;
+    unsigned long long parsed = strtoull(text, &end, 10);
+    if (errno != 0 || end == text || *end != '\0') return 0;
+    *value = parsed;
+    return 1;
+}
+
+static int read_file_range(int argc, char **argv) {
+    if (argc != 5 || argv[2] == NULL || argv[2][0] != '/') return X_USAGE;
+    unsigned long long requested_offset, requested_count;
+    if (!parse_decimal_u64(argv[3], &requested_offset) ||
+        !parse_decimal_u64(argv[4], &requested_count) ||
+        requested_count > READ_RANGE_MAX_BYTES || requested_offset > (unsigned long long) LLONG_MAX ||
+        requested_count > (unsigned long long) LLONG_MAX - requested_offset) {
+        return X_USAGE;
+    }
+    const char *open_path;
+    char *owned_open_path;
+    int result = nofollow_open_path(argv[2], &open_path, &owned_open_path);
+    if (result != 0) return result;
+    int source_fd;
+    do {
+        source_fd = open(open_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    } while (source_fd < 0 && errno == EINTR);
+    free(owned_open_path);
+    if (source_fd < 0) return X_SOURCE_UNREADABLE;
+
+    struct stat initial;
+    if (retry_fstat(source_fd, &initial) != 0 || !S_ISREG(initial.st_mode) || initial.st_size < 0 ||
+        requested_offset > (unsigned long long) initial.st_size ||
+        requested_count > (unsigned long long) initial.st_size - requested_offset) {
+        close(source_fd);
+        return X_SOURCE_UNREADABLE;
+    }
+    char header[256];
+    int header_length = snprintf(
+        header, sizeof(header),
+        "ISAVER_RANGE_V1\t%llu\t%llu\t%llu\t%lld\t%ld\t%lld\t%ld\t%llu\t%llu\n",
+        (unsigned long long) initial.st_size,
+        (unsigned long long) initial.st_dev,
+        (unsigned long long) initial.st_ino,
+        (long long) initial.st_mtim.tv_sec, initial.st_mtim.tv_nsec,
+        (long long) initial.st_ctim.tv_sec, initial.st_ctim.tv_nsec,
+        requested_offset, requested_count
+    );
+    if (header_length < 0 || (size_t) header_length >= sizeof(header)) {
+        close(source_fd);
+        return X_IO;
+    }
+    result = write_stdout(header, (size_t) header_length);
+    unsigned char buffer[49152];
+    unsigned long long copied = 0ULL;
+    while (result == 0 && copied < requested_count) {
+        size_t wanted = (size_t) (requested_count - copied);
+        if (wanted > READ_FILE_CHUNK_BYTES) wanted = READ_FILE_CHUNK_BYTES;
+        ssize_t read_count;
+        do {
+            read_count = pread(source_fd, buffer, wanted, (off_t) (requested_offset + copied));
+        } while (read_count < 0 && errno == EINTR);
+        if (read_count <= 0) {
+            result = X_SOURCE_CHANGED;
+            break;
+        }
+        copied += (unsigned long long) read_count;
+        result = write_base64_line(buffer, (size_t) read_count);
+    }
+    struct stat final_status;
+    if (result == 0 &&
+        (retry_fstat(source_fd, &final_status) != 0 ||
+         final_status.st_dev != initial.st_dev || final_status.st_ino != initial.st_ino ||
+         final_status.st_size != initial.st_size || copied != requested_count ||
+         final_status.st_mtim.tv_sec != initial.st_mtim.tv_sec ||
+         final_status.st_mtim.tv_nsec != initial.st_mtim.tv_nsec ||
+         final_status.st_ctim.tv_sec != initial.st_ctim.tv_sec ||
+         final_status.st_ctim.tv_nsec != initial.st_ctim.tv_nsec)) {
+        result = X_SOURCE_CHANGED;
+    }
+    close(source_fd);
+    return result;
+}
+
+static int file_metadata(int argc, char **argv) {
+    if (argc != 3 || argv[2] == NULL || argv[2][0] != '/') return X_USAGE;
+    const char *open_path;
+    char *owned_open_path;
+    int result = nofollow_open_path(argv[2], &open_path, &owned_open_path);
+    if (result != 0) return result;
+    int descriptor;
+    do {
+        descriptor = open(open_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    } while (descriptor < 0 && errno == EINTR);
+    free(owned_open_path);
+    if (descriptor < 0) return X_SOURCE_UNREADABLE;
+    struct stat status;
+    if (retry_fstat(descriptor, &status) != 0) {
+        close(descriptor);
+        return X_SOURCE_UNREADABLE;
+    }
+    char output[192];
+    int length = snprintf(
+        output, sizeof(output), "ISAVER_META_V1\t%u\t%llu\t%llu\t%llu\t%llu\n",
+        (unsigned int) (status.st_mode & 07777),
+        (unsigned long long) status.st_uid, (unsigned long long) status.st_gid,
+        (unsigned long long) status.st_dev, (unsigned long long) status.st_ino
+    );
+    close(descriptor);
+    if (length < 0 || (size_t) length >= sizeof(output)) return X_IO;
+    return write_stdout(output, (size_t) length);
 }
 
 static int regular_file_version_matches(
@@ -2757,6 +2871,8 @@ int main(int argc, char **argv) {
     if (argc < 2) return X_USAGE;
     if (strcmp(argv[1], "list-dir") == 0) return list_directory(argc, argv);
     if (strcmp(argv[1], "read-file-stdout") == 0) return read_file_stdout(argc, argv);
+    if (strcmp(argv[1], "read-file-range") == 0) return read_file_range(argc, argv);
+    if (strcmp(argv[1], "file-metadata") == 0) return file_metadata(argc, argv);
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
     if (strcmp(argv[1], "copy-file-publish") == 0) return copy_file_publish(argc, argv);

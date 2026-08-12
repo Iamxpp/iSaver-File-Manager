@@ -4,6 +4,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.iamxpp.isaver.ISaverApplication
 import com.iamxpp.isaver.data.root.LibsuRootSession
 import com.iamxpp.isaver.data.root.RootCommandCodec
+import com.iamxpp.isaver.data.root.RootFileMetadata
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootStatus
@@ -31,6 +32,37 @@ class RootChecksumInstrumentedTest {
         }
     }
 
+    @Test fun sparseFileBeyondLegacyLimitStreamsAndReportsExactMetadata() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        root(app, "rm -rf -- ${quote(ROOT)}; mkdir -p -- ${quote(ROOT)}")
+        try {
+            root(app, "dd if=/dev/zero of=${quote(LARGE_FILE)} bs=1 count=0 seek=$LARGE_SIZE")
+            root(app, "chmod 640 ${quote(LARGE_FILE)}")
+            val entry = app.rootFileSystem.stat(path(LARGE_FILE)) as OperationResult.Success
+            val expectedDigest = root(app, "sha256sum -- ${quote(LARGE_FILE)}").substringBefore(' ')
+
+            val digest = app.fileChecksumRepository.sha256(entry.value)
+            val metadata = app.rootFileSystem.metadata(path(LARGE_FILE))
+            val expectedMetadata = root(
+                app,
+                "stat -c '%a:%u:%g:%d:%i' -- ${quote(LARGE_FILE)}",
+            ).split(':')
+
+            assertTrue(digest.toString(), digest is OperationResult.Success)
+            assertEquals(expectedDigest, (digest as OperationResult.Success).value)
+            assertTrue(metadata.toString(), metadata is OperationResult.Success)
+            metadata as OperationResult.Success<RootFileMetadata>
+            assertEquals(expectedMetadata[0].toInt(8), metadata.value.mode)
+            assertEquals(expectedMetadata[1].toLong(), metadata.value.uid)
+            assertEquals(expectedMetadata[2].toLong(), metadata.value.gid)
+            assertEquals(expectedMetadata[3].toLong(), metadata.value.device)
+            assertEquals(expectedMetadata[4].toLong(), metadata.value.inode)
+        } finally {
+            root(app, "rm -rf -- ${quote(ROOT)}")
+        }
+    }
+
     private suspend fun root(app: ISaverApplication, command: String): String {
         val result = (app.rootSession as LibsuRootSession).shellCoordinator.execute(command)
         assertEquals(result.stderr.joinToString("\n"), 0, result.exitCode)
@@ -42,5 +74,7 @@ class RootChecksumInstrumentedTest {
     private companion object {
         const val ROOT = "/data/local/tmp/isaver-test/checksum"
         const val FILE = "$ROOT/value.txt"
+        const val LARGE_FILE = "$ROOT/large.bin"
+        const val LARGE_SIZE = 268435457
     }
 }

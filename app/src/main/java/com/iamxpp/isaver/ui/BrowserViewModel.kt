@@ -98,6 +98,7 @@ class BrowserViewModel(
     private var activeTaskCompletedBytes = 0L
     private var renameFileJob: Job? = null
     private var checksumJob: Job? = null
+    private var metadataJob: Job? = null
     private val batchRenamePlanner = BatchRenamePlanner()
     private val batchRenameExecutor = BatchRenameExecutor(renameFile)
     private var copySelectionToRestore: BrowserCopySelection? = null
@@ -206,17 +207,57 @@ class BrowserViewModel(
 
     fun dismissFileInfo() {
         checksumJob?.cancel()
+        metadataJob?.cancel()
         mutableState.value = mutableState.value.copy(
-            fileInfo = null, checksumRunning = false, checksumValue = null, checksumError = null,
+            fileInfo = null, fileMetadata = null, fileMetadataLoading = false, fileMetadataError = null,
+            checksumRunning = false, checksumValue = null, checksumError = null,
         )
     }
 
     fun showFileInfo(entry: DirectoryEntry) {
         checksumJob?.cancel()
+        metadataJob?.cancel()
         mutableState.value = mutableState.value.copy(
-            fileInfo = entry, checksumRunning = false, checksumValue = null, checksumError = null,
+            fileInfo = entry, fileMetadata = null, fileMetadataLoading = true, fileMetadataError = null,
+            checksumRunning = false, checksumValue = null, checksumError = null,
         )
+        metadataJob = viewModelScope.launch {
+            val metadata = withContext(ioDispatcher) { rootFileSystem.metadata(entry.path) }
+            if (mutableState.value.fileInfo?.path != entry.path) return@launch
+            mutableState.value = when (metadata) {
+                is OperationResult.Success -> when (
+                    val identity = withContext(ioDispatcher) { rootFileSystem.identity(entry.path) }
+                ) {
+                    is OperationResult.Success -> if (
+                        metadata.value.device == identity.value.device &&
+                        metadata.value.inode == identity.value.inode
+                    ) {
+                        mutableState.value.copy(
+                            fileMetadata = metadata.value,
+                            fileMetadataLoading = false,
+                            fileMetadataError = null,
+                        )
+                    } else {
+                        changedMetadataState()
+                    }
+                    is OperationResult.Failure -> mutableState.value.copy(
+                        fileMetadataLoading = false,
+                        fileMetadataError = identity.userMessage,
+                    )
+                }
+                is OperationResult.Failure -> mutableState.value.copy(
+                    fileMetadataLoading = false,
+                    fileMetadataError = metadata.userMessage,
+                )
+            }
+        }
     }
+
+    private fun changedMetadataState() = mutableState.value.copy(
+        fileMetadata = null,
+        fileMetadataLoading = false,
+        fileMetadataError = "文件已变化，请刷新核对",
+    )
 
     fun calculateSha256() {
         val entry = mutableState.value.fileInfo ?: return

@@ -17,6 +17,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LibsuRootFileSystemTest {
+    @Test fun `range source change maps to uncertain outcome`() = runTest {
+        val runner = FakeRunner(RootCommandResult(54, emptyList(), emptyList()))
+        val fileSystem = LibsuRootFileSystem(runner, StandardTestDispatcher(testScheduler), 5_000)
+
+        val result = fileSystem.readRange(path("/tmp/value"), 0, 1)
+
+        assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
+        assertEquals("文件读取结果需要核对", result.userMessage)
+    }
     @Test fun `file identity parser accepts one nonnegative device inode pair only`(){assertEquals(RootFileIdentity(12,34),RootFileIdentity.parse(listOf("12:34")).getOrThrow());listOf(emptyList(),listOf("1:2","3:4"),listOf("-1:2"),listOf("a:2"),listOf("1:2:3")).forEach{assertTrue(RootFileIdentity.parse(it).isFailure)}}
     @Test fun `stat maps a missing marker without exiting the cached root shell`() = runTest {
         val runner = FakeRunner(RootCommandResult(0, listOf("ISAVER_STAT_V1_NOT_FOUND"), emptyList()))

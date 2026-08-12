@@ -38,6 +38,13 @@ interface RootFileSystem {
         source: RootPath,
         output: OutputStream,
     ): OperationResult<Long> = unsupportedTransfer()
+    suspend fun readRange(
+        source: RootPath,
+        offset: Long,
+        count: Long,
+    ): OperationResult<RootFileChunk> = unsupportedTransfer()
+
+    suspend fun metadata(source: RootPath): OperationResult<RootFileMetadata> = unsupportedTransfer()
 
     suspend fun transferFromStream(
         source: RootTransferSource,

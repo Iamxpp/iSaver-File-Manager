@@ -10,6 +10,53 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class FileChecksumRepositoryTest {
+    @Test fun `streams multiple immutable ranges beyond the legacy limit`() = runTest {
+        val chunkSize = 4L
+        val bytes = "0123456789".toByteArray()
+        val offsets = mutableListOf<Long>()
+        val repository = FileChecksumRepository(
+            readRange = { _, offset, count ->
+                offsets += offset
+                val end = (offset + count).coerceAtMost(bytes.size.toLong()).toInt()
+                OperationResult.Success(
+                    com.iamxpp.isaver.data.root.RootFileChunk(
+                        bytes.copyOfRange(offset.toInt(), end),
+                        com.iamxpp.isaver.data.root.RootFileVersion(bytes.size.toLong(), 1, 2, 3, 4, 5, 6),
+                    ),
+                )
+            },
+            chunkSizeBytes = chunkSize,
+        )
+
+        val result = repository.sha256(entry(bytes.size.toLong()))
+
+        assertEquals(listOf(0L, 4L, 8L), offsets)
+        assertEquals(
+            "84d89877f0d4041efb6bf91a16f0248f2fd573e6af05c19f96bedb9f882f7882",
+            (result as OperationResult.Success).value,
+        )
+    }
+
+    @Test fun `rejects file version changes between ranges`() = runTest {
+        var calls = 0
+        val repository = FileChecksumRepository(
+            readRange = { _, _, _ ->
+                calls += 1
+                OperationResult.Success(
+                    com.iamxpp.isaver.data.root.RootFileChunk(
+                        ByteArray(4),
+                        com.iamxpp.isaver.data.root.RootFileVersion(8, 1, 2, 3, calls.toLong(), 5, 6),
+                    ),
+                )
+            },
+            chunkSizeBytes = 4,
+        )
+
+        val result = repository.sha256(entry(8))
+
+        assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (result as OperationResult.Failure).code)
+    }
+
     @Test fun `computes lower case sha256 without caching the file`() = runTest {
         val bytes = "iSaver".toByteArray()
         val repository = FileChecksumRepository { _, output ->
@@ -23,11 +70,26 @@ class FileChecksumRepositoryTest {
     }
 
     @Test fun `computes standard empty file digest`() = runTest {
-        val repository = FileChecksumRepository { _, _ -> OperationResult.Success(0) }
+        var calls = 0
+        val repository = FileChecksumRepository(
+            readRange = { _, offset, count ->
+                calls += 1
+                assertEquals(0L, offset)
+                assertEquals(0L, count)
+                OperationResult.Success(
+                    com.iamxpp.isaver.data.root.RootFileChunk(
+                        ByteArray(0),
+                        com.iamxpp.isaver.data.root.RootFileVersion(0, 1, 2, 3, 4, 5, 6),
+                    ),
+                )
+            },
+            chunkSizeBytes = 4,
+        )
         assertEquals(
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             (repository.sha256(entry(0)) as OperationResult.Success).value,
         )
+        assertEquals(1, calls)
     }
 
     @Test fun `rejects directories and mismatched read sizes`() = runTest {

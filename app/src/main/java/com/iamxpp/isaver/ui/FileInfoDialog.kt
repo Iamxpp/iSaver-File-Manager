@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
+import com.iamxpp.isaver.data.root.RootFileMetadata
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
@@ -18,6 +19,9 @@ import java.util.Date
 @Composable
 fun FileInfoDialog(
     entry: DirectoryEntry,
+    metadata: RootFileMetadata? = null,
+    metadataLoading: Boolean = false,
+    metadataError: String? = null,
     checksumRunning: Boolean = false,
     checksumValue: String? = null,
     checksumError: String? = null,
@@ -38,6 +42,13 @@ fun FileInfoDialog(
                 } ?: "—")
                 InfoRow("读取", if (entry.readable) "可读" else "不可读")
                 InfoRow("写入", if (entry.writable) "可写" else "只读")
+                metadata?.let {
+                    InfoRow("权限", "0${it.mode.toString(8).padStart(3, '0')}")
+                    InfoRow("UID / GID", "${it.uid} / ${it.gid}")
+                    InfoRow("设备 / inode", "${it.device} / ${it.inode}")
+                }
+                if (metadataLoading) InfoRow("精确属性", "正在读取")
+                metadataError?.let { InfoRow("精确属性", it) }
                 if (entry.type == EntryType.FILE && entry.readable && !entry.symbolicLink) {
                     checksumValue?.let { InfoRow("SHA-256", it) }
                     checksumError?.let { InfoRow("SHA-256", it) }
