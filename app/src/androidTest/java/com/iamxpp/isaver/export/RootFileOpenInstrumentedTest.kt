@@ -26,28 +26,30 @@ class RootFileOpenInstrumentedTest {
         assertEquals(RootStatus.Available, app.rootSession.check())
         resetTarget(app)
         try {
-            root(app, "printf %s root-open-fixture > ${quote(SOURCE)}")
+            root(app, "printf %s '%PDF-1.7 root-open-fixture' > ${quote(SOURCE)}")
             val source = RootPath.parse(SOURCE).getOrThrow()
             val entry = (app.rootFileSystem.stat(source) as OperationResult.Success).value
 
             val grant = (app.rootExportRepository.export(entry) as OperationResult.Success).value
             val intent = ExternalOpenIntentFactory.create(grant)
+            val chooser = ExternalOpenIntentFactory.createChooser(grant)
 
             assertTrue(grant.contentUri.startsWith("content://${app.packageName}.external-file/file/"))
             assertFalse(grant.contentUri.contains(SOURCE))
-            assertEquals("text/plain", grant.mimeType)
+            assertEquals("application/pdf", grant.mimeType)
             assertEquals(Intent.ACTION_VIEW, intent.action)
+            assertEquals(Intent.ACTION_CHOOSER, chooser.action)
             assertTrue((intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
 
             val uri = Uri.parse(grant.contentUri)
             val bytes = app.contentResolver.openFileDescriptor(uri, "r")!!.use {
                 ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
             }
-            assertArrayEquals("root-open-fixture".toByteArray(), bytes)
+            assertArrayEquals("%PDF-1.7 root-open-fixture".toByteArray(), bytes)
             assertThrows(FileNotFoundException::class.java) {
                 app.contentResolver.openFileDescriptor(uri, "r")
             }
-            assertEquals("root-open-fixture", root(app, "cat -- ${quote(SOURCE)}"))
+            assertEquals("%PDF-1.7 root-open-fixture", root(app, "cat -- ${quote(SOURCE)}"))
         } finally {
             root(app, "rm -rf -- ${quote(TARGET)}")
         }

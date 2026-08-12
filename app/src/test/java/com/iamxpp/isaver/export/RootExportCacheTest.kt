@@ -54,6 +54,24 @@ class RootExportCacheTest {
     }
 
     @Test
+    fun `reads only a bounded prefix from a validated export`() = runTest {
+        val bytes = ByteArray(128) { it.toByte() }
+        val root = tempRoot()
+        val cache = cache(
+            root = root,
+            fileSystem = FakeFileSystem { output ->
+                output.write(bytes)
+                OperationResult.Success(bytes.size.toLong())
+            },
+        )
+        val cached = (cache.cache(entry(size = bytes.size.toLong()), "application/octet-stream") as
+            OperationResult.Success<CachedExportFile>).value
+
+        assertArrayEquals(bytes.copyOf(64), cache.readPrefix(cached))
+        assertEquals(null, cache.readPrefix(cached.copy(inode = -1L)))
+    }
+
+    @Test
     fun `rejects unsafe entries and removes partial or mismatched stages`() = runTest {
         val root = tempRoot()
         var copyCalls = 0

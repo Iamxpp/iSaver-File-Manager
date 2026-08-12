@@ -126,6 +126,30 @@ class RootExportCache internal constructor(
         }
     }
 
+    suspend fun readPrefix(
+        cached: CachedExportFile,
+        maxBytes: Int = MAX_MIME_HEADER_BYTES,
+    ): ByteArray? = withContext(ioDispatcher) {
+        if (maxBytes !in 1..MAX_MIME_HEADER_BYTES || !validateNow(cached)) return@withContext null
+        try {
+            cached.file.inputStream().use { input ->
+                val buffer = ByteArray(maxBytes)
+                var count = 0
+                while (count < buffer.size) {
+                    val read = input.read(buffer, count, buffer.size - count)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    count += read
+                }
+                buffer.copyOf(count)
+            }
+        } catch (_: IOException) {
+            null
+        } catch (_: SecurityException) {
+            null
+        }
+    }
+
     fun discardNow(cached: CachedExportFile) {
         if (!belongsToExportDirectory(cached.file)) return
         cached.file.delete()
@@ -172,6 +196,7 @@ class RootExportCache internal constructor(
     private companion object {
         const val EXPORT_DIRECTORY = "export"
         const val ORPHAN_TTL_MILLIS = 24L * 60L * 60L * 1_000L
+        const val MAX_MIME_HEADER_BYTES = 64
         const val UUID_PATTERN =
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-" +
                 "[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"

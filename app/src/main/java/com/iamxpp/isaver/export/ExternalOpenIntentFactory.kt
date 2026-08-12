@@ -13,4 +13,7 @@ object ExternalOpenIntentFactory {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
+
+    fun createChooser(grant: ExternalFileGrant): Intent =
+        Intent.createChooser(create(grant), "打开方式")
 }

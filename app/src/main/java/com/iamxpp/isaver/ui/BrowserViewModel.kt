@@ -129,6 +129,18 @@ class BrowserViewModel(
         }
     }
 
+    fun openWith(entry: DirectoryEntry) {
+        if (entry.type != EntryType.FILE || !entry.readable || entry.symbolicLink) {
+            mutableState.value = mutableState.value.copy(
+                fileOpenError = BrowserOperationError(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件"),
+            )
+            return
+        }
+        cancelExternalShare()
+        val openRequest = cancelExternalOpen()
+        openExternalFile(entry, openRequest, chooser = true)
+    }
+
     fun selectEntry(entry: DirectoryEntry) {
         if (!entry.readable || entry.symbolicLink || entry.type == EntryType.OTHER) return
         val selected = mutableState.value.selectedEntries.toMutableSet()
@@ -156,6 +168,7 @@ class BrowserViewModel(
         if (!launched) revokeExport(grant)
         mutableState.value = mutableState.value.copy(
             externalFileToOpen = null,
+            externalOpenChooser = false,
             fileOpenError = if (launched) null else BrowserOperationError(
                 ErrorCode.COMMAND_FAILED,
                 "没有可打开此文件的应用",
@@ -888,10 +901,15 @@ class BrowserViewModel(
         }
     }
 
-    private fun openExternalFile(entry: DirectoryEntry, request: Long) {
+    private fun openExternalFile(
+        entry: DirectoryEntry,
+        request: Long,
+        chooser: Boolean = false,
+    ) {
         mutableState.value = mutableState.value.copy(
             openingFile = true,
             externalFileToOpen = null,
+            externalOpenChooser = false,
             fileOpenError = null,
             fileInfo = null,
             archiveToOpen = null,
@@ -913,6 +931,7 @@ class BrowserViewModel(
                         mutableState.value = mutableState.value.copy(
                             openingFile = false,
                             externalFileToOpen = result.value,
+                            externalOpenChooser = chooser,
                         )
                         recordSuccessfulFileAccess(entry)
                     }
@@ -1006,6 +1025,7 @@ class BrowserViewModel(
         mutableState.value = mutableState.value.copy(
             openingFile = false,
             externalFileToOpen = null,
+            externalOpenChooser = false,
         )
         return openFileGeneration
     }

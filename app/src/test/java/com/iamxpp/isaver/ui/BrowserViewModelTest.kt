@@ -980,6 +980,29 @@ class BrowserViewModelTest {
         assertEquals(archive, vm.state.value.archiveToOpen)
     }
 
+    @Test fun `explicit open with exports archives and requests chooser`() = runTest {
+        val archive = entry("backup.zip", EntryType.FILE)
+        val grant = ExternalFileGrant(
+            contentUri = "content://com.iamxpp.isaver.external-file/file/${"ef".repeat(32)}",
+            token = "ef".repeat(32),
+            displayName = archive.name,
+            mimeType = "application/zip",
+        )
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            exportFile = { OperationResult.Success(grant) },
+        )
+
+        vm.openWith(archive)
+        advanceUntilIdle()
+
+        assertEquals(grant, vm.state.value.externalFileToOpen)
+        assertTrue(vm.state.value.externalOpenChooser)
+        assertNull(vm.state.value.archiveToOpen)
+    }
+
     @Test fun `create file uses exact typed name then refreshes and exposes location target`() = runTest {
         val created = entry("中文 report.txt", EntryType.FILE, "/storage/emulated/0/中文 report.txt")
         var listCount = 0

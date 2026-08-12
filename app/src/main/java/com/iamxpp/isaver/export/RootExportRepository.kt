@@ -30,11 +30,14 @@ class RootExportRepository(
         ttlMillis: Long,
         failureMessage: String,
     ): OperationResult<ExternalFileGrant> {
-        val cached = when (val result = cache.cache(entry, mimeResolver.resolve(entry.name))) {
+        val extensionMime = mimeResolver.resolve(entry.name)
+        val cached = when (val result = cache.cache(entry, extensionMime)) {
             is OperationResult.Failure -> return result
             is OperationResult.Success -> result.value
         }
-        return registry.issue(cached, ttlMillis).fold(
+        val header = cache.readPrefix(cached) ?: byteArrayOf()
+        val inspected = cached.copy(mimeType = mimeResolver.resolve(entry.name, header))
+        return registry.issue(inspected, ttlMillis).fold(
             onSuccess = { OperationResult.Success(it) },
             onFailure = {
                 cache.discardNow(cached)

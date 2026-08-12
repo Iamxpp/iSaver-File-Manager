@@ -31,4 +31,22 @@ class ExternalOpenIntentFactoryTest {
         assertFalse((intent.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0)
         assertEquals(Uri.parse(grant.contentUri), intent.clipData?.getItemAt(0)?.uri)
     }
+
+    @Test
+    fun `explicit open intent is wrapped in an Android chooser`() {
+        val grant = ExternalFileGrant(
+            contentUri = "content://com.iamxpp.isaver.external-file/file/${"cd".repeat(32)}",
+            token = "cd".repeat(32),
+            displayName = "report.pdf",
+            mimeType = "application/pdf",
+        )
+
+        val chooser = ExternalOpenIntentFactory.createChooser(grant)
+        val target = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        assertEquals("打开方式", chooser.getCharSequenceExtra(Intent.EXTRA_TITLE))
+        assertEquals(Intent.ACTION_VIEW, target?.action)
+        assertEquals(Uri.parse(grant.contentUri), target?.data)
+    }
 }

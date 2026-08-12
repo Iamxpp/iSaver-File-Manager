@@ -171,7 +171,13 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(browserState.externalFileToOpen) {
                         val grant = browserState.externalFileToOpen ?: return@LaunchedEffect
                         val launched = try {
-                            startActivity(ExternalOpenIntentFactory.create(grant))
+                            startActivity(
+                                if (browserState.externalOpenChooser) {
+                                    ExternalOpenIntentFactory.createChooser(grant)
+                                } else {
+                                    ExternalOpenIntentFactory.create(grant)
+                                },
+                            )
                             true
                         } catch (_: ActivityNotFoundException) {
                             false
@@ -379,6 +385,7 @@ class MainActivity : ComponentActivity() {
                         onDismissCreateFileError = browserViewModel::dismissCreateFileError,
                         onToggleSelection = browserViewModel::toggleSelection,
                         onOpenBrowserEntry = browserViewModel::openEntry,
+                        onOpenWithBrowserEntry = browserViewModel::openWith,
                         onClearBrowserSelection = browserViewModel::clearSelection,
                         onDismissFileInfo = browserViewModel::dismissFileInfo,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,

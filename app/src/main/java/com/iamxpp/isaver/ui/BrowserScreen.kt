@@ -82,6 +82,7 @@ fun BrowserScreen(
     onCreateFile: ((String) -> Unit)? = null,
     onToggleSelection: (DirectoryEntry) -> Unit = {},
     onOpenEntry: (DirectoryEntry) -> Unit = onToggleSelection,
+    onOpenWithEntry: ((DirectoryEntry) -> Unit)? = null,
     onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
     onClearSelection: () -> Unit = {},
     onDismissFileInfo: () -> Unit = {},
@@ -282,6 +283,8 @@ fun BrowserScreen(
     actionEntry?.let { entry ->
         FileActionsSheet(
             entry = entry,
+            openWithVisible = onOpenWithEntry != null && entry.type == EntryType.FILE,
+            openWithEnabled = !state.openingFile && entry.readable && !entry.symbolicLink,
             shareVisible = onShareEntry != null && entry.type == EntryType.FILE,
             shareEnabled = !state.sharingFile,
             moveVisible = onMoveEntry != null && entry.type == EntryType.FILE,
@@ -294,6 +297,10 @@ fun BrowserScreen(
             onShare = {
                 actionEntry = null
                 onShareEntry?.invoke(entry)
+            },
+            onOpenWith = {
+                actionEntry = null
+                onOpenWithEntry?.invoke(entry)
             },
             onCompress = {
                 actionEntry = null
@@ -473,6 +480,8 @@ internal fun BrowserContent(
 @OptIn(ExperimentalMaterial3Api::class)
 private fun FileActionsSheet(
     entry: DirectoryEntry,
+    openWithVisible: Boolean,
+    openWithEnabled: Boolean,
     shareVisible: Boolean,
     shareEnabled: Boolean,
     moveVisible: Boolean,
@@ -482,6 +491,7 @@ private fun FileActionsSheet(
     renameVisible: Boolean,
     renameEnabled: Boolean,
     compressVisible: Boolean,
+    onOpenWith: () -> Unit,
     onShare: () -> Unit,
     onCompress: () -> Unit,
     onMove: () -> Unit,
@@ -511,6 +521,14 @@ private fun FileActionsSheet(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
             HorizontalDivider(color = ISaverDivider)
+            if (openWithVisible) {
+                FileActionRow(
+                    title = "打开方式",
+                    description = "选择其他应用打开",
+                    enabled = openWithEnabled,
+                    onClick = onOpenWith,
+                )
+            }
             if (shareVisible) {
                 FileActionRow(
                     title = "分享",

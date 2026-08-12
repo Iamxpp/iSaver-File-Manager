@@ -37,6 +37,7 @@ data class BrowserUiState(
     val archiveToOpen: DirectoryEntry? = null,
     val openingFile: Boolean = false,
     val externalFileToOpen: ExternalFileGrant? = null,
+    val externalOpenChooser: Boolean = false,
     val fileOpenError: BrowserOperationError? = null,
     val sharingFile: Boolean = false,
     val externalFilesToShare: List<ExternalFileGrant> = emptyList(),

@@ -78,6 +78,24 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun longPressFileForwardsExplicitOpenWith() {
+        val file = entry("report.pdf", EntryType.FILE)
+        var opened: DirectoryEntry? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onOpenWithEntry = { opened = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
+        compose.onNodeWithText("打开方式").assertIsDisplayed().performClick()
+
+        compose.runOnIdle { assertEquals(file, opened) }
+    }
+
+    @Test
     fun multipleSelectionForwardsShareFromSelectionBar() {
         val first = entry("first.txt", EntryType.FILE)
         val second = entry("second.pdf", EntryType.FILE)
