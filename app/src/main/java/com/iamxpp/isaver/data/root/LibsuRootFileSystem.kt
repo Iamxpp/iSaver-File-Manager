@@ -124,6 +124,59 @@ class LibsuRootFileSystem internal constructor(
         return finalChild
     }
 
+    override suspend fun createFileNoReplace(
+        parent: RootPath,
+        name: EntryName,
+    ): OperationResult<DirectoryEntry> {
+        if (RootPathRiskPolicy.isProtected(parent)) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览", "Protected create-file path")
+        }
+        val preparedResult = prepareWritableDirectory(parent)
+        if (preparedResult !is OperationResult.Success) return preparedResult as OperationResult.Failure
+        val prepared = preparedResult.value
+        val targetPath = EntryName.join(prepared.canonical, name)
+        when (val target = stat(targetPath)) {
+            is OperationResult.Success -> return failure(
+                ErrorCode.ALREADY_EXISTS,
+                "文件已存在",
+                "Create-file target already existed",
+            )
+            is OperationResult.Failure -> if (target.code != ErrorCode.NOT_FOUND) return target
+        }
+        currentCoroutineContext().ensureActive()
+        val execution = runHelperBounded(
+            transferHelper.createFileNoReplace(
+                original = prepared.original.value,
+                canonical = prepared.canonical.value,
+                name = name,
+                parentIdentity = prepared.identity,
+            ),
+            helperOperationTimeoutMillis,
+        ).getOrElse {
+            return uncertainCreateFile("Create-file helper exceeded its bounded deadline or lost its result")
+        }
+        if (execution.exitCode != 0) {
+            return mapExitCode(execution.exitCode, execution.stderr, "无法新建文件", "create-file-noreplace")
+        }
+        val createdIdentity = RootFileIdentity.parse(execution.stdout).getOrElse {
+            return uncertainCreateFile("Create-file helper returned malformed identity")
+        }
+        val created = stat(targetPath)
+        val actualIdentity = readIdentity(targetPath)
+        val parentAfter = canonicalize(parent)
+        if (
+            created !is OperationResult.Success ||
+            created.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            created.value.symbolicLink ||
+            created.value.sizeBytes != 0L ||
+            actualIdentity !is OperationResult.Success || actualIdentity.value != createdIdentity ||
+            parentAfter !is OperationResult.Success || parentAfter.value != prepared.canonical
+        ) {
+            return uncertainCreateFile("Created file could not be fully reconciled")
+        }
+        return created
+    }
+
     override suspend fun transferFromStream(
         source: RootTransferSource,
         targetDirectory: RootPath,
@@ -996,17 +1049,17 @@ class LibsuRootFileSystem internal constructor(
             )
             54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
             56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
-            55 -> if (operation == "rename-noreplace") {
-                uncertainRename("Native helper reported an uncertain rename outcome")
-            } else {
-                failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
+            55 -> when (operation) {
+                "rename-noreplace" -> uncertainRename("Native helper reported an uncertain rename outcome")
+                "create-file-noreplace" -> uncertainCreateFile("Native helper reported an uncertain create-file outcome")
+                else -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
             }
             58 -> failure(ErrorCode.CROSS_DEVICE, "暂不支持跨存储移动", "Move crossed a file-system boundary")
             59 -> failure(ErrorCode.MOVE_PARTIAL, "文件已复制，但来源未删除", "Move target was published but source removal failed")
-            137 -> if (operation == "rename-noreplace") {
-                uncertainRename("Native rename helper was killed after timeout")
-            } else {
-                failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
+            137 -> when (operation) {
+                "rename-noreplace" -> uncertainRename("Native rename helper was killed after timeout")
+                "create-file-noreplace" -> uncertainCreateFile("Native create-file helper was killed after timeout")
+                else -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
             }
             else -> if (operation in STREAM_COPY_OPERATIONS && stderr.looksLikeContentReadFailure()) {
                 failure(
@@ -1242,6 +1295,7 @@ private fun uncertainExtraction(technical:String)=failure(ErrorCode.OUTCOME_UNCE
 private fun uncertainMove(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"移动结果不确定，请刷新来源和目标目录核对",technical)
 private fun invalidMoveSource(technical:String="Move source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法移动此文件",technical)
 private fun uncertainRename(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"重命名结果不确定，请刷新目录核对",technical)
+private fun uncertainCreateFile(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"新建文件结果不确定，请刷新目录核对",technical)
 private fun invalidRenameSource(technical:String="Rename source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法重命名此文件",technical)
 private fun uncertainCopy(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"复制结果不确定，请刷新目标目录核对",technical)
 private fun invalidCopySource(technical:String="Copy source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法复制此文件",technical)

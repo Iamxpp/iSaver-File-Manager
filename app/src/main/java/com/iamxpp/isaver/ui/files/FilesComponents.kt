@@ -405,9 +405,11 @@ fun FilesOverflowMenu(
     onSortFieldChange: (SortField) -> Unit,
     onSortDirectionToggle: () -> Unit,
     onCreateFolder: () -> Unit,
+    onCreateFile: (() -> Unit)? = null,
     onCompress: () -> Unit,
     onConnectServer: () -> Unit,
     canCreateFolder: Boolean,
+    canCreateFile: Boolean = false,
     canCompress: Boolean,
     canConnectServer: Boolean,
     onAddLocation: (() -> Unit)? = null,
@@ -432,6 +434,13 @@ fun FilesOverflowMenu(
             enabled = canCreateFolder,
             onClick = onCreateFolder,
         )
+        if (onCreateFile != null) {
+            FilesMenuItem(
+                text = "新建文件",
+                enabled = canCreateFile,
+                onClick = onCreateFile,
+            )
+        }
         FilesMenuItem(
             text = "压缩文件",
             enabled = canCompress,

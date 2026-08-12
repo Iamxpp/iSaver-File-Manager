@@ -66,6 +66,7 @@ class RootTransferHelperTest {
         assertTrue(main.contains("copy-file-publish"))
         assertTrue(main.contains("move-cross-device-noreplace"))
         assertTrue(main.contains("rename-noreplace"))
+        assertTrue(main.contains("create-file-noreplace"))
         assertFalse(main.contains("strcmp(argv[1], \"copy-publish\")"))
     }
 
@@ -74,6 +75,21 @@ class RootTransferHelperTest {
         val command = helper.readFile("/data/user/0/com.iamxpp.isaver/files/report with space.bin")
         assertTrue(command.contains("'read-file-stdout' '/data/user/0/com.iamxpp.isaver/files/report with space.bin'"))
         assertFalse(command.contains("'cat'"))
+        assertFalse(command.contains("sh -c"))
+    }
+
+    @Test
+    fun `create file command binds parent identity and hostile basename`() {
+        val command = helper.createFileNoReplace(
+            original = "/parent original",
+            canonical = "/parent canonical",
+            name = com.iamxpp.isaver.domain.EntryName.parse("new';\n.txt").getOrThrow(),
+            parentIdentity = RootFileIdentity(1L, 2L),
+        )
+
+        assertTrue(command.contains("'create-file-noreplace' '/parent original' '/parent canonical'"))
+        assertTrue(command.endsWith("'new'\\'';\n.txt' '1' '2'"))
+        assertFalse(command.contains("touch"))
         assertFalse(command.contains("sh -c"))
     }
 

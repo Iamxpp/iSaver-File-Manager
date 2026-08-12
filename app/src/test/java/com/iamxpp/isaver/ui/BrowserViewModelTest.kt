@@ -5,6 +5,7 @@ import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.DirectoryEntry
+import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
@@ -979,6 +980,68 @@ class BrowserViewModelTest {
         assertEquals(archive, vm.state.value.archiveToOpen)
     }
 
+    @Test fun `create file uses exact typed name then refreshes and exposes location target`() = runTest {
+        val created = entry("中文 report.txt", EntryType.FILE, "/storage/emulated/0/中文 report.txt")
+        var listCount = 0
+        val fs = FakeFileSystem(
+            listBlock = {
+                listCount += 1
+                OperationResult.Success(if (listCount == 1) emptyList() else listOf(created))
+            },
+            createFileBlock = { parent, name ->
+                assertEquals("/storage/emulated/0", parent.value)
+                assertEquals("中文 report.txt", name.value)
+                OperationResult.Success(created)
+            },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
+        advanceUntilIdle()
+
+        vm.createFile("中文 report.txt")
+        advanceUntilIdle()
+
+        assertEquals(2, listCount)
+        assertEquals(created.path, vm.state.value.locationTarget)
+        assertEquals(created, vm.state.value.createdFile)
+        assertNull(vm.state.value.createFileError)
+    }
+
+    @Test fun `create file rejects invalid name before filesystem call`() = runTest {
+        var createCalls = 0
+        val fs = FakeFileSystem(
+            listBlock = { OperationResult.Success(emptyList()) },
+            createFileBlock = { _, _ -> createCalls += 1; error("must not create") },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
+        advanceUntilIdle()
+
+        vm.createFile("../invalid.txt")
+
+        assertEquals(0, createCalls)
+        assertEquals(ErrorCode.COMMAND_FAILED, vm.state.value.createFileError?.code)
+        assertEquals("文件名称无效", vm.state.value.createFileError?.userMessage)
+    }
+
+    @Test fun `create file exposes no replace conflict without refreshing`() = runTest {
+        var listCount = 0
+        val fs = FakeFileSystem(
+            listBlock = { listCount += 1; OperationResult.Success(emptyList()) },
+            createFileBlock = { _, _ -> OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "文件已存在", "exists") },
+        )
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openInitial()
+        advanceUntilIdle()
+
+        vm.createFile("existing.txt")
+        advanceUntilIdle()
+
+        assertEquals(1, listCount)
+        assertEquals(ErrorCode.ALREADY_EXISTS, vm.state.value.createFileError?.code)
+        assertFalse(vm.state.value.creatingFile)
+    }
+
     @Test fun `archive tap supersedes an external file export still in progress`() = runTest {
         val exportResult = CompletableDeferred<OperationResult<ExternalFileGrant>>()
         val ordinary = entry("report.pdf", EntryType.FILE)
@@ -1602,6 +1665,7 @@ class BrowserViewModelTest {
             OperationResult.Success(DirectoryEntry(path, "current", EntryType.DIRECTORY, 0, 0, true, true, false))
         },
         val createBlock: suspend (RootPath, FolderName) -> OperationResult<DirectoryEntry> = { _, _ -> error("unused") },
+        val createFileBlock: suspend (RootPath, EntryName) -> OperationResult<DirectoryEntry> = { _, _ -> error("unused") },
         val snapshotBlock: (suspend (RootPath) -> OperationResult<DirectorySnapshot>)? = null,
         val canonicalBlock: suspend (RootPath) -> OperationResult<RootPath> = { OperationResult.Success(it) },
         val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>,
@@ -1628,6 +1692,8 @@ class BrowserViewModelTest {
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> = statBlock(path)
         override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = canonicalBlock(path)
         override suspend fun createDirectory(parent: RootPath, name: FolderName): OperationResult<DirectoryEntry> = createBlock(parent, name)
+        override suspend fun createFileNoReplace(parent: RootPath, name: EntryName): OperationResult<DirectoryEntry> =
+            createFileBlock(parent, name)
     }
 
     private class FakeBrowserPreferencesStore(initial: BrowserPreferences) : BrowserPreferencesStore {

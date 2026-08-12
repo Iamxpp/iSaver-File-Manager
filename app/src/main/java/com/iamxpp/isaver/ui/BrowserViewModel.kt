@@ -8,6 +8,7 @@ import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.archive.ArchiveRepository
 import com.iamxpp.isaver.archive.ArchiveState
 import com.iamxpp.isaver.domain.DirectoryEntry
+import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
@@ -63,6 +64,7 @@ class BrowserViewModel(
     private var loadJob: Job? = null
     private var presentationJob: Job? = null
     private var createDirectoryJob: Job? = null
+    private var createFileJob: Job? = null
     private var openFileJob: Job? = null
     private var openFileGeneration = 0L
     private var shareFileJob: Job? = null
@@ -268,7 +270,7 @@ class BrowserViewModel(
     fun beginMoveSelection(): Boolean = beginMove(selectedEntriesInDirectoryOrder())
 
     private fun beginMove(entries: List<DirectoryEntry>): Boolean {
-        if (mutableState.value.movingFile || mutableState.value.copyingFile || mutableState.value.renamingFile) return false
+        if (fileOperationBusy()) return false
         cancelExternalOpen()
         cancelExternalShare()
         if (
@@ -392,7 +394,7 @@ class BrowserViewModel(
     fun beginCopySelection(): Boolean = beginCopy(selectedEntriesInDirectoryOrder())
 
     private fun beginCopy(entries: List<DirectoryEntry>): Boolean {
-        if (mutableState.value.copyingFile || mutableState.value.movingFile || mutableState.value.renamingFile) return false
+        if (fileOperationBusy()) return false
         cancelExternalOpen()
         cancelExternalShare()
         if (
@@ -509,7 +511,7 @@ class BrowserViewModel(
     }
 
     fun renameEntry(entry: DirectoryEntry, newName: String) {
-        if (renameFileJob?.isActive == true) return
+        if (renameFileJob?.isActive == true || fileOperationBusy()) return
         val parent = mutableState.value.currentPath
         mutableState.value = mutableState.value.copy(
             renamingFile = true,
@@ -625,7 +627,7 @@ class BrowserViewModel(
     }
 
     fun createDirectory(rawName: String) {
-        if (createDirectoryJob?.isActive == true) return
+        if (createDirectoryJob?.isActive == true || fileOperationBusy()) return
         if (!mutableState.value.canCreateDirectory) {
             mutableState.value = mutableState.value.copy(
                 createDirectoryError = BrowserOperationError(ErrorCode.NOT_WRITABLE, "目录不可写"),
@@ -681,6 +683,10 @@ class BrowserViewModel(
             entries = presentedEntries.take(visibleCount),
             hasMore = visibleCount < current.totalCount,
         )
+    }
+
+    private fun fileOperationBusy(): Boolean = mutableState.value.run {
+        creatingDirectory || creatingFile || movingFile || copyingFile || renamingFile || compressing
     }
 
     private fun load(
@@ -744,6 +750,9 @@ class BrowserViewModel(
             renamingFile = previousState.renamingFile,
             renamedOutput = previousState.renamedOutput,
             fileRenameError = previousState.fileRenameError,
+            creatingFile = previousState.creatingFile,
+            createdFile = previousState.createdFile,
+            createFileError = previousState.createFileError,
             compressionMessage = null,
         )
         val cachedPresentationJob = if (cachedSnapshot != null && cachedEntries.isEmpty()) {
@@ -922,6 +931,72 @@ class BrowserViewModel(
                 }
             }
         }
+    }
+
+    fun createFile(rawName: String) {
+        if (createFileJob?.isActive == true || fileOperationBusy()) return
+        if (!mutableState.value.canCreateDirectory) {
+            mutableState.value = mutableState.value.copy(
+                createFileError = BrowserOperationError(ErrorCode.NOT_WRITABLE, "目录不可写"),
+            )
+            return
+        }
+        val name = EntryName.parse(rawName).getOrElse {
+            mutableState.value = mutableState.value.copy(
+                createFileError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "文件名称无效"),
+            )
+            return
+        }
+        val parent = mutableState.value.currentPath
+        mutableState.value = mutableState.value.copy(
+            creatingFile = true,
+            createdFile = null,
+            createFileError = null,
+            locationTarget = null,
+        )
+        createFileJob = viewModelScope.launch {
+            try {
+                when (val result = withContext(ioDispatcher) { rootFileSystem.createFileNoReplace(parent, name) }) {
+                    is OperationResult.Failure -> if (mutableState.value.currentPath == parent) {
+                        mutableState.value = mutableState.value.copy(
+                            creatingFile = false,
+                            createFileError = BrowserOperationError(result.code, result.userMessage),
+                        )
+                    }
+                    is OperationResult.Success -> if (mutableState.value.currentPath == parent) {
+                        mutableState.value = mutableState.value.copy(
+                            creatingFile = false,
+                            createdFile = result.value,
+                        )
+                        load(parent, result.value.path)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                if (mutableState.value.currentPath == parent) {
+                    mutableState.value = mutableState.value.copy(creatingFile = false)
+                }
+                throw cancelled
+            } catch (_: Exception) {
+                if (mutableState.value.currentPath == parent) {
+                    mutableState.value = mutableState.value.copy(
+                        creatingFile = false,
+                        createFileError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "新建文件失败"),
+                    )
+                }
+            }
+        }
+    }
+
+    fun consumeCreatedFile() {
+        mutableState.value = mutableState.value.copy(createdFile = null)
+    }
+
+    fun dismissCreateFileError() {
+        mutableState.value = mutableState.value.copy(createFileError = null)
+    }
+
+    fun dismissCreateDirectoryError() {
+        mutableState.value = mutableState.value.copy(createDirectoryError = null)
     }
 
     private fun cancelExternalOpen(): Long {

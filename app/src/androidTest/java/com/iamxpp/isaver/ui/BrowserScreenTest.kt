@@ -404,6 +404,37 @@ class BrowserScreenTest {
         compose.onNodeWithText("新建文件夹").assertIsNotEnabled()
     }
 
+    @Test fun createFileDialogForwardsExactName() {
+        var created: String? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(canCreateDirectory = true),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onCreateFile = { created = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("新建文件").assertIsEnabled().performClick()
+        compose.onNodeWithContentDescription("文件名称").performTextReplacement("测试 report.txt")
+        compose.onNodeWithText("确定").performClick()
+
+        assertEquals("测试 report.txt", created)
+    }
+
+    @Test fun createFileMenuIsAbsentWithoutNormalBrowserCallback() {
+        compose.setContent {
+            BrowserScreen(
+                state = state(canCreateDirectory = true),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+            )
+        }
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onAllNodesWithText("新建文件").assertCountEquals(0)
+        compose.onNodeWithText("新建文件夹").assertIsEnabled()
+    }
+
     @Test fun listModeAndDeferredMenuActionsAreExplained() {
         val file = entry("说明.txt", EntryType.FILE)
         compose.setContent {

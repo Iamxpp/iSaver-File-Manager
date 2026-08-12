@@ -79,6 +79,7 @@ fun BrowserScreen(
     onDisplayModeChange: (DisplayMode) -> Unit = {},
     onSortChange: (SortSpec) -> Unit = {},
     onCreateDirectory: (String) -> Unit = {},
+    onCreateFile: ((String) -> Unit)? = null,
     onToggleSelection: (DirectoryEntry) -> Unit = {},
     onOpenEntry: (DirectoryEntry) -> Unit = onToggleSelection,
     onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
@@ -99,6 +100,7 @@ fun BrowserScreen(
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
+    onDismissCreateFileError: () -> Unit = {},
     onCompress: ((String) -> Unit)? = null,
     onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
     remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
@@ -110,6 +112,7 @@ fun BrowserScreen(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var createDialogVisible by remember { mutableStateOf(false) }
+    var createFileDialogVisible by remember { mutableStateOf(false) }
     var compressDialogVisible by remember { mutableStateOf(false) }
     var serverDialogVisible by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
@@ -159,6 +162,12 @@ fun BrowserScreen(
                         menuExpanded = false
                         createDialogVisible = true
                     },
+                    onCreateFile = onCreateFile?.let {
+                        {
+                            menuExpanded = false
+                            createFileDialogVisible = true
+                        }
+                    },
                     onCompress = {
                         menuExpanded = false
                         if (onCompress != null) compressDialogVisible = true
@@ -167,7 +176,8 @@ fun BrowserScreen(
                         menuExpanded = false
                         if (onConnectServer != null) serverDialogVisible = true
                     },
-                    canCreateFolder = state.canCreateDirectory && !state.creatingDirectory,
+                    canCreateFolder = state.canCreateDirectory && !state.creatingDirectory && !state.creatingFile,
+                    canCreateFile = state.canCreateDirectory && !state.creatingDirectory && !state.creatingFile,
                     canCompress = onCompress != null &&
                         state.selectedEntries.isNotEmpty() &&
                         !state.compressing,
@@ -260,6 +270,15 @@ fun BrowserScreen(
             },
         )
     }
+    if (createFileDialogVisible) {
+        CreateFileDialog(
+            onDismiss = { createFileDialogVisible = false },
+            onConfirm = {
+                createFileDialogVisible = false
+                onCreateFile?.invoke(it)
+            },
+        )
+    }
     actionEntry?.let { entry ->
         FileActionsSheet(
             entry = entry,
@@ -301,6 +320,9 @@ fun BrowserScreen(
     }
     state.createDirectoryError?.let {
         MessageDialog(it.userMessage, "关闭", onDismissCreateError)
+    }
+    state.createFileError?.let {
+        MessageDialog(it.userMessage, "关闭", onDismissCreateFileError)
     }
     state.presentationError?.let {
         MessageDialog(it, "关闭", onDismissPresentationError)
@@ -405,6 +427,13 @@ internal fun BrowserContent(
         if (state.creatingDirectory) {
             Text(
                 "正在新建文件夹",
+                color = ISaverSecondaryText,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            )
+        }
+        if (state.creatingFile) {
+            Text(
+                "正在新建文件",
                 color = ISaverSecondaryText,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
             )
@@ -582,6 +611,29 @@ private fun CreateFolderDialog(onDismiss: () -> Unit, onConfirm: (String) -> Uni
             )
         },
         confirmButton = { TextButton(onClick = { onConfirm(name.text) }) { Text("确定") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun CreateFileDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember {
+        mutableStateOf(TextFieldValue("未命名.txt", selection = TextRange(0, "未命名".length)))
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新建文件") },
+        text = {
+            TextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                modifier = Modifier.semantics { contentDescription = "文件名称" },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name.text) }, enabled = name.text.isNotBlank()) { Text("确定") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }

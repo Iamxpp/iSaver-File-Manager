@@ -234,6 +234,12 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(this@MainActivity, "已重命名为 ${output.name}", Toast.LENGTH_SHORT).show()
                     }
 
+                    LaunchedEffect(browserState.createdFile) {
+                        val output = browserState.createdFile ?: return@LaunchedEffect
+                        browserViewModel.consumeCreatedFile()
+                        Toast.makeText(this@MainActivity, "已新建 ${output.name}", Toast.LENGTH_SHORT).show()
+                    }
+
                     LaunchedEffect(archiveState.operation) {
                         val success = archiveState.operation as? com.iamxpp.isaver.archive.ArchiveState.Success
                             ?: return@LaunchedEffect
@@ -368,6 +374,9 @@ class MainActivity : ComponentActivity() {
                         onDisplayModeChange = browserViewModel::setDisplayMode,
                         onSortChange = browserViewModel::setSort,
                         onCreateDirectory = browserViewModel::createDirectory,
+                        onCreateFile = browserViewModel::createFile,
+                        onDismissCreateDirectoryError = browserViewModel::dismissCreateDirectoryError,
+                        onDismissCreateFileError = browserViewModel::dismissCreateFileError,
                         onToggleSelection = browserViewModel::toggleSelection,
                         onOpenBrowserEntry = browserViewModel::openEntry,
                         onClearBrowserSelection = browserViewModel::clearSelection,

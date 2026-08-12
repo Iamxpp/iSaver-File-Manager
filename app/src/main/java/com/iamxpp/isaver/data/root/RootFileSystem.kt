@@ -27,6 +27,10 @@ interface RootFileSystem {
      * the original cancellation; they do not clean up or claim a definite outcome.
      */
     suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>
+    suspend fun createFileNoReplace(
+        parent: RootPath,
+        name: EntryName,
+    ): OperationResult<DirectoryEntry> = unsupportedCreateFile()
     suspend fun copyToOutput(
         source: RootPath,
         output: OutputStream,
@@ -98,6 +102,12 @@ private fun unsupportedRename(): OperationResult.Failure = OperationResult.Failu
     ErrorCode.COMMAND_FAILED,
     "不支持安全重命名",
     "Same-filesystem rename primitive unsupported",
+)
+
+private fun unsupportedCreateFile(): OperationResult.Failure = OperationResult.Failure(
+    ErrorCode.COMMAND_FAILED,
+    "不支持安全新建文件",
+    "Empty file creation primitive unsupported",
 )
 
 private fun unsupportedCopy(): OperationResult.Failure = OperationResult.Failure(

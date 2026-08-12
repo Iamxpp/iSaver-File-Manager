@@ -1714,6 +1714,54 @@ static int rename_noreplace(int argc, char **argv) {
     return 0;
 }
 
+static int create_file_noreplace(int argc, char **argv) {
+    if (argc != 7 || !basename_ok(argv[4])) return X_USAGE;
+    unsigned long long parent_device;
+    unsigned long long parent_inode;
+    if (!parse_identity(argv, 5, &parent_device, &parent_inode)) return X_USAGE;
+
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    int file_fd = openat(
+        parent_fd,
+        argv[4],
+        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+        0600
+    );
+    if (file_fd < 0) {
+        int result = write_errno(errno);
+        close(parent_fd);
+        return result;
+    }
+    struct stat created;
+    if (retry_fstat(file_fd, &created) != 0 || !S_ISREG(created.st_mode) || created.st_size != 0) {
+        close(file_fd);
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (fsync(file_fd) != 0 && errno != EINVAL && errno != EROFS) {
+        close(file_fd);
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    close(file_fd);
+    struct stat visible;
+    if (retry_fstatat(parent_fd, argv[4], &visible, AT_SYMLINK_NOFOLLOW) != 0 ||
+        !S_ISREG(visible.st_mode) ||
+        !identity_matches(&visible, (unsigned long long) created.st_dev, (unsigned long long) created.st_ino) ||
+        visible.st_size != 0) {
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (fsync(parent_fd) != 0 && errno != EINVAL && errno != EROFS) {
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    printf("%llu:%llu\n", (unsigned long long) visible.st_dev, (unsigned long long) visible.st_ino);
+    close(parent_fd);
+    return 0;
+}
+
 static int prepare_extraction_stage(int argc, char **argv) {
     if (argc != 7 || !extraction_stage_name_ok(argv[4])) return X_USAGE;
     unsigned long long parent_device;
@@ -2060,6 +2108,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);
     if (strcmp(argv[1], "move-noreplace") == 0) return move_noreplace(argc, argv);
     if (strcmp(argv[1], "rename-noreplace") == 0) return rename_noreplace(argc, argv);
+    if (strcmp(argv[1], "create-file-noreplace") == 0) return create_file_noreplace(argc, argv);
     if (strcmp(argv[1], "prepare-extract-stage") == 0) return prepare_extraction_stage(argc, argv);
     if (strcmp(argv[1], "mkdir-extract") == 0) return mkdir_extract(argc, argv);
     if (strcmp(argv[1], "copy-extract-stdin") == 0) return copy_extract_stdin(argc, argv);
