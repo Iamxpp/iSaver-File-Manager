@@ -1741,6 +1741,87 @@ class BrowserViewModelTest {
         assertTrue(taskStore.updates.all { it.id == "task-1" })
     }
 
+    @Test fun `copy task pauses between entries and resumes without replay`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
+        val second = entry("second.txt", EntryType.FILE, path = "${sourceDirectory.value}/second.txt")
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val calls = mutableListOf<String>()
+        val taskStore = RecordingOperationTaskStore()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            copyFile = { source, _, target, _ ->
+                calls += source.name
+                if (source == first) {
+                    firstStarted.complete(Unit)
+                    releaseFirst.await()
+                }
+                OperationResult.Success(source.copy(path = RootPath.parse("${target.value}/${source.name}").getOrThrow()))
+            },
+            operationTaskStore = taskStore,
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+        vm.beginCopySelection()
+        vm.copyTo(targetDirectory)
+        firstStarted.await()
+
+        vm.pauseTask("task-1")
+        releaseFirst.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(listOf("first.txt"), calls)
+        assertTrue(taskStore.updates.any { it.state == OperationTaskState.PAUSED && it.completed == 1 })
+        vm.resumeTask("task-1")
+        advanceUntilIdle()
+        assertEquals(listOf("first.txt", "second.txt"), calls)
+        assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
+    }
+
+    @Test fun `copy task cancellation stops later entries and records terminal state`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
+        val second = entry("second.txt", EntryType.FILE, path = "${sourceDirectory.value}/second.txt")
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val calls = mutableListOf<String>()
+        val taskStore = RecordingOperationTaskStore()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            copyFile = { source, _, target, _ ->
+                calls += source.name
+                firstStarted.complete(Unit)
+                withContext(NonCancellable) { releaseFirst.await() }
+                OperationResult.Success(source.copy(path = RootPath.parse("${target.value}/${source.name}").getOrThrow()))
+            },
+            operationTaskStore = taskStore,
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+        vm.beginCopySelection()
+        vm.copyTo(targetDirectory)
+        firstStarted.await()
+
+        vm.cancelTask("task-1")
+        releaseFirst.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(listOf("first.txt"), calls)
+        assertTrue(taskStore.updates.any { it.state == OperationTaskState.CANCELLING })
+        assertEquals(OperationTaskState.CANCELLED, taskStore.updates.last().state)
+    }
+
     @Test fun `copy to source directory stays in picker and never dispatches`() = runTest {
         val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
         val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
@@ -1977,7 +2058,7 @@ class BrowserViewModelTest {
         val starts = mutableListOf<Pair<OperationTaskType, Int>>()
         val updates = mutableListOf<TaskUpdate>()
 
-        override suspend fun start(type: OperationTaskType, totalItems: Int): String {
+        override suspend fun start(type: OperationTaskType, totalItems: Int, totalBytes: Long?): String {
             starts += type to totalItems
             return "task-${starts.size}"
         }
@@ -1988,6 +2069,7 @@ class BrowserViewModelTest {
             completedItems: Int,
             failedItems: Int,
             message: String?,
+            completedBytes: Long?,
         ) {
             updates += TaskUpdate(id, state, completedItems)
         }

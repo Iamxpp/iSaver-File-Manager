@@ -15,7 +15,7 @@ class OperationTaskRepository internal constructor(
 
     override val tasks: Flow<List<OperationTask>> = dao.observeAll().map { rows -> rows.map { it.toModel() } }
 
-    override suspend fun start(type: OperationTaskType, totalItems: Int): String {
+    override suspend fun start(type: OperationTaskType, totalItems: Int, totalBytes: Long?): String {
         require(totalItems > 0)
         val now = clock()
         val id = idFactory()
@@ -27,6 +27,8 @@ class OperationTaskRepository internal constructor(
                 totalItems = totalItems,
                 completedItems = 0,
                 failedItems = 0,
+                totalBytes = totalBytes?.coerceAtLeast(0),
+                completedBytes = 0,
                 recoveryPolicy = OperationRecoveryPolicy.NEVER_REPLAY.name,
                 message = null,
                 createdAt = now,
@@ -42,6 +44,7 @@ class OperationTaskRepository internal constructor(
         completedItems: Int,
         failedItems: Int,
         message: String?,
+        completedBytes: Long?,
     ) {
         val current = dao.find(id) ?: return
         dao.upsert(
@@ -49,6 +52,10 @@ class OperationTaskRepository internal constructor(
                 state = state.name,
                 completedItems = completedItems.coerceIn(0, current.totalItems),
                 failedItems = failedItems.coerceAtLeast(0),
+                completedBytes = (completedBytes ?: current.completedBytes).coerceIn(
+                    0,
+                    current.totalBytes ?: Long.MAX_VALUE,
+                ),
                 message = message,
                 updatedAt = clock(),
             ),
@@ -70,6 +77,8 @@ class OperationTaskRepository internal constructor(
         totalItems = totalItems,
         completedItems = completedItems,
         failedItems = failedItems,
+        totalBytes = totalBytes,
+        completedBytes = completedBytes,
         recoveryPolicy = OperationRecoveryPolicy.valueOf(recoveryPolicy),
         message = message,
         createdAt = createdAt,

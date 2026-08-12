@@ -262,6 +262,8 @@ class BrowserScreenTest {
     @Test
     fun taskCenterShowsPersistedProgressAndClearsFinishedTasks() {
         var cleared = false
+        var paused = false
+        var cancelled = false
         val task = OperationTask(
             id = "task-1",
             type = OperationTaskType.COPY,
@@ -269,6 +271,8 @@ class BrowserScreenTest {
             totalItems = 3,
             completedItems = 1,
             failedItems = 0,
+            totalBytes = 3_000,
+            completedBytes = 1_000,
             recoveryPolicy = OperationRecoveryPolicy.NEVER_REPLAY,
             message = null,
             createdAt = 1,
@@ -276,19 +280,27 @@ class BrowserScreenTest {
         )
         compose.setContent {
             BrowserScreen(
-                state = state().copy(operationTasks = listOf(task)),
+                state = state().copy(operationTasks = listOf(task), controllableTaskId = task.id),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
                 onClearFinishedTasks = { cleared = true },
+                onPauseTask = { paused = true },
+                onCancelTask = { cancelled = true },
             )
         }
 
         compose.onNodeWithContentDescription("更多操作").performClick()
         compose.onNodeWithText("任务中心").assertIsDisplayed().performClick()
         compose.onNodeWithText("复制").assertIsDisplayed()
-        compose.onNodeWithText("运行中 · 1/3").assertIsDisplayed()
+        compose.onNodeWithText("运行中 · 1/3 · 1000 B/2.9 KB").assertIsDisplayed()
+        compose.onNodeWithText("暂停").performClick()
+        compose.onNodeWithText("取消").performClick()
         compose.onNodeWithText("清理已完成").performClick()
 
-        compose.runOnIdle { assertTrue(cleared) }
+        compose.runOnIdle {
+            assertTrue(cleared)
+            assertTrue(paused)
+            assertTrue(cancelled)
+        }
     }
 
     @Test

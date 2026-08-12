@@ -60,7 +60,12 @@ class ISaverApplication : Application() {
     internal val rootFileSystem: RootFileSystem by lazy { LibsuRootFileSystem("${applicationInfo.nativeLibraryDir}/libisaver_fs_helper.so") }
     internal val database: ISaverDatabase by lazy {
         Room.databaseBuilder(this, ISaverDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ISaverDatabase.MIGRATION_1_2, ISaverDatabase.MIGRATION_2_3, ISaverDatabase.MIGRATION_3_4)
+            .addMigrations(
+                ISaverDatabase.MIGRATION_1_2,
+                ISaverDatabase.MIGRATION_2_3,
+                ISaverDatabase.MIGRATION_3_4,
+                ISaverDatabase.MIGRATION_4_5,
+            )
             .build()
     }
     internal val customLocationRepository: CustomLocationRepository by lazy {

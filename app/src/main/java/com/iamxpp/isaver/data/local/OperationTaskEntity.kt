@@ -15,6 +15,8 @@ data class OperationTaskEntity(
     val totalItems: Int,
     val completedItems: Int,
     val failedItems: Int,
+    val totalBytes: Long?,
+    val completedBytes: Long,
     val recoveryPolicy: String,
     val message: String?,
     val createdAt: Long,

@@ -27,6 +27,8 @@ data class OperationTask(
     val totalItems: Int,
     val completedItems: Int,
     val failedItems: Int,
+    val totalBytes: Long?,
+    val completedBytes: Long,
     val recoveryPolicy: OperationRecoveryPolicy,
     val message: String?,
     val createdAt: Long,
@@ -36,7 +38,7 @@ data class OperationTask(
 interface OperationTaskStore {
     val tasks: Flow<List<OperationTask>>
 
-    suspend fun start(type: OperationTaskType, totalItems: Int): String
+    suspend fun start(type: OperationTaskType, totalItems: Int, totalBytes: Long? = null): String
 
     suspend fun update(
         id: String,
@@ -44,6 +46,7 @@ interface OperationTaskStore {
         completedItems: Int,
         failedItems: Int = 0,
         message: String? = null,
+        completedBytes: Long? = null,
     )
 
     suspend fun reconcileInterrupted()

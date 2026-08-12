@@ -34,13 +34,15 @@ class OperationTaskRepositoryTest {
         var now = 10L
         val repository = OperationTaskRepository(database.operationTaskDao(), { now++ }, { "task-1" })
 
-        val id = repository.start(OperationTaskType.COPY, 3)
-        repository.update(id, OperationTaskState.RUNNING, 1)
-        repository.update(id, OperationTaskState.SUCCESS, 3)
+        val id = repository.start(OperationTaskType.COPY, 3, 300)
+        repository.update(id, OperationTaskState.RUNNING, 1, completedBytes = 100)
+        repository.update(id, OperationTaskState.SUCCESS, 3, completedBytes = 300)
 
         val task = repository.tasks.first().single()
         assertEquals("task-1", task.id)
         assertEquals(3, task.completedItems)
+        assertEquals(300L, task.totalBytes)
+        assertEquals(300L, task.completedBytes)
         assertEquals(OperationTaskState.SUCCESS, task.state)
         repository.clearFinished()
         assertEquals(emptyList<OperationTask>(), repository.tasks.first())

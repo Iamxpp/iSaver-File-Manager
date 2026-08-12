@@ -65,6 +65,8 @@ data class BrowserUiState(
     val batchRenamePlan: BatchRenamePlan? = null,
     val batchRenameError: BrowserOperationError? = null,
     val operationTasks: List<OperationTask> = emptyList(),
+    val controllableTaskId: String? = null,
+    val controllableTaskPaused: Boolean = false,
     val trashItems: List<TrashItem> = emptyList(),
     val deletingEntry: Boolean = false,
     val trashError: BrowserOperationError? = null,

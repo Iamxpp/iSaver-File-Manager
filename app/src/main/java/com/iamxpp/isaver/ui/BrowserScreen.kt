@@ -110,6 +110,9 @@ fun BrowserScreen(
     onExecuteBatchRename: (() -> Unit)? = null,
     onDismissBatchRename: () -> Unit = {},
     onClearFinishedTasks: () -> Unit = {},
+    onPauseTask: (String) -> Unit = {},
+    onResumeTask: (String) -> Unit = {},
+    onCancelTask: (String) -> Unit = {},
     onRecycleEntry: ((DirectoryEntry) -> Unit)? = null,
     onDeleteEntryPermanently: ((DirectoryEntry) -> Unit)? = null,
     onRestoreTrashItem: (TrashItem) -> Unit = {},
@@ -436,7 +439,12 @@ fun BrowserScreen(
     if (taskCenterVisible) {
         OperationTaskDialog(
             tasks = state.operationTasks,
+            controllableTaskId = state.controllableTaskId,
+            controllableTaskPaused = state.controllableTaskPaused,
             onClearFinished = onClearFinishedTasks,
+            onPause = onPauseTask,
+            onResume = onResumeTask,
+            onCancel = onCancelTask,
             onDismiss = { taskCenterVisible = false },
         )
     }
@@ -887,7 +895,12 @@ private fun BatchRenameDialog(
 @Composable
 private fun OperationTaskDialog(
     tasks: List<OperationTask>,
+    controllableTaskId: String?,
+    controllableTaskPaused: Boolean,
     onClearFinished: () -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onCancel: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -902,9 +915,24 @@ private fun OperationTaskDialog(
                         ListItem(
                             headlineContent = { Text(task.type.taskLabel()) },
                             supportingContent = {
-                                Text("${task.state.stateLabel()} · ${task.completedItems}/${task.totalItems}" +
+                                val bytes = task.totalBytes?.let {
+                                    " · ${formatTaskBytes(task.completedBytes)}/${formatTaskBytes(it)}"
+                                } ?: ""
+                                Text("${task.state.stateLabel()} · ${task.completedItems}/${task.totalItems}$bytes" +
                                     (task.message?.let { " · $it" } ?: ""))
                             },
+                            trailingContent = if (task.id == controllableTaskId) {
+                                {
+                                    Row {
+                                        TextButton(
+                                            onClick = {
+                                                if (controllableTaskPaused) onResume(task.id) else onPause(task.id)
+                                            },
+                                        ) { Text(if (controllableTaskPaused) "继续" else "暂停") }
+                                        TextButton(onClick = { onCancel(task.id) }) { Text("取消") }
+                                    }
+                                }
+                            } else null,
                             colors = ListItemDefaults.colors(containerColor = ISaverCard),
                         )
                     }
@@ -914,6 +942,13 @@ private fun OperationTaskDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
         dismissButton = { TextButton(onClick = onClearFinished) { Text("清理已完成") } },
     )
+}
+
+private fun formatTaskBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024L * 1024L -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
+    bytes >= 1024L * 1024L -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 @Composable

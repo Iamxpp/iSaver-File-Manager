@@ -78,6 +78,17 @@ class ISaverDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration4To5AddsTaskByteProgress() {
+        migrationHelper.createDatabase(TEST_DATABASE, 4).close()
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            TEST_DATABASE, 5, true, ISaverDatabase.MIGRATION_4_5,
+        )
+        migrated.query("SELECT totalBytes, completedBytes FROM operation_tasks").use { cursor ->
+            assertEquals(2, cursor.columnCount)
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "isaver-migration-test"
     }

@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.NonCancellable
@@ -84,6 +85,9 @@ class BrowserViewModel(
     private var moveFileJob: Job? = null
     private var selectionToRestore: BrowserMoveSelection? = null
     private var copyFileJob: Job? = null
+    private val taskPaused = MutableStateFlow(false)
+    private var activeTaskId: String? = null
+    private var activeTaskCompletedBytes = 0L
     private var renameFileJob: Job? = null
     private val batchRenamePlanner = BatchRenamePlanner()
     private val batchRenameExecutor = BatchRenameExecutor(renameFile)
@@ -366,10 +370,16 @@ class BrowserViewModel(
         moveFileJob = viewModelScope.launch {
             var taskId: String? = existingTaskId
             try {
-                taskId = taskId ?: operationTaskStore?.start(OperationTaskType.MOVE, selection.entries.size)
-                updateTask(taskId, OperationTaskState.RUNNING, completedBefore.size)
+                taskId = taskId ?: operationTaskStore?.start(
+                    OperationTaskType.MOVE,
+                    selection.entries.size,
+                    selection.totalKnownBytes(),
+                )
+                ownTask(taskId)
+                updateTask(taskId, OperationTaskState.RUNNING, completedBefore.size, completedBytes = completedBefore.knownBytes())
                 val completed = completedBefore.toMutableList()
                 for (index in startIndex until selection.entries.size) {
+                    awaitTaskResume(taskId, completed.size, completed.knownBytes())
                     val entry = selection.entries[index]
                     val action = if (index == startIndex) currentAction else ConflictAction.CANCEL
                     when (
@@ -391,7 +401,7 @@ class BrowserViewModel(
                                         completed += kept.value
                                         mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                                         recordSuccessfulFileAccess(kept.value)
-                                        updateTask(taskId, OperationTaskState.RUNNING, completed.size)
+                                        updateRunningTask(taskId, completed.size, completed.knownBytes())
                                         continue
                                     }
                                     is OperationResult.Failure -> {
@@ -442,7 +452,7 @@ class BrowserViewModel(
                             completed += result.value
                             mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                             recordSuccessfulFileAccess(result.value)
-                            updateTask(taskId, OperationTaskState.RUNNING, completed.size)
+                            updateRunningTask(taskId, completed.size, completed.knownBytes())
                         }
                     }
                 }
@@ -471,6 +481,8 @@ class BrowserViewModel(
                     selection.entries.size,
                     OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法移动文件"),
                 )
+            } finally {
+                releaseTask(taskId)
             }
         }
     }
@@ -561,10 +573,16 @@ class BrowserViewModel(
         copyFileJob = viewModelScope.launch {
             var taskId: String? = existingTaskId
             try {
-                taskId = taskId ?: operationTaskStore?.start(OperationTaskType.COPY, selection.entries.size)
-                updateTask(taskId, OperationTaskState.RUNNING, completedBefore.size)
+                taskId = taskId ?: operationTaskStore?.start(
+                    OperationTaskType.COPY,
+                    selection.entries.size,
+                    selection.totalKnownBytes(),
+                )
+                ownTask(taskId)
+                updateTask(taskId, OperationTaskState.RUNNING, completedBefore.size, completedBytes = completedBefore.knownBytes())
                 val completed = completedBefore.toMutableList()
                 for (index in startIndex until selection.entries.size) {
+                    awaitTaskResume(taskId, completed.size, completed.knownBytes())
                     val entry = selection.entries[index]
                     val action = if (index == startIndex) currentAction else ConflictAction.CANCEL
                     when (
@@ -586,7 +604,7 @@ class BrowserViewModel(
                                         completed += kept.value
                                         mutableState.value = mutableState.value.copy(copyCompletedCount = completed.size)
                                         recordSuccessfulFileAccess(kept.value)
-                                        updateTask(taskId, OperationTaskState.RUNNING, completed.size)
+                                        updateRunningTask(taskId, completed.size, completed.knownBytes())
                                         continue
                                     }
                                     is OperationResult.Failure -> {
@@ -637,7 +655,7 @@ class BrowserViewModel(
                             completed += result.value
                             mutableState.value = mutableState.value.copy(copyCompletedCount = completed.size)
                             recordSuccessfulFileAccess(result.value)
-                            updateTask(taskId, OperationTaskState.RUNNING, completed.size)
+                            updateRunningTask(taskId, completed.size, completed.knownBytes())
                         }
                     }
                 }
@@ -666,6 +684,8 @@ class BrowserViewModel(
                     selection.entries.size,
                     OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法复制文件"),
                 )
+            } finally {
+                releaseTask(taskId)
             }
         }
     }
@@ -851,6 +871,28 @@ class BrowserViewModel(
         operationTaskStore?.let { store -> viewModelScope.launch(ioDispatcher) { store.clearFinished() } }
     }
 
+    fun pauseTask(id: String) {
+        if (id != activeTaskId || taskPaused.value) return
+        taskPaused.value = true
+        mutableState.value = mutableState.value.copy(controllableTaskPaused = true)
+    }
+
+    fun resumeTask(id: String) {
+        if (id != activeTaskId || !taskPaused.value) return
+        taskPaused.value = false
+        mutableState.value = mutableState.value.copy(controllableTaskPaused = false)
+    }
+
+    fun cancelTask(id: String) {
+        if (id != activeTaskId) return
+        viewModelScope.launch(ioDispatcher) {
+            updateTask(id, OperationTaskState.CANCELLING, activeCompletedItems(), completedBytes = activeCompletedBytes())
+            moveFileJob?.takeIf { it.isActive }?.cancel()
+            copyFileJob?.takeIf { it.isActive }?.cancel()
+            taskPaused.value = false
+        }
+    }
+
     fun recycleEntry(entry: DirectoryEntry) {
         val repository = trashRepository ?: return
         if (fileOperationBusy() || mutableState.value.deletingEntry) return
@@ -943,9 +985,57 @@ class BrowserViewModel(
         completed: Int,
         failed: Int = 0,
         message: String? = null,
+        completedBytes: Long? = null,
     ) {
-        if (id != null) operationTaskStore?.update(id, state, completed, failed, message)
+        if (id != null) operationTaskStore?.update(id, state, completed, failed, message, completedBytes)
     }
+
+    private suspend fun awaitTaskResume(id: String?, completed: Int, completedBytes: Long) {
+        if (!taskPaused.value) return
+        updateTask(id, OperationTaskState.PAUSED, completed, completedBytes = completedBytes)
+        taskPaused.first { paused -> !paused }
+        updateTask(id, OperationTaskState.RUNNING, completed, completedBytes = completedBytes)
+    }
+
+    private suspend fun updateRunningTask(id: String?, completed: Int, completedBytes: Long) {
+        activeTaskCompletedBytes = completedBytes
+        updateTask(
+            id,
+            if (taskPaused.value) OperationTaskState.PAUSED else OperationTaskState.RUNNING,
+            completed,
+            completedBytes = completedBytes,
+        )
+    }
+
+    private fun ownTask(id: String?) {
+        activeTaskId = id
+        activeTaskCompletedBytes = 0
+        taskPaused.value = false
+        mutableState.value = mutableState.value.copy(controllableTaskId = id, controllableTaskPaused = false)
+    }
+
+    private fun releaseTask(id: String?) {
+        if (activeTaskId != id) return
+        activeTaskId = null
+        activeTaskCompletedBytes = 0
+        taskPaused.value = false
+        mutableState.value = mutableState.value.copy(controllableTaskId = null, controllableTaskPaused = false)
+    }
+
+    private fun activeCompletedItems() = if (mutableState.value.movingFile) {
+        mutableState.value.moveCompletedCount
+    } else {
+        mutableState.value.copyCompletedCount
+    }
+
+    private fun activeCompletedBytes(): Long = activeTaskCompletedBytes
+
+    private fun List<DirectoryEntry>.knownBytes(): Long = sumOf { it.sizeBytes ?: 0L }
+
+    private fun BrowserMoveSelection.totalKnownBytes(): Long? = entries.totalKnownBytes()
+    private fun BrowserCopySelection.totalKnownBytes(): Long? = entries.totalKnownBytes()
+    private fun List<DirectoryEntry>.totalKnownBytes(): Long? =
+        if (all { it.type == EntryType.FILE && it.sizeBytes != null }) knownBytes() else null
 
     private suspend fun finishFailedTask(
         id: String?,
