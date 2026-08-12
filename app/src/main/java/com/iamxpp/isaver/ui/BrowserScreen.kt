@@ -1108,6 +1108,9 @@ private fun ConflictDialog(
                 )
                 TextButton(onClick = { onResolve(ConflictAction.KEEP_BOTH, false) }) { Text("保留两者") }
                 TextButton(onClick = { onResolve(ConflictAction.SKIP, false) }) { Text("跳过") }
+                TextButton(onClick = { onResolve(ConflictAction.REPLACE, false) }) {
+                    Text("替换", color = MaterialTheme.colorScheme.error)
+                }
                 if (prompt.totalCount > 1) {
                     TextButton(onClick = { onResolve(ConflictAction.KEEP_BOTH, true) }) { Text("全部保留两者") }
                     TextButton(onClick = { onResolve(ConflictAction.SKIP, true) }) { Text("全部跳过") }

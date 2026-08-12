@@ -69,6 +69,22 @@ class BrowserScreenTest {
         assertEquals(listOf(ConflictAction.KEEP_BOTH to true), decisions)
     }
 
+    @Test fun conflictDialogOffersExplicitReplace() {
+        var selected: ConflictAction? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state().copy(conflictPrompt = BrowserConflictPrompt(
+                    BrowserConflictOperation.MOVE, "报告.txt", 0, 1,
+                )),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onResolveConflict = { action, _ -> selected = action },
+            )
+        }
+
+        compose.onNodeWithText("替换").performClick()
+        compose.runOnIdle { assertEquals(ConflictAction.REPLACE, selected) }
+    }
+
     @get:Rule val compose = createComposeRule()
 
     @Test

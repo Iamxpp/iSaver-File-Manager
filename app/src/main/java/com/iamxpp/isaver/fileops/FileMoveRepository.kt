@@ -10,10 +10,12 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.transfer.OutputNameDraft
 import com.iamxpp.isaver.transfer.TargetNameResolver
+import com.iamxpp.isaver.trash.TrashRepository
 
 class FileMoveRepository internal constructor(
     private val moveFileAs: suspend (DirectoryEntry, RootPath, RootPath, EntryName) -> OperationResult<DirectoryEntry>,
     private val nameResolver: TargetNameResolver = TargetNameResolver(),
+    private val replaceExisting: (suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>)? = null,
 ) {
     internal constructor(
         moveFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>,
@@ -23,7 +25,16 @@ class FileMoveRepository internal constructor(
         },
     )
 
-    constructor(fileSystem: RootFileSystem) : this(fileSystem::moveEntryAsNoReplace)
+    constructor(fileSystem: RootFileSystem, trashRepository: TrashRepository? = null) : this(
+        fileSystem::moveEntryAsNoReplace,
+        replaceExisting = trashRepository?.let { trash ->
+            { source, sourceDirectory, targetDirectory ->
+                RecoverableReplaceRepository(fileSystem, trash).replace(
+                    source, sourceDirectory, targetDirectory, fileSystem::moveEntryAsNoReplace,
+                )
+            }
+        },
+    )
 
     suspend fun move(
         source: DirectoryEntry,
@@ -39,6 +50,10 @@ class FileMoveRepository internal constructor(
             source.path != EntryName.join(sourceDirectory, name)
         ) {
             return sourceUnreadable()
+        }
+        if (conflictAction == ConflictAction.REPLACE) {
+            return replaceExisting?.invoke(source, sourceDirectory, targetDirectory)
+                ?: OperationResult.Failure(ErrorCode.NOT_WRITABLE, "此位置不支持可恢复替换")
         }
         if (sourceDirectory == targetDirectory) {
             return OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "文件已在当前目录")

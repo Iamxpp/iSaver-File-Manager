@@ -4,4 +4,5 @@ enum class ConflictAction {
     CANCEL,
     SKIP,
     KEEP_BOTH,
+    REPLACE,
 }

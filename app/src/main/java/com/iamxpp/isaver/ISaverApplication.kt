@@ -184,11 +184,12 @@ class ISaverApplication : Application() {
             mimeResolver = MimeResolver(),
         )
     }
+    internal val trashRepository: TrashRepository by lazy { TrashRepository(rootFileSystem, database.trashItemDao()) }
     internal val fileMoveRepository: FileMoveRepository by lazy {
-        FileMoveRepository(rootFileSystem)
+        FileMoveRepository(rootFileSystem, trashRepository)
     }
     internal val fileCopyRepository: FileCopyRepository by lazy {
-        FileCopyRepository(rootFileSystem)
+        FileCopyRepository(rootFileSystem, trashRepository)
     }
     internal val fileRenameRepository: FileRenameRepository by lazy {
         FileRenameRepository(rootFileSystem)
@@ -196,7 +197,6 @@ class ISaverApplication : Application() {
     internal val operationTaskRepository: OperationTaskRepository by lazy {
         OperationTaskRepository(database.operationTaskDao())
     }
-    internal val trashRepository: TrashRepository by lazy { TrashRepository(rootFileSystem, database.trashItemDao()) }
     internal val remoteCredentialStore by lazy { KeystoreCredentialStore(this) }
     internal val remoteFileSystemFactory by lazy { RemoteFileSystemFactory(remoteCredentialStore) }
     internal val transferDependencies: TransferDependencies by lazy {

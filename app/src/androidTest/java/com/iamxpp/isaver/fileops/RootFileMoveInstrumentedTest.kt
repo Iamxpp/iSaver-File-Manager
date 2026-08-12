@@ -9,6 +9,7 @@ import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootStatus
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -201,6 +202,52 @@ class RootFileMoveInstrumentedTest {
         }
     }
 
+    @Test
+    fun sharedCopyAndMoveReplaceKeepRecoverableBackups() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        root(app, "rm -rf -- ${quote(REPLACE_TEST_ROOT)} ${quote("/storage/emulated/0/.iSaver/Trash")}")
+        root(app, "mkdir -p -- ${quote(REPLACE_SOURCE)} ${quote(REPLACE_TARGET)}")
+        try {
+            root(app, "printf %s old-copy > ${quote(REPLACE_TARGET + "/copy.txt")}")
+            root(app, "printf %s new-copy > ${quote(REPLACE_SOURCE + "/copy.txt")}")
+            val copied = app.fileCopyRepository.copy(
+                stat(app, REPLACE_SOURCE + "/copy.txt"),
+                path(REPLACE_SOURCE),
+                path(REPLACE_TARGET),
+                ConflictAction.REPLACE,
+            )
+            assertTrue(copied.toString(), copied is OperationResult.Success)
+            assertEquals("new-copy", root(app, "cat -- ${quote(REPLACE_TARGET + "/copy.txt")}"))
+            assertEquals("new-copy", root(app, "cat -- ${quote(REPLACE_SOURCE + "/copy.txt")}"))
+            val copyBackup = app.trashRepository.items.first().first {
+                it.originalPath == path(REPLACE_TARGET + "/copy.txt")
+            }
+            assertEquals("old-copy", root(app, "cat -- ${quote(copyBackup.trashedPath.value)}"))
+
+            root(app, "printf %s old-move > ${quote(REPLACE_TARGET + "/move.txt")}")
+            root(app, "printf %s new-move > ${quote(REPLACE_SOURCE + "/move.txt")}")
+            val moved = app.fileMoveRepository.move(
+                stat(app, REPLACE_SOURCE + "/move.txt"),
+                path(REPLACE_SOURCE),
+                path(REPLACE_TARGET),
+                ConflictAction.REPLACE,
+            )
+            assertTrue(moved.toString(), moved is OperationResult.Success)
+            assertEquals("new-move", root(app, "cat -- ${quote(REPLACE_TARGET + "/move.txt")}"))
+            assertEquals("missing", root(app, "test ! -e ${quote(REPLACE_SOURCE + "/move.txt")} && echo missing"))
+            val moveBackup = app.trashRepository.items.first().first {
+                it.originalPath == path(REPLACE_TARGET + "/move.txt")
+            }
+            assertEquals("old-move", root(app, "cat -- ${quote(moveBackup.trashedPath.value)}"))
+
+            assertTrue(app.trashRepository.deletePermanently(copyBackup) is OperationResult.Success)
+            assertTrue(app.trashRepository.deletePermanently(moveBackup) is OperationResult.Success)
+        } finally {
+            root(app, "rm -rf -- ${quote(REPLACE_TEST_ROOT)} ${quote("/storage/emulated/0/.iSaver/Trash")}")
+        }
+    }
+
     private suspend fun resetTargets(app: ISaverApplication) {
         cleanupTargets(app)
         root(
@@ -259,5 +306,8 @@ class RootFileMoveInstrumentedTest {
         const val TRASH_TEST_SOURCE = "$TRASH_TEST_ROOT/source"
         const val TRASH_SOURCE_FILE = "$TRASH_TEST_SOURCE/report.txt"
         const val TRASH_DELETE_DIRECTORY = "$TRASH_TEST_ROOT/delete-folder"
+        const val REPLACE_TEST_ROOT = "/storage/emulated/0/isaver-test/replace"
+        const val REPLACE_SOURCE = "$REPLACE_TEST_ROOT/source"
+        const val REPLACE_TARGET = "$REPLACE_TEST_ROOT/target"
     }
 }

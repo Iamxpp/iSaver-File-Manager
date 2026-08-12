@@ -108,5 +108,6 @@ data class BrowserConflictPrompt(
         ConflictAction.CANCEL,
         ConflictAction.SKIP,
         ConflictAction.KEEP_BOTH,
+        ConflictAction.REPLACE,
     ),
 )
