@@ -46,7 +46,8 @@ function Invoke-Adb([string[]]$Arguments, [int]$ExpectedExit = 0) {
 }
 
 function Invoke-Root([string]$Command, [int]$ExpectedExit = 0) {
-    Invoke-Adb -Arguments @("shell", "su", "-c", $Command) -ExpectedExit $ExpectedExit
+    $escaped = $Command.Replace("'", "'\''")
+    Invoke-Adb -Arguments @("shell", "su -c '$escaped'") -ExpectedExit $ExpectedExit
 }
 
 function Get-InstalledUid([string]$Package) {
