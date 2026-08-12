@@ -133,6 +133,38 @@ class RootFileMoveInstrumentedTest {
         }
     }
 
+    @Test
+    fun batchRenameSwapsNamesThroughBoundTemporaryEntries() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        resetRenameTargets(app)
+        try {
+            root(app, "printf %s first > ${quote(RENAME_DIRECTORY + "/a.txt")}")
+            root(app, "printf %s second > ${quote(RENAME_DIRECTORY + "/b.txt")}")
+            val first = stat(app, RENAME_DIRECTORY + "/a.txt")
+            val second = stat(app, RENAME_DIRECTORY + "/b.txt")
+            val plan = BatchRenamePlan(
+                listOf(
+                    BatchRenameItem(first, com.iamxpp.isaver.domain.EntryName.parse("b.txt").getOrThrow()),
+                    BatchRenameItem(second, com.iamxpp.isaver.domain.EntryName.parse("a.txt").getOrThrow()),
+                ),
+            )
+            val executor = BatchRenameExecutor(app.fileRenameRepository::rename)
+
+            val result = executor.execute(plan, path(RENAME_DIRECTORY))
+
+            assertTrue(result.toString(), result is OperationResult.Success)
+            assertEquals("second", root(app, "cat -- ${quote(RENAME_DIRECTORY + "/a.txt")}"))
+            assertEquals("first", root(app, "cat -- ${quote(RENAME_DIRECTORY + "/b.txt")}"))
+            assertEquals(
+                "clean",
+                root(app, "if find ${quote(RENAME_DIRECTORY)} -maxdepth 1 -name '.isaver-rename-*' | grep -q .; then echo staged; else echo clean; fi"),
+            )
+        } finally {
+            cleanupRenameTargets(app)
+        }
+    }
+
     private suspend fun resetTargets(app: ISaverApplication) {
         cleanupTargets(app)
         root(

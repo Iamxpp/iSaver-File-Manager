@@ -12,6 +12,8 @@ import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.export.ExternalFileGrant
+import com.iamxpp.isaver.fileops.BatchRenameMode
+import com.iamxpp.isaver.fileops.BatchRenameRule
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1503,6 +1505,111 @@ class BrowserViewModelTest {
         assertFalse(vm.state.value.renamingFile)
         assertNull(vm.state.value.renamedOutput)
         assertEquals(ErrorCode.ALREADY_EXISTS, vm.state.value.fileRenameError?.code)
+    }
+
+    @Test fun `batch rename preview reports conflicts before execution`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val first = entry("a.txt", EntryType.FILE, path = "${sourceDirectory.value}/a.txt")
+        val second = entry("b.txt", EntryType.FILE, path = "${sourceDirectory.value}/b.txt")
+        val existing = entry("c.txt", EntryType.FILE, path = "${sourceDirectory.value}/c.txt")
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second, existing)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+
+        vm.previewBatchRename(BatchRenameRule(BatchRenameMode.PREFIX_SUFFIX, prefix = "new-"))
+        assertEquals(listOf("new-a.txt", "new-b.txt"), vm.state.value.batchRenamePlan?.items?.map { it.targetName.value })
+        assertNull(vm.state.value.batchRenameError)
+
+        vm.previewBatchRename(BatchRenameRule(BatchRenameMode.FIND_REPLACE, find = "a", replacement = "c"))
+        assertNull(vm.state.value.batchRenamePlan)
+        assertEquals(ErrorCode.ALREADY_EXISTS, vm.state.value.batchRenameError?.code)
+    }
+
+    @Test fun `batch rename rejects changed selection after preview`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val first = entry("a.txt", EntryType.FILE, path = "${sourceDirectory.value}/a.txt")
+        val second = entry("b.txt", EntryType.FILE, path = "${sourceDirectory.value}/b.txt")
+        var renameCalls = 0
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            renameFile = { _, _, _ -> renameCalls += 1; error("must not rename") },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+        vm.previewBatchRename(BatchRenameRule(BatchRenameMode.PREFIX_SUFFIX, prefix = "new-"))
+
+        vm.selectEntry(second)
+        vm.executeBatchRename()
+
+        assertEquals(0, renameCalls)
+        assertNull(vm.state.value.batchRenamePlan)
+        assertEquals("选择已变化，请重新预览", vm.state.value.batchRenameError?.userMessage)
+    }
+
+    @Test fun `successful batch rename clears selection and refreshes directory`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val first = entry("a.txt", EntryType.FILE, path = "${sourceDirectory.value}/a.txt")
+        val second = entry("b.txt", EntryType.FILE, path = "${sourceDirectory.value}/b.txt")
+        val current = linkedMapOf(first.name to first, second.name to second)
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(current.values.toList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            renameFile = { source, parent, target ->
+                current.remove(source.name)
+                val output = source.copy(path = RootPath.parse("${parent.value}/$target").getOrThrow(), name = target)
+                current[target] = output
+                OperationResult.Success(output)
+            },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+        vm.previewBatchRename(BatchRenameRule(BatchRenameMode.PREFIX_SUFFIX, prefix = "new-"))
+
+        vm.executeBatchRename()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.selectedEntries.isEmpty())
+        assertNull(vm.state.value.batchRenamePlan)
+        assertNull(vm.state.value.batchRenameError)
+        assertEquals(listOf("new-a.txt", "new-b.txt"), vm.state.value.allEntries.map { it.name })
+    }
+
+    @Test fun `batch rename execution failure remains visible`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val first = entry("a.txt", EntryType.FILE, path = "${sourceDirectory.value}/a.txt")
+        val second = entry("b.txt", EntryType.FILE, path = "${sourceDirectory.value}/b.txt")
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            renameFile = { _, _, _ -> OperationResult.Failure(ErrorCode.NOT_WRITABLE, "目录不可写") },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+        vm.previewBatchRename(BatchRenameRule(BatchRenameMode.PREFIX_SUFFIX, prefix = "new-"))
+
+        vm.executeBatchRename()
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.renamingFile)
+        assertNull(vm.state.value.batchRenamePlan)
+        assertEquals(ErrorCode.NOT_WRITABLE, vm.state.value.batchRenameError?.code)
+        assertEquals(setOf(first, second), vm.state.value.selectedEntries)
     }
 
     @Test fun `single file copy keeps source identity while choosing and emits copied output`() = runTest {

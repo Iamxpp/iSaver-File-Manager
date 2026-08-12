@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.testTag
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.fileops.ConflictAction
+import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.remote.RemoteConnectionDraft
@@ -72,6 +73,9 @@ fun ISaverHomeScreen(
     onDismissFileCopyError: () -> Unit = {},
     onResolveBrowserConflict: (ConflictAction, Boolean) -> Unit = { _, _ -> },
     onRenameBrowserEntry: ((DirectoryEntry, String) -> Unit)? = null,
+    onPreviewBatchRename: ((BatchRenameRule) -> Unit)? = null,
+    onExecuteBatchRename: (() -> Unit)? = null,
+    onDismissBatchRename: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
     onCompress: (String) -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
@@ -203,6 +207,9 @@ fun ISaverHomeScreen(
                 onDismissFileCopyError = onDismissFileCopyError,
                 onResolveConflict = onResolveBrowserConflict,
                 onRenameEntry = if (saveMode) null else onRenameBrowserEntry,
+                onPreviewBatchRename = if (saveMode) null else onPreviewBatchRename,
+                onExecuteBatchRename = if (saveMode) null else onExecuteBatchRename,
+                onDismissBatchRename = onDismissBatchRename,
                 onDismissFileRenameError = onDismissFileRenameError,
                 onCompress = onCompress,
                 onDismissCompressionMessage = onDismissCompressionMessage,

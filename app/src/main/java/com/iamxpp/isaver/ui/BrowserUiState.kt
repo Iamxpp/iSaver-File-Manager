@@ -5,6 +5,7 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.ConflictAction
+import com.iamxpp.isaver.fileops.BatchRenamePlan
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
@@ -59,6 +60,8 @@ data class BrowserUiState(
     val renamingFile: Boolean = false,
     val renamedOutput: DirectoryEntry? = null,
     val fileRenameError: BrowserOperationError? = null,
+    val batchRenamePlan: BatchRenamePlan? = null,
+    val batchRenameError: BrowserOperationError? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {

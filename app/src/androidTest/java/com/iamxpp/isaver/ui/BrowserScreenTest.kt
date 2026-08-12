@@ -24,6 +24,9 @@ import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.fileops.ConflictAction
+import com.iamxpp.isaver.fileops.BatchRenameItem
+import com.iamxpp.isaver.fileops.BatchRenamePlan
+import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesSaveAction
@@ -199,6 +202,54 @@ class BrowserScreenTest {
         compose.runOnIdle {
             assertTrue(moved)
             assertTrue(copied)
+        }
+    }
+
+    @Test
+    fun batchRenameRequiresPreviewBeforeExecution() {
+        val first = entry("old-a.txt", EntryType.FILE)
+        val second = entry("old-b.txt", EntryType.FILE)
+        var previewRule: BatchRenameRule? = null
+        var executed = false
+        var currentState by mutableStateOf(
+            state(
+                entries = listOf(first, second),
+                allEntries = listOf(first, second),
+                selectedEntries = setOf(first, second),
+            ),
+        )
+        compose.setContent {
+            BrowserScreen(
+                state = currentState,
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onPreviewBatchRename = { rule ->
+                    previewRule = rule
+                    currentState = currentState.copy(
+                        batchRenamePlan = BatchRenamePlan(
+                            listOf(
+                                BatchRenameItem(first, com.iamxpp.isaver.domain.EntryName.parse("new-a.txt").getOrThrow()),
+                                BatchRenameItem(second, com.iamxpp.isaver.domain.EntryName.parse("new-b.txt").getOrThrow()),
+                            ),
+                        ),
+                    )
+                },
+                onExecuteBatchRename = { executed = true },
+            )
+        }
+
+        compose.onNodeWithText("批量重命名").performClick()
+        compose.onNodeWithText("执行").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("查找").performTextInput("old")
+        compose.onNodeWithContentDescription("替换为").performTextInput("new")
+        compose.onNodeWithText("生成预览").performClick()
+        compose.onNodeWithText("old-a.txt  →  new-a.txt").assertIsDisplayed()
+        compose.onNodeWithText("old-b.txt  →  new-b.txt").assertIsDisplayed()
+        compose.onNodeWithText("执行").assertIsEnabled().performClick()
+
+        compose.runOnIdle {
+            assertEquals("old", previewRule?.find)
+            assertEquals("new", previewRule?.replacement)
+            assertTrue(executed)
         }
     }
 

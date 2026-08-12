@@ -46,6 +46,9 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.fileops.ConflictAction
+import com.iamxpp.isaver.fileops.BatchRenameCase
+import com.iamxpp.isaver.fileops.BatchRenameMode
+import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.remote.RemoteConnectionDraft
 import com.iamxpp.isaver.remote.RemoteConnectionUiState
 import com.iamxpp.isaver.remote.RemoteProtocol
@@ -99,6 +102,9 @@ fun BrowserScreen(
     onDismissFileCopyError: () -> Unit = {},
     onResolveConflict: (ConflictAction, Boolean) -> Unit = { _, _ -> },
     onRenameEntry: ((DirectoryEntry, String) -> Unit)? = null,
+    onPreviewBatchRename: ((BatchRenameRule) -> Unit)? = null,
+    onExecuteBatchRename: (() -> Unit)? = null,
+    onDismissBatchRename: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
@@ -120,9 +126,13 @@ fun BrowserScreen(
     var serverDialogVisible by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var renameDialogEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var batchRenameDialogVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.currentPath) {
         actionEntry = null
+    }
+    LaunchedEffect(state.selectionMode) {
+        if (!state.selectionMode) batchRenameDialogVisible = false
     }
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
@@ -201,7 +211,8 @@ fun BrowserScreen(
                     Text("已选择 ${state.selectedEntries.size} 项", modifier = Modifier.weight(1f))
                     TextButton(onClick = onClearSelection) { Text("清除") }
                 }
-                if (onShareSelection != null || onMoveSelection != null || onCopySelection != null) {
+                if (onShareSelection != null || onMoveSelection != null || onCopySelection != null ||
+                    onPreviewBatchRename != null) {
                     Row(Modifier.fillMaxWidth()) {
                         onShareSelection?.let { share ->
                             TextButton(
@@ -223,6 +234,13 @@ fun BrowserScreen(
                                 onClick = copy,
                                 modifier = Modifier.weight(1f),
                             ) { Text("复制到") }
+                        }
+                        if (onPreviewBatchRename != null && state.selectedEntries.size > 1) {
+                            TextButton(
+                                enabled = !state.renamingFile,
+                                onClick = { batchRenameDialogVisible = true },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("批量重命名") }
                         }
                     }
                 }
@@ -356,6 +374,19 @@ fun BrowserScreen(
             onConfirm = { newName ->
                 renameDialogEntry = null
                 onRenameEntry?.invoke(entry, newName)
+            },
+        )
+    }
+    if (batchRenameDialogVisible && onPreviewBatchRename != null && onExecuteBatchRename != null) {
+        BatchRenameDialog(
+            plan = state.batchRenamePlan,
+            error = state.batchRenameError?.userMessage,
+            running = state.renamingFile,
+            onPreview = onPreviewBatchRename,
+            onExecute = onExecuteBatchRename,
+            onDismiss = {
+                batchRenameDialogVisible = false
+                onDismissBatchRename()
             },
         )
     }
@@ -687,6 +718,124 @@ private fun RenameDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+@Composable
+private fun BatchRenameDialog(
+    plan: com.iamxpp.isaver.fileops.BatchRenamePlan?,
+    error: String?,
+    running: Boolean,
+    onPreview: (BatchRenameRule) -> Unit,
+    onExecute: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var mode by remember { mutableStateOf(BatchRenameMode.FIND_REPLACE) }
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    var start by remember { mutableStateOf("1") }
+    var width by remember { mutableStateOf("1") }
+    var renameCase by remember { mutableStateOf(BatchRenameCase.LOWERCASE) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("批量重命名") },
+        text = {
+            Column {
+                listOf(BatchRenameMode.entries.take(3), BatchRenameMode.entries.drop(3)).forEach { options ->
+                    Row(Modifier.fillMaxWidth()) {
+                        options.forEach { option ->
+                        TextButton(
+                            onClick = { mode = option },
+                            enabled = !running,
+                            modifier = Modifier.weight(1f),
+                        ) { Text(option.label()) }
+                        }
+                    }
+                }
+                when (mode) {
+                    BatchRenameMode.FIND_REPLACE, BatchRenameMode.REGEX -> {
+                        BatchRenameField(first, { first = it }, if (mode == BatchRenameMode.REGEX) "正则表达式" else "查找")
+                        BatchRenameField(second, { second = it }, "替换为")
+                    }
+                    BatchRenameMode.PREFIX_SUFFIX -> {
+                        BatchRenameField(first, { first = it }, "前缀")
+                        BatchRenameField(second, { second = it }, "后缀")
+                    }
+                    BatchRenameMode.NUMBERING -> {
+                        BatchRenameField(first, { first = it }, "前缀")
+                        BatchRenameField(second, { second = it }, "后缀")
+                        Row {
+                            BatchRenameField(start, { start = it.filter(Char::isDigit) }, "起始序号", Modifier.weight(1f))
+                            BatchRenameField(width, { width = it.filter(Char::isDigit) }, "序号位数", Modifier.weight(1f))
+                        }
+                    }
+                    BatchRenameMode.CASE -> Row {
+                        TextButton(onClick = { renameCase = BatchRenameCase.LOWERCASE }) { Text("小写") }
+                        TextButton(onClick = { renameCase = BatchRenameCase.UPPERCASE }) { Text("大写") }
+                    }
+                }
+                TextButton(
+                    enabled = !running,
+                    onClick = {
+                        onPreview(
+                            BatchRenameRule(
+                                mode = mode,
+                                find = first,
+                                replacement = second,
+                                prefix = first,
+                                suffix = second,
+                                startNumber = start.toIntOrNull() ?: 1,
+                                numberWidth = width.toIntOrNull() ?: 1,
+                                renameCase = renameCase,
+                            ),
+                        )
+                    },
+                ) { Text("生成预览") }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                plan?.let { preview ->
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+                        items(preview.items, key = { it.source.path.value }) { item ->
+                            Text(
+                                "${item.source.name}  →  ${item.targetName.value}",
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onExecute, enabled = plan != null && !running) {
+                Text(if (running) "正在重命名" else "执行")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !running) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun BatchRenameField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = true,
+        modifier = modifier.semantics { contentDescription = label },
+    )
+}
+
+private fun BatchRenameMode.label(): String = when (this) {
+    BatchRenameMode.FIND_REPLACE -> "替换"
+    BatchRenameMode.PREFIX_SUFFIX -> "前后缀"
+    BatchRenameMode.NUMBERING -> "序号"
+    BatchRenameMode.CASE -> "大小写"
+    BatchRenameMode.REGEX -> "正则"
 }
 
 @Composable

@@ -17,6 +17,9 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.ConflictAction
+import com.iamxpp.isaver.fileops.BatchRenameExecutor
+import com.iamxpp.isaver.fileops.BatchRenamePlanner
+import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -74,6 +77,8 @@ class BrowserViewModel(
     private var selectionToRestore: BrowserMoveSelection? = null
     private var copyFileJob: Job? = null
     private var renameFileJob: Job? = null
+    private val batchRenamePlanner = BatchRenamePlanner()
+    private val batchRenameExecutor = BatchRenameExecutor(renameFile)
     private var copySelectionToRestore: BrowserCopySelection? = null
     private var pendingConflict: PendingConflict? = null
     private var generation = 0L
@@ -709,6 +714,71 @@ class BrowserViewModel(
 
     fun dismissFileRenameError() {
         mutableState.value = mutableState.value.copy(fileRenameError = null)
+    }
+
+    fun previewBatchRename(rule: BatchRenameRule) {
+        if (fileOperationBusy()) return
+        val current = mutableState.value
+        val selected = selectedEntriesInDirectoryOrder()
+        when (val result = batchRenamePlanner.plan(selected, current.allEntries, rule)) {
+            is OperationResult.Success -> mutableState.value = current.copy(
+                batchRenamePlan = result.value,
+                batchRenameError = null,
+            )
+            is OperationResult.Failure -> mutableState.value = current.copy(
+                batchRenamePlan = null,
+                batchRenameError = BrowserOperationError(result.code, result.userMessage),
+            )
+        }
+    }
+
+    fun executeBatchRename() {
+        if (renameFileJob?.isActive == true || fileOperationBusy()) return
+        val plan = mutableState.value.batchRenamePlan ?: return
+        val currentPaths = selectedEntriesInDirectoryOrder().map { it.path }
+        if (currentPaths != plan.items.map { it.source.path }) {
+            mutableState.value = mutableState.value.copy(
+                batchRenamePlan = null,
+                batchRenameError = BrowserOperationError(ErrorCode.SOURCE_UNREADABLE, "选择已变化，请重新预览"),
+            )
+            return
+        }
+        val parent = mutableState.value.currentPath
+        mutableState.value = mutableState.value.copy(renamingFile = true, batchRenameError = null)
+        renameFileJob = viewModelScope.launch {
+            try {
+                when (val result = withContext(ioDispatcher) { batchRenameExecutor.execute(plan, parent) }) {
+                    is OperationResult.Failure -> mutableState.value = mutableState.value.copy(
+                        renamingFile = false,
+                        batchRenamePlan = null,
+                        batchRenameError = BrowserOperationError(result.code, result.userMessage),
+                    )
+                    is OperationResult.Success -> {
+                        mutableState.value = mutableState.value.copy(
+                            selectedEntries = emptySet(),
+                            renamingFile = false,
+                            batchRenamePlan = null,
+                            batchRenameError = null,
+                        )
+                        load(parent)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                mutableState.value = mutableState.value.copy(renamingFile = false)
+                throw cancelled
+            } catch (_: Exception) {
+                mutableState.value = mutableState.value.copy(
+                    renamingFile = false,
+                    batchRenamePlan = null,
+                    batchRenameError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "批量重命名失败"),
+                )
+            }
+        }
+    }
+
+    fun dismissBatchRename() {
+        if (mutableState.value.renamingFile) return
+        mutableState.value = mutableState.value.copy(batchRenamePlan = null, batchRenameError = null)
     }
 
     fun compress(outputName: String) {
