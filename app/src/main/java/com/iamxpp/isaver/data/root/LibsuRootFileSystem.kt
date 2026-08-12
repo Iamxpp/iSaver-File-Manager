@@ -916,6 +916,177 @@ class LibsuRootFileSystem internal constructor(
         }
     }
 
+    override suspend fun copyDirectoryAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = directoryOperation(
+        source, sourceDirectory, targetDirectory, targetName, move = false,
+    )
+
+    override suspend fun moveDirectoryAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = directoryOperation(
+        source, sourceDirectory, targetDirectory, targetName, move = true,
+    )
+
+    private suspend fun directoryOperation(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+        move: Boolean,
+    ): OperationResult<DirectoryEntry> {
+        val sourceName = EntryName.parse(source.name).getOrElse { return invalidDirectorySource() }
+        if (
+            source.type != com.iamxpp.isaver.domain.EntryType.DIRECTORY || source.symbolicLink ||
+            !source.readable || source.path != EntryName.join(sourceDirectory, sourceName)
+        ) return invalidDirectorySource()
+        if (sourceDirectory == targetDirectory) {
+            return failure(ErrorCode.ALREADY_EXISTS, "项目已在当前目录", "Directory target matched source parent")
+        }
+        if (RootPathRiskPolicy.isProtected(targetDirectory) ||
+            move && RootPathRiskPolicy.isProtected(sourceDirectory)) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览", "Protected directory operation")
+        }
+        val sourceParent = if (move) prepareWritableDirectory(sourceDirectory)
+            else prepareReadableDirectory(sourceDirectory)
+        if (sourceParent !is OperationResult.Success) return sourceParent as OperationResult.Failure
+        val targetParent = prepareWritableDirectory(targetDirectory)
+        if (targetParent !is OperationResult.Success) return targetParent as OperationResult.Failure
+        val expectedSource = EntryName.join(sourceParent.value.canonical, sourceName)
+        val currentSource = stat(source.path)
+        val canonicalSource = canonicalize(source.path)
+        if (
+            currentSource !is OperationResult.Success ||
+            currentSource.value.type != com.iamxpp.isaver.domain.EntryType.DIRECTORY ||
+            currentSource.value.symbolicLink || !currentSource.value.readable ||
+            canonicalSource !is OperationResult.Success || canonicalSource.value != expectedSource ||
+            canonicalDescendant(canonicalSource.value, targetParent.value.canonical)
+        ) return invalidDirectorySource("Directory source or target mapping changed")
+        val sourceIdentity = readIdentity(expectedSource)
+        if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
+        val targetPath = EntryName.join(targetParent.value.canonical, targetName)
+        when (val existing = stat(targetPath)) {
+            is OperationResult.Success -> return failure(
+                ErrorCode.ALREADY_EXISTS, "目标位置已存在同名项目", "Directory target already existed",
+            )
+            is OperationResult.Failure -> if (existing.code != ErrorCode.NOT_FOUND) return existing
+        }
+        if (move) {
+            val direct = runHelperBounded(
+                transferHelper.moveDirectoryNoReplace(
+                    sourceParent.value.original.value, sourceParent.value.canonical.value, sourceName,
+                    sourceParent.value.identity, sourceIdentity.value, targetParent.value.original.value,
+                    targetParent.value.canonical.value, targetParent.value.identity, targetName,
+                ),
+                helperOperationTimeoutMillis,
+            ).getOrElse { return uncertainDirectoryMove("Directory move helper result was lost") }
+            if (direct.exitCode == 0) {
+                return reconcileDirectoryResult(
+                    expectedSource, sourceIdentity.value, targetPath, targetName,
+                    sourceDirectory, sourceParent.value, targetDirectory, targetParent.value, true, direct.stdout,
+                )
+            }
+            if (direct.exitCode != 58) {
+                return mapExitCode(direct.exitCode, direct.stderr, "无法移动目录", "move-directory-noreplace")
+            }
+        }
+        val stageName = stageNameFactory()
+        if (!STAGE_NAME.matches(stageName)) {
+            return failure(ErrorCode.COMMAND_FAILED, "无法准备目标目录", "Invalid generated stage name")
+        }
+        val stageResult = prepareStage(targetParent.value, stageName) { reason ->
+            if (move) uncertainDirectoryMove(reason) else uncertainDirectoryCopy(reason)
+        }
+        if (stageResult !is OperationResult.Success) return stageResult as OperationResult.Failure
+        val stage = stageResult.value
+        val command = if (move) {
+            transferHelper.moveDirectoryCrossDeviceNoReplace(
+                sourceParent.value.original.value, sourceParent.value.canonical.value, sourceName,
+                sourceParent.value.identity, sourceIdentity.value, targetParent.value.original.value,
+                targetParent.value.canonical.value, stage, targetName, targetParent.value.identity,
+                DIRECTORY_OPERATION_TIMEOUT_MILLIS,
+            )
+        } else {
+            transferHelper.copyDirectoryPublish(
+                sourceParent.value.original.value, sourceParent.value.canonical.value, sourceName,
+                sourceParent.value.identity, sourceIdentity.value, targetParent.value.original.value,
+                targetParent.value.canonical.value, stage, targetName, targetParent.value.identity,
+                DIRECTORY_OPERATION_TIMEOUT_MILLIS,
+            )
+        }
+        val operation = if (move) "move-directory-cross-device-noreplace" else "copy-directory-publish"
+        val execution = runHelperBounded(command, DIRECTORY_OPERATION_TIMEOUT_MILLIS).getOrElse {
+            return if (move) uncertainDirectoryMove("Directory move result was lost")
+            else uncertainDirectoryCopy("Directory copy result was lost")
+        }
+        if (execution.exitCode != 0) {
+            return mapExitCode(
+                execution.exitCode, execution.stderr,
+                if (move) "无法移动目录" else "无法复制目录", operation,
+            )
+        }
+        return reconcileDirectoryResult(
+            expectedSource, sourceIdentity.value, targetPath, targetName, sourceDirectory,
+            sourceParent.value, targetDirectory, targetParent.value, move, execution.stdout,
+        )
+    }
+
+    private suspend fun reconcileDirectoryResult(
+        expectedSource: RootPath,
+        sourceIdentity: RootFileIdentity,
+        targetPath: RootPath,
+        targetName: EntryName,
+        sourceDirectory: RootPath,
+        sourceParent: PreparedTransferDirectory,
+        targetDirectory: RootPath,
+        targetParent: PreparedTransferDirectory,
+        move: Boolean,
+        stdout: List<String>,
+    ): OperationResult<DirectoryEntry> {
+        val publishedIdentity = RootFileIdentity.parse(stdout).getOrElse {
+            return if (move) uncertainDirectoryMove("Directory helper returned malformed identity")
+            else uncertainDirectoryCopy("Directory helper returned malformed identity")
+        }
+        val target = stat(targetPath)
+        val targetIdentity = readIdentity(targetPath)
+        val sourceAfter = stat(expectedSource)
+        val sourceIdentityAfter = if (sourceAfter is OperationResult.Success) readIdentity(expectedSource) else null
+        val sourceParentAfter = canonicalize(sourceDirectory)
+        val targetParentAfter = canonicalize(targetDirectory)
+        val sourceMatches = sourceAfter is OperationResult.Success &&
+            sourceAfter.value.type == com.iamxpp.isaver.domain.EntryType.DIRECTORY &&
+            !sourceAfter.value.symbolicLink &&
+            sourceIdentityAfter is OperationResult.Success && sourceIdentityAfter.value == sourceIdentity
+        val sourceExpected = if (move) {
+            sourceAfter is OperationResult.Failure && sourceAfter.code == ErrorCode.NOT_FOUND
+        } else {
+            sourceMatches
+        }
+        if (
+            target !is OperationResult.Success || target.value.name != targetName.value ||
+            target.value.type != com.iamxpp.isaver.domain.EntryType.DIRECTORY || target.value.symbolicLink ||
+            targetIdentity !is OperationResult.Success || targetIdentity.value != publishedIdentity ||
+            !sourceExpected || sourceParentAfter !is OperationResult.Success ||
+            sourceParentAfter.value != sourceParent.canonical ||
+            targetParentAfter !is OperationResult.Success || targetParentAfter.value != targetParent.canonical
+        ) {
+            return if (move) uncertainDirectoryMove("Directory move could not be reconciled")
+            else uncertainDirectoryCopy("Directory copy could not be reconciled")
+        }
+        return target
+    }
+
+    private fun canonicalDescendant(source: RootPath, target: RootPath): Boolean {
+        val prefix = source.value.trimEnd('/') + "/"
+        return target == source || target.value.startsWith(prefix)
+    }
+
     private suspend fun prepareStage(
         directory:PreparedTransferDirectory,
         stageName:String,
@@ -1070,18 +1241,38 @@ class LibsuRootFileSystem internal constructor(
                 if (operation == "prepare-stage") "目标目录临时文件受系统限制，请换个文件夹再试" else failureMessage,
                 "Stage directory did not pass safety checks",
             )
-            54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
-            56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
+            54 -> failure(
+                ErrorCode.SOURCE_UNREADABLE,
+                if (operation.isDirectoryOperation()) "无法读取来源目录" else "无法读取来源文件",
+                "Source identity or contents changed",
+            )
+            56 -> failure(
+                ErrorCode.SOURCE_UNREADABLE,
+                if (operation.isDirectoryOperation()) "无法读取来源目录" else "无法读取来源文件",
+                "Source could not be read",
+            )
             55 -> when (operation) {
                 "rename-noreplace" -> uncertainRename("Native helper reported an uncertain rename outcome")
                 "create-file-noreplace" -> uncertainCreateFile("Native helper reported an uncertain create-file outcome")
+                "move-directory-noreplace", "move-directory-cross-device-noreplace" ->
+                    uncertainDirectoryMove("Native helper reported an uncertain directory move outcome")
+                "copy-directory-publish" ->
+                    uncertainDirectoryCopy("Native helper reported an uncertain directory copy outcome")
                 else -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
             }
             58 -> failure(ErrorCode.CROSS_DEVICE, "暂不支持跨存储移动", "Move crossed a file-system boundary")
-            59 -> failure(ErrorCode.MOVE_PARTIAL, "文件已复制，但来源未删除", "Move target was published but source removal failed")
+            59 -> failure(
+                ErrorCode.MOVE_PARTIAL,
+                if (operation.isDirectoryOperation()) "目录已复制，但来源未完整删除" else "文件已复制，但来源未删除",
+                "Move target was published but source removal failed",
+            )
             137 -> when (operation) {
                 "rename-noreplace" -> uncertainRename("Native rename helper was killed after timeout")
                 "create-file-noreplace" -> uncertainCreateFile("Native create-file helper was killed after timeout")
+                "move-directory-noreplace", "move-directory-cross-device-noreplace" ->
+                    uncertainDirectoryMove("Native directory move helper was killed after timeout")
+                "copy-directory-publish" ->
+                    uncertainDirectoryCopy("Native directory copy helper was killed after timeout")
                 else -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
             }
             else -> if (operation in STREAM_COPY_OPERATIONS && stderr.looksLikeContentReadFailure()) {
@@ -1101,6 +1292,8 @@ class LibsuRootFileSystem internal constructor(
         logRootFailure(operation, exitCode, stderr, failure.code)
         return failure
     }
+
+    private fun String.isDirectoryOperation(): Boolean = contains("directory")
 
     private fun logRootFailure(
         operation: String,
@@ -1217,6 +1410,7 @@ class LibsuRootFileSystem internal constructor(
 
     private companion object {
         const val DEFAULT_TIMEOUT_MILLIS = 10_000L
+        const val DIRECTORY_OPERATION_TIMEOUT_MILLIS = 300_000L
         const val MIN_STREAM_TRANSFER_TIMEOUT_MILLIS = 30_000L
         const val TRANSFER_TIMEOUT_BYTES_PER_SECOND = 2L * 1024L * 1024L
         const val EXIT_NOT_FOUND = 44
@@ -1317,6 +1511,15 @@ private fun uncertainTransfer(technical:String)=failure(ErrorCode.OUTCOME_UNCERT
 private fun uncertainExtraction(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"解压结果不确定，请刷新目标目录核对",technical)
 private fun uncertainMove(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"移动结果不确定，请刷新来源和目标目录核对",technical)
 private fun invalidMoveSource(technical:String="Move source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法移动此文件",technical)
+private fun uncertainDirectoryMove(technical:String)=failure(
+    ErrorCode.OUTCOME_UNCERTAIN, "目录移动结果不确定，请刷新来源和目标目录核对", technical,
+)
+private fun uncertainDirectoryCopy(technical:String)=failure(
+    ErrorCode.OUTCOME_UNCERTAIN, "目录复制结果不确定，请刷新目标目录核对", technical,
+)
+private fun invalidDirectorySource(technical:String="Directory source was not a stable readable directory")=failure(
+    ErrorCode.SOURCE_UNREADABLE, "无法读取来源目录", technical,
+)
 private fun uncertainRename(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"重命名结果不确定，请刷新目录核对",technical)
 private fun uncertainCreateFile(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"新建文件结果不确定，请刷新目录核对",technical)
 private fun invalidRenameSource(technical:String="Rename source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法重命名此文件",technical)

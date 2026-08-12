@@ -23,7 +23,7 @@ class FileCopyRepository internal constructor(
         },
     )
 
-    constructor(fileSystem: RootFileSystem) : this(fileSystem::copyFileAsNoReplace)
+    constructor(fileSystem: RootFileSystem) : this(fileSystem::copyEntryAsNoReplace)
 
     suspend fun copy(
         source: DirectoryEntry,
@@ -33,7 +33,7 @@ class FileCopyRepository internal constructor(
     ): OperationResult<DirectoryEntry> {
         val name = EntryName.parse(source.name).getOrElse { return sourceUnreadable() }
         if (
-            source.type != EntryType.FILE ||
+            source.type == EntryType.OTHER ||
             !source.readable ||
             source.symbolicLink ||
             source.path != EntryName.join(sourceDirectory, name)
@@ -42,6 +42,9 @@ class FileCopyRepository internal constructor(
         }
         if (sourceDirectory == targetDirectory) {
             return OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "文件已在当前目录")
+        }
+        if (source.type == EntryType.DIRECTORY && targetIsSourceOrDescendant(source.path, targetDirectory)) {
+            return OperationResult.Failure(ErrorCode.COMMAND_FAILED, "不能复制到目录自身或其子目录")
         }
         if (RootPathRiskPolicy.isProtected(targetDirectory)) {
             return OperationResult.Failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览")
@@ -66,6 +69,11 @@ class FileCopyRepository internal constructor(
 
     private fun sourceUnreadable() = OperationResult.Failure(
         ErrorCode.SOURCE_UNREADABLE,
-        "当前仅支持复制单个普通文件",
+        "无法复制此项目",
     )
+
+    private fun targetIsSourceOrDescendant(source: RootPath, target: RootPath): Boolean {
+        val prefix = source.value.trimEnd('/') + "/"
+        return target == source || target.value.startsWith(prefix)
+    }
 }

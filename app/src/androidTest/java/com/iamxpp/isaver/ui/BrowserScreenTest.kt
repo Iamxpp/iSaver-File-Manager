@@ -63,19 +63,30 @@ class BrowserScreenTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun longPressSelectsReadableDirectoryForCompression() {
+    fun longPressDirectoryOffersMoveAndCopyActions() {
         val directory = entry("folder", EntryType.DIRECTORY)
         var selected: DirectoryEntry? = null
+        var moved: DirectoryEntry? = null
+        var copied: DirectoryEntry? = null
         compose.setContent {
             BrowserScreen(
                 state = state(entries = listOf(directory)),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
                 onSelectEntry = { selected = it },
+                onMoveEntry = { moved = it },
+                onCopyEntry = { copied = it },
             )
         }
 
         compose.onNodeWithContentDescription("列表项：folder").performTouchInput { longClick() }
-        compose.runOnIdle { assertEquals(directory, selected) }
+        compose.onNodeWithText("移动到").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("列表项：folder").performTouchInput { longClick() }
+        compose.onNodeWithText("复制到").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(directory, selected)
+            assertEquals(directory, moved)
+            assertEquals(directory, copied)
+        }
     }
 
     @Test

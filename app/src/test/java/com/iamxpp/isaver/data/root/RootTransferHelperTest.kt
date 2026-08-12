@@ -67,7 +67,47 @@ class RootTransferHelperTest {
         assertTrue(main.contains("move-cross-device-noreplace"))
         assertTrue(main.contains("rename-noreplace"))
         assertTrue(main.contains("create-file-noreplace"))
+        assertTrue(main.contains("copy-directory-publish"))
+        assertTrue(main.contains("move-directory-noreplace"))
+        assertTrue(main.contains("move-directory-cross-device-noreplace"))
         assertFalse(main.contains("strcmp(argv[1], \"copy-publish\")"))
+    }
+
+    @Test
+    fun `directory commands bind source target stage and explicit final name`() {
+        val sourceName = com.iamxpp.isaver.domain.EntryName.parse("source folder").getOrThrow()
+        val finalName = com.iamxpp.isaver.domain.EntryName.parse("source folder (1)").getOrThrow()
+        val stage = TransferStage(
+            ".isaver-stage-123e4567-e89b-12d3-a456-426614174000",
+            RootFileIdentity(7L, 8L),
+        )
+        val copy = helper.copyDirectoryPublish(
+            "/source original", "/source canonical", sourceName, RootFileIdentity(1, 2),
+            RootFileIdentity(3, 4), "/target original", "/target canonical", stage, finalName,
+            RootFileIdentity(5, 6), 1_250L,
+        )
+        val move = helper.moveDirectoryNoReplace(
+            "/source original", "/source canonical", sourceName, RootFileIdentity(1, 2),
+            RootFileIdentity(3, 4), "/target original", "/target canonical",
+            RootFileIdentity(5, 6), finalName,
+        )
+        val cross = helper.moveDirectoryCrossDeviceNoReplace(
+            "/source original", "/source canonical", sourceName, RootFileIdentity(1, 2),
+            RootFileIdentity(3, 4), "/target original", "/target canonical", stage, finalName,
+            RootFileIdentity(5, 6), 1_250L,
+        )
+
+        assertTrue(copy.contains("'copy-directory-publish' '/source original' '/source canonical'"))
+        assertTrue(move.contains("'move-directory-noreplace' '/source original' '/source canonical'"))
+        assertTrue(cross.contains("'move-directory-cross-device-noreplace' '/source original' '/source canonical'"))
+        listOf(copy, move, cross).forEach { command ->
+            assertTrue(command.contains("'source folder' '1' '2' '3' '4'"))
+            assertTrue(command.contains("'/target original' '/target canonical'"))
+            assertTrue(command.contains("'source folder (1)'"))
+            assertFalse(command.contains("cp -r"))
+            assertFalse(command.contains("rm -rf"))
+            assertFalse(command.contains("sh -c"))
+        }
     }
 
     @Test

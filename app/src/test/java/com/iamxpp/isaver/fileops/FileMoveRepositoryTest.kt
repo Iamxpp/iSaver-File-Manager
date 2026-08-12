@@ -60,6 +60,26 @@ class FileMoveRepositoryTest {
     }
 
     @Test
+    fun `moves a readable directory through the generic typed operation`() = runTest {
+        val sourceParent = path("/data/local/tmp/source")
+        val targetParent = path("/data/local/tmp/target")
+        val source = entry("folder", sourceParent, EntryType.DIRECTORY)
+        val targets = mutableListOf<String>()
+        val repository = FileMoveRepository(
+            moveFileAs = { _, _, target, targetName ->
+                targets += targetName.value
+                OperationResult.Success(entry(targetName.value, target, EntryType.DIRECTORY))
+            },
+            nameResolver = TargetNameResolver(),
+        )
+
+        val result = repository.move(source, sourceParent, targetParent)
+
+        assertTrue(result is OperationResult.Success)
+        assertEquals(listOf("folder"), targets)
+    }
+
+    @Test
     fun `rejects unsafe sources same parent and protected paths before root dispatch`() = runTest {
         var calls = 0
         val repository = FileMoveRepository { _, _, _ ->
@@ -68,7 +88,6 @@ class FileMoveRepositoryTest {
         }
         val sourceDirectory = path("/data/local/tmp/source")
         val cases = listOf(
-            Triple(entry("folder", sourceDirectory, EntryType.DIRECTORY), sourceDirectory, path("/data/local/tmp/target")) to ErrorCode.SOURCE_UNREADABLE,
             Triple(entry("link", sourceDirectory, symbolicLink = true), sourceDirectory, path("/data/local/tmp/target")) to ErrorCode.SOURCE_UNREADABLE,
             Triple(entry("report.txt", sourceDirectory), sourceDirectory, sourceDirectory) to ErrorCode.ALREADY_EXISTS,
             Triple(entry("report.txt", path("/system/source")), path("/system/source"), path("/data/local/tmp/target")) to ErrorCode.NOT_WRITABLE,

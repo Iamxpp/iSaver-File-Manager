@@ -23,7 +23,7 @@ class FileMoveRepository internal constructor(
         },
     )
 
-    constructor(fileSystem: RootFileSystem) : this(fileSystem::moveFileAsNoReplace)
+    constructor(fileSystem: RootFileSystem) : this(fileSystem::moveEntryAsNoReplace)
 
     suspend fun move(
         source: DirectoryEntry,
@@ -33,7 +33,7 @@ class FileMoveRepository internal constructor(
     ): OperationResult<DirectoryEntry> {
         val name = EntryName.parse(source.name).getOrElse { return sourceUnreadable() }
         if (
-            source.type != EntryType.FILE ||
+            source.type == EntryType.OTHER ||
             !source.readable ||
             source.symbolicLink ||
             source.path != EntryName.join(sourceDirectory, name)
@@ -42,6 +42,9 @@ class FileMoveRepository internal constructor(
         }
         if (sourceDirectory == targetDirectory) {
             return OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "文件已在当前目录")
+        }
+        if (source.type == EntryType.DIRECTORY && targetIsSourceOrDescendant(source.path, targetDirectory)) {
+            return OperationResult.Failure(ErrorCode.COMMAND_FAILED, "不能移动到目录自身或其子目录")
         }
         if (
             RootPathRiskPolicy.isProtected(sourceDirectory) ||
@@ -69,6 +72,11 @@ class FileMoveRepository internal constructor(
 
     private fun sourceUnreadable() = OperationResult.Failure(
         ErrorCode.SOURCE_UNREADABLE,
-        "当前仅支持移动单个普通文件",
+        "无法移动此项目",
     )
+
+    private fun targetIsSourceOrDescendant(source: RootPath, target: RootPath): Boolean {
+        val prefix = source.value.trimEnd('/') + "/"
+        return target == source || target.value.startsWith(prefix)
+    }
 }

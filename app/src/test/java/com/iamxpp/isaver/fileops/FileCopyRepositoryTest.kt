@@ -83,6 +83,29 @@ class FileCopyRepositoryTest {
     }
 
     @Test
+    fun `copies a readable directory but rejects itself and descendant targets`() = runTest {
+        val sourceParent = path("/data/local/tmp/source")
+        val source = entry("folder", sourceParent, EntryType.DIRECTORY)
+        val target = path("/data/local/tmp/target")
+        val requests = mutableListOf<DirectoryEntry>()
+        val repository = FileCopyRepository(
+            copyFileAs = { selected, _, targetDirectory, targetName ->
+                requests += selected
+                OperationResult.Success(entry(targetName.value, targetDirectory, EntryType.DIRECTORY))
+            },
+            nameResolver = TargetNameResolver(),
+        )
+
+        assertTrue(repository.copy(source, sourceParent, target) is OperationResult.Success)
+        assertEquals(ErrorCode.COMMAND_FAILED, (repository.copy(source, sourceParent, source.path) as OperationResult.Failure).code)
+        assertEquals(
+            ErrorCode.COMMAND_FAILED,
+            (repository.copy(source, sourceParent, path("${source.path.value}/child")) as OperationResult.Failure).code,
+        )
+        assertEquals(listOf(source), requests)
+    }
+
+    @Test
     fun `rejects unsafe sources same parent and protected targets before root dispatch`() = runTest {
         var calls = 0
         val repository = FileCopyRepository { _, _, _ ->
@@ -91,7 +114,6 @@ class FileCopyRepositoryTest {
         }
         val sourceDirectory = path("/data/local/tmp/source")
         val cases = listOf(
-            Triple(entry("folder", sourceDirectory, EntryType.DIRECTORY), sourceDirectory, path("/data/local/tmp/target")) to ErrorCode.SOURCE_UNREADABLE,
             Triple(entry("link", sourceDirectory, symbolicLink = true), sourceDirectory, path("/data/local/tmp/target")) to ErrorCode.SOURCE_UNREADABLE,
             Triple(entry("report.txt", sourceDirectory), sourceDirectory, sourceDirectory) to ErrorCode.ALREADY_EXISTS,
             Triple(entry("report.txt", sourceDirectory), sourceDirectory, path("/system")) to ErrorCode.NOT_WRITABLE,

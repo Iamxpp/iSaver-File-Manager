@@ -290,13 +290,13 @@ class BrowserViewModel(
         cancelExternalShare()
         if (
             entries.isEmpty() ||
-            entries.any { it.type != EntryType.FILE || !it.readable || it.symbolicLink } ||
+            entries.any { it.type == EntryType.OTHER || !it.readable || it.symbolicLink } ||
             RootPathRiskPolicy.isProtected(mutableState.value.currentPath)
         ) {
             mutableState.value = mutableState.value.copy(
                 fileMoveError = BrowserOperationError(
                     ErrorCode.SOURCE_UNREADABLE,
-                    "当前仅支持移动选中的普通文件",
+                    "无法移动选中的项目",
                 ),
             )
             return false
@@ -467,12 +467,12 @@ class BrowserViewModel(
         cancelExternalShare()
         if (
             entries.isEmpty() ||
-            entries.any { it.type != EntryType.FILE || !it.readable || it.symbolicLink }
+            entries.any { it.type == EntryType.OTHER || !it.readable || it.symbolicLink }
         ) {
             mutableState.value = mutableState.value.copy(
                 fileCopyError = BrowserOperationError(
                     ErrorCode.SOURCE_UNREADABLE,
-                    "当前仅支持复制选中的普通文件",
+                    "无法复制选中的项目",
                 ),
             )
             return false

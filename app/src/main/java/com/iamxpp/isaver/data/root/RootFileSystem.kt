@@ -60,6 +60,26 @@ interface RootFileSystem {
             unsupportedMove()
         }
 
+    suspend fun moveDirectoryAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = unsupportedMove()
+
+    suspend fun moveEntryAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = when (source.type) {
+        com.iamxpp.isaver.domain.EntryType.FILE ->
+            moveFileAsNoReplace(source, sourceDirectory, targetDirectory, targetName)
+        com.iamxpp.isaver.domain.EntryType.DIRECTORY ->
+            moveDirectoryAsNoReplace(source, sourceDirectory, targetDirectory, targetName)
+        com.iamxpp.isaver.domain.EntryType.OTHER -> unsupportedMove()
+    }
+
     suspend fun renameFileNoReplace(
         source: DirectoryEntry,
         sourceDirectory: RootPath,
@@ -83,6 +103,26 @@ interface RootFileSystem {
         } else {
             unsupportedCopy()
         }
+
+    suspend fun copyDirectoryAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = unsupportedCopy()
+
+    suspend fun copyEntryAsNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = when (source.type) {
+        com.iamxpp.isaver.domain.EntryType.FILE ->
+            copyFileAsNoReplace(source, sourceDirectory, targetDirectory, targetName)
+        com.iamxpp.isaver.domain.EntryType.DIRECTORY ->
+            copyDirectoryAsNoReplace(source, sourceDirectory, targetDirectory, targetName)
+        com.iamxpp.isaver.domain.EntryType.OTHER -> unsupportedCopy()
+    }
 
     suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> =
         unsupportedExtraction()
