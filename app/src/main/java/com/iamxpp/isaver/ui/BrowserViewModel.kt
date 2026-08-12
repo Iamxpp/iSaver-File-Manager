@@ -31,10 +31,12 @@ import com.iamxpp.isaver.tasks.OperationTaskStore
 import com.iamxpp.isaver.tasks.OperationTaskType
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.trash.TrashRepository
+import com.iamxpp.isaver.trash.RestoreConflictAction
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.transfer.OutputNameDraft
+import com.iamxpp.isaver.preview.RootPreviewRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
@@ -80,6 +82,7 @@ class BrowserViewModel(
     },
     private val bookmarkRepository: BookmarkRepository? = null,
     private val localSearchRepository: LocalSearchRepository = LocalSearchRepository(rootFileSystem),
+    private val previewRepository: RootPreviewRepository = RootPreviewRepository(rootFileSystem),
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
@@ -104,6 +107,7 @@ class BrowserViewModel(
     private var checksumJob: Job? = null
     private var metadataJob: Job? = null
     private var deepSearchJob: Job? = null
+    private var previewJob: Job? = null
     private val batchRenamePlanner = BatchRenamePlanner()
     private val batchRenameExecutor = BatchRenameExecutor(renameFile)
     private var copySelectionToRestore: BrowserCopySelection? = null
@@ -175,6 +179,7 @@ class BrowserViewModel(
                     fileInfo = null,
                     fileOpenError = null,
                 )
+                previewRepository.supports(entry.name) -> previewEntry(entry)
                 else -> openExternalFile(entry, openRequest)
             }
             EntryType.OTHER -> {
@@ -324,6 +329,40 @@ class BrowserViewModel(
 
     fun dismissFileOpenError() {
         mutableState.value = mutableState.value.copy(fileOpenError = null)
+    }
+
+    fun dismissPreview() {
+        previewJob?.cancel()
+        mutableState.value = mutableState.value.copy(
+            preview = null,
+            previewEntry = null,
+            previewLoading = false,
+            previewError = null,
+        )
+    }
+
+    private fun previewEntry(entry: DirectoryEntry) {
+        previewJob?.cancel()
+        mutableState.value = mutableState.value.copy(
+            preview = null,
+            previewEntry = entry,
+            previewLoading = true,
+            previewError = null,
+            fileInfo = null,
+            archiveToOpen = null,
+        )
+        previewJob = viewModelScope.launch {
+            when (val result = withContext(ioDispatcher) { previewRepository.preview(entry) }) {
+                is OperationResult.Success -> mutableState.value = mutableState.value.copy(
+                    preview = result.value,
+                    previewLoading = false,
+                )
+                is OperationResult.Failure -> mutableState.value = mutableState.value.copy(
+                    previewLoading = false,
+                    previewError = BrowserOperationError(result.code, result.userMessage),
+                )
+            }
+        }
     }
 
     fun shareEntry(entry: DirectoryEntry) {
@@ -539,7 +578,11 @@ class BrowserViewModel(
                                     movingFile = false,
                                     movedOutput = completed.lastOrNull(),
                                     conflictPrompt = BrowserConflictPrompt(
-                                        BrowserConflictOperation.MOVE, entry.name, completed.size, selection.entries.size,
+                                        operation = BrowserConflictOperation.MOVE,
+                                        entryName = entry.name,
+                                        completedCount = completed.size,
+                                        totalCount = selection.entries.size,
+                                        entryType = entry.type,
                                     ),
                                 )
                                 updateTask(taskId, OperationTaskState.NEEDS_ACTION, completed.size, message = "等待处理同名冲突")
@@ -742,7 +785,11 @@ class BrowserViewModel(
                                     copyingFile = false,
                                     copiedOutput = completed.lastOrNull(),
                                     conflictPrompt = BrowserConflictPrompt(
-                                        BrowserConflictOperation.COPY, entry.name, completed.size, selection.entries.size,
+                                        operation = BrowserConflictOperation.COPY,
+                                        entryName = entry.name,
+                                        completedCount = completed.size,
+                                        totalCount = selection.entries.size,
+                                        entryType = entry.type,
                                     ),
                                 )
                                 updateTask(taskId, OperationTaskState.NEEDS_ACTION, completed.size, message = "等待处理同名冲突")
@@ -1093,6 +1140,15 @@ class BrowserViewModel(
 
     fun restoreTrashItem(item: TrashItem) = runTrashItemOperation(item, restore = true)
 
+    fun restoreTrashItem(item: TrashItem, action: RestoreConflictAction, name: String? = null) {
+        mutableState.value = mutableState.value.copy(restoreConflictItem = null)
+        runTrashItemOperation(item, restore = true, restoreAction = action, restoreName = name)
+    }
+
+    fun dismissRestoreConflict() {
+        mutableState.value = mutableState.value.copy(restoreConflictItem = null)
+    }
+
     fun deleteTrashItemPermanently(item: TrashItem) = runTrashItemOperation(item, restore = false)
 
     fun restoreTrashItems(items: List<TrashItem>) {
@@ -1166,7 +1222,12 @@ class BrowserViewModel(
         }
     }
 
-    private fun runTrashItemOperation(item: TrashItem, restore: Boolean) {
+    private fun runTrashItemOperation(
+        item: TrashItem,
+        restore: Boolean,
+        restoreAction: RestoreConflictAction = RestoreConflictAction.CANCEL,
+        restoreName: String? = null,
+    ) {
         val repository = trashRepository ?: return
         if (fileOperationBusy() || mutableState.value.deletingEntry) return
         mutableState.value = mutableState.value.copy(deletingEntry = true, trashError = null)
@@ -1177,7 +1238,7 @@ class BrowserViewModel(
             )
             updateTask(taskId, OperationTaskState.RUNNING, 0)
             val result = withContext(ioDispatcher) {
-                if (restore) repository.restore(item) else repository.deletePermanently(item)
+                if (restore) repository.restore(item, restoreAction, restoreName) else repository.deletePermanently(item)
             }
             when (result) {
                 is OperationResult.Success -> {
@@ -1186,7 +1247,9 @@ class BrowserViewModel(
                 }
                 is OperationResult.Failure -> {
                     mutableState.value = mutableState.value.copy(
-                        deletingEntry = false, trashError = BrowserOperationError(result.code, result.userMessage),
+                        deletingEntry = false,
+                        trashError = BrowserOperationError(result.code, result.userMessage),
+                        restoreConflictItem = item.takeIf { restore && result.code == ErrorCode.ALREADY_EXISTS },
                     )
                     finishFailedTask(taskId, 0, 1, result)
                 }

@@ -29,6 +29,7 @@ import com.iamxpp.isaver.ui.recent.RecentUiState
 import com.iamxpp.isaver.ui.archive.ArchiveScreen
 import com.iamxpp.isaver.ui.archive.ArchiveUiState
 import com.iamxpp.isaver.search.LocalSearchCriteria
+import com.iamxpp.isaver.trash.RestoreConflictAction
 
 @Composable
 fun ISaverHomeScreen(
@@ -71,6 +72,7 @@ fun ISaverHomeScreen(
     onShowFileInfo: (DirectoryEntry) -> Unit = {},
     onCalculateSha256: () -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
+    onDismissPreview: () -> Unit = {},
     onShareBrowserEntry: (DirectoryEntry) -> Unit = {},
     onShareBrowserSelection: () -> Unit = {},
     onRecycleBrowserSelection: ((List<DirectoryEntry>) -> Unit)? = null,
@@ -95,6 +97,8 @@ fun ISaverHomeScreen(
     onRecycleEntry: ((DirectoryEntry) -> Unit)? = null,
     onDeleteEntryPermanently: ((DirectoryEntry) -> Unit)? = null,
     onRestoreTrashItem: (TrashItem) -> Unit = {},
+    onRestoreTrashItemWithAction: (TrashItem, RestoreConflictAction, String?) -> Unit = { _, _, _ -> },
+    onDismissRestoreConflict: () -> Unit = {},
     onDeleteTrashItemPermanently: (TrashItem) -> Unit = {},
     onRestoreAllTrashItems: (List<TrashItem>) -> Unit = {},
     onClearTrash: (List<TrashItem>) -> Unit = {},
@@ -228,6 +232,7 @@ fun ISaverHomeScreen(
                 onShowFileInfo = onShowFileInfo,
                 onCalculateSha256 = onCalculateSha256,
                 onDismissFileOpenError = onDismissFileOpenError,
+                onDismissPreview = onDismissPreview,
                 onShareEntry = onShareBrowserEntry,
                 onShareSelection = if (saveMode) null else onShareBrowserSelection,
                 onRecycleSelection = if (saveMode) null else onRecycleBrowserSelection,
@@ -250,6 +255,8 @@ fun ISaverHomeScreen(
                 onRecycleEntry = if (saveMode) null else onRecycleEntry,
                 onDeleteEntryPermanently = if (saveMode) null else onDeleteEntryPermanently,
                 onRestoreTrashItem = onRestoreTrashItem,
+                onRestoreTrashItemWithAction = onRestoreTrashItemWithAction,
+                onDismissRestoreConflict = onDismissRestoreConflict,
                 onDeleteTrashItemPermanently = onDeleteTrashItemPermanently,
                 onRestoreAllTrashItems = onRestoreAllTrashItems,
                 onClearTrash = onClearTrash,

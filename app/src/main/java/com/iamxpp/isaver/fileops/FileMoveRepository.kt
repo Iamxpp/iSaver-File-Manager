@@ -16,6 +16,7 @@ class FileMoveRepository internal constructor(
     private val moveFileAs: suspend (DirectoryEntry, RootPath, RootPath, EntryName) -> OperationResult<DirectoryEntry>,
     private val nameResolver: TargetNameResolver = TargetNameResolver(),
     private val replaceExisting: (suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>)? = null,
+    private val mergeDirectory: (suspend (DirectoryEntry, RootPath, RootPath, ConflictAction) -> OperationResult<DirectoryEntry>)? = null,
 ) {
     internal constructor(
         moveFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>,
@@ -32,6 +33,26 @@ class FileMoveRepository internal constructor(
                 RecoverableReplaceRepository(fileSystem, trash).replace(
                     source, sourceDirectory, targetDirectory, fileSystem::moveEntryAsNoReplace,
                 )
+            }
+        },
+        mergeDirectory = { source, sourceDirectory, targetDirectory, conflictAction ->
+            val target = fileSystem.stat(EntryName.join(targetDirectory, EntryName.parse(source.name).getOrThrow()))
+            when (target) {
+                is OperationResult.Failure -> target
+                is OperationResult.Success -> {
+                    val merger = DirectoryMergeRepository(
+                        fileSystem,
+                        { _, _, _, _ -> OperationResult.Failure(ErrorCode.COMMAND_FAILED, "不支持复制合并") },
+                        { child, parent, destination, action ->
+                            FileMoveRepository(fileSystem, trashRepository).move(child, parent, destination, action)
+                        },
+                        fileSystem::deleteEntryPermanently,
+                    )
+                    when (val merged = merger.merge(source, sourceDirectory, target.value, targetDirectory, true, conflictAction)) {
+                        is OperationResult.Failure -> merged
+                        is OperationResult.Success -> OperationResult.Success(target.value)
+                    }
+                }
             }
         },
     )
@@ -54,6 +75,10 @@ class FileMoveRepository internal constructor(
         if (conflictAction == ConflictAction.REPLACE) {
             return replaceExisting?.invoke(source, sourceDirectory, targetDirectory)
                 ?: OperationResult.Failure(ErrorCode.NOT_WRITABLE, "此位置不支持可恢复替换")
+        }
+        if (conflictAction == ConflictAction.MERGE && source.type == EntryType.DIRECTORY) {
+            return mergeDirectory?.invoke(source, sourceDirectory, targetDirectory, conflictAction)
+                ?: OperationResult.Failure(ErrorCode.COMMAND_FAILED, "移动目录合并将在后续切片提供")
         }
         if (sourceDirectory == targetDirectory) {
             return OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "文件已在当前目录")

@@ -72,6 +72,37 @@ class TrashRepositoryTest {
         assertEquals(1, repository.items.first().size)
     }
 
+    @Test fun `restore conflict can keep both with a generated name`() = runTest {
+        val fileSystem = FakeTrashFileSystem()
+        val repository = TrashRepository(fileSystem, database.trashItemDao(), { 10 }, { "trash-id" })
+        val parent = path("/storage/emulated/0/Documents")
+        val source = entry("report.txt", parent, EntryType.FILE)
+        fileSystem.entries[source.path] = source
+        val item = (repository.recycle(source, parent) as OperationResult.Success).value
+        fileSystem.entries[source.path] = source
+
+        val result = repository.restore(item, RestoreConflictAction.KEEP_BOTH)
+
+        assertTrue(result is OperationResult.Success)
+        assertTrue(fileSystem.entries.keys.any { it.value.endsWith("report (1).txt") })
+        assertTrue(repository.items.first().isEmpty())
+    }
+
+    @Test fun `restore conflict accepts a validated replacement name`() = runTest {
+        val fileSystem = FakeTrashFileSystem()
+        val repository = TrashRepository(fileSystem, database.trashItemDao(), { 10 }, { "trash-id" })
+        val parent = path("/storage/emulated/0/Documents")
+        val source = entry("report.txt", parent, EntryType.FILE)
+        fileSystem.entries[source.path] = source
+        val item = (repository.recycle(source, parent) as OperationResult.Success).value
+        fileSystem.entries[source.path] = source
+
+        val result = repository.restore(item, RestoreConflictAction.RENAME, "restored.txt")
+
+        assertTrue(result is OperationResult.Success)
+        assertTrue(fileSystem.entries.containsKey(path("/storage/emulated/0/Documents/restored.txt")))
+    }
+
     @Test fun `private data does not silently enter shared trash`() = runTest {
         val repository = TrashRepository(FakeTrashFileSystem(), database.trashItemDao(), { 10 }, { "trash-id" })
         val parent = path("/data/local/tmp")

@@ -16,6 +16,7 @@ class FileCopyRepository internal constructor(
     private val copyFileAs: suspend (DirectoryEntry, RootPath, RootPath, EntryName) -> OperationResult<DirectoryEntry>,
     private val nameResolver: TargetNameResolver = TargetNameResolver(),
     private val replaceExisting: (suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>)? = null,
+    private val mergeDirectory: (suspend (DirectoryEntry, RootPath, RootPath, ConflictAction) -> OperationResult<DirectoryEntry>)? = null,
 ) {
     internal constructor(
         copyFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry>,
@@ -32,6 +33,26 @@ class FileCopyRepository internal constructor(
                 RecoverableReplaceRepository(fileSystem, trash).replace(
                     source, sourceDirectory, targetDirectory, fileSystem::copyEntryAsNoReplace,
                 )
+            }
+        },
+        mergeDirectory = { source, sourceDirectory, targetDirectory, conflictAction ->
+            val target = fileSystem.stat(EntryName.join(targetDirectory, EntryName.parse(source.name).getOrThrow()))
+            when (target) {
+                is OperationResult.Failure -> target
+                is OperationResult.Success -> {
+                    val merger = DirectoryMergeRepository(
+                        fileSystem,
+                        { child, parent, destination, action ->
+                            FileCopyRepository(fileSystem, trashRepository).copy(child, parent, destination, action)
+                        },
+                        { _, _, _, _ -> OperationResult.Failure(ErrorCode.COMMAND_FAILED, "不支持移动合并") },
+                        { _, _ -> OperationResult.Success(Unit) },
+                    )
+                    when (val merged = merger.merge(source, sourceDirectory, target.value, targetDirectory, false, conflictAction)) {
+                        is OperationResult.Failure -> merged
+                        is OperationResult.Success -> OperationResult.Success(target.value)
+                    }
+                }
             }
         },
     )
@@ -63,6 +84,10 @@ class FileCopyRepository internal constructor(
         if (conflictAction == ConflictAction.REPLACE) {
             return replaceExisting?.invoke(source, sourceDirectory, targetDirectory)
                 ?: OperationResult.Failure(ErrorCode.NOT_WRITABLE, "此位置不支持可恢复替换")
+        }
+        if (conflictAction == ConflictAction.MERGE && source.type == EntryType.DIRECTORY) {
+            return mergeDirectory?.invoke(source, sourceDirectory, targetDirectory, conflictAction)
+                ?: OperationResult.Failure(ErrorCode.COMMAND_FAILED, "不支持目录合并")
         }
         val draft = OutputNameDraft.fromDisplayName(source.name)
         var attempt = 0

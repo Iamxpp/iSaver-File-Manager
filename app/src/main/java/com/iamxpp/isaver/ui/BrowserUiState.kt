@@ -3,6 +3,7 @@ package com.iamxpp.isaver.ui
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenamePlan
@@ -15,6 +16,7 @@ import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.bookmarks.Bookmark
 import com.iamxpp.isaver.data.root.RootFileMetadata
 import com.iamxpp.isaver.search.LocalSearchCriteria
+import com.iamxpp.isaver.preview.PreviewContent
 
 data class BrowserUiState(
     val currentPath: RootPath,
@@ -63,6 +65,10 @@ data class BrowserUiState(
     val externalFileToOpen: ExternalFileGrant? = null,
     val externalOpenChooser: Boolean = false,
     val fileOpenError: BrowserOperationError? = null,
+    val preview: PreviewContent? = null,
+    val previewEntry: DirectoryEntry? = null,
+    val previewLoading: Boolean = false,
+    val previewError: BrowserOperationError? = null,
     val sharingFile: Boolean = false,
     val externalFilesToShare: List<ExternalFileGrant> = emptyList(),
     val fileShareError: BrowserOperationError? = null,
@@ -90,6 +96,7 @@ data class BrowserUiState(
     val trashItems: List<TrashItem> = emptyList(),
     val deletingEntry: Boolean = false,
     val trashError: BrowserOperationError? = null,
+    val restoreConflictItem: TrashItem? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {
@@ -124,10 +131,12 @@ data class BrowserConflictPrompt(
     val entryName: String,
     val completedCount: Int,
     val totalCount: Int,
+    val entryType: EntryType = EntryType.FILE,
     val availableActions: Set<ConflictAction> = setOf(
         ConflictAction.CANCEL,
         ConflictAction.SKIP,
         ConflictAction.KEEP_BOTH,
         ConflictAction.REPLACE,
+        ConflictAction.MERGE,
     ),
 )

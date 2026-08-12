@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.map
 
 enum class TrashItemState { PENDING, ACTIVE, NEEDS_REVIEW }
 
+enum class RestoreConflictAction { CANCEL, KEEP_BOTH, RENAME }
+
 data class TrashItem(
     val id: String,
     val originalPath: RootPath,
@@ -111,17 +113,39 @@ class TrashRepository internal constructor(
         return TrashBatchResult(completed, sources.size, null)
     }
 
-    suspend fun restore(item: TrashItem): OperationResult<DirectoryEntry> {
+    suspend fun restore(
+        item: TrashItem,
+        conflictAction: RestoreConflictAction = RestoreConflictAction.CANCEL,
+        requestedName: String? = null,
+    ): OperationResult<DirectoryEntry> {
         val current = verifiedTrashEntry(item) ?: return invalidTrashItem()
-        val targetName = EntryName.parse(item.originalName).getOrElse { return invalidTrashItem() }
-        return when (val restored = fileSystem.moveEntryAsNoReplace(
-            current, TRASH_FILES, item.originalParent, targetName,
-        )) {
-            is OperationResult.Failure -> restored
+        val originalName = EntryName.parse(item.originalName).getOrElse { return invalidTrashItem() }
+        val targetName = when (conflictAction) {
+            RestoreConflictAction.RENAME -> requestedName?.let { EntryName.parse(it).getOrNull() }
+            else -> originalName
+        } ?: return OperationResult.Failure(ErrorCode.COMMAND_FAILED, "恢复名称无效")
+        var attempt = 0
+        while (true) {
+            val candidate = if (conflictAction == RestoreConflictAction.KEEP_BOTH && attempt > 0) {
+                incrementName(originalName, attempt)
+            } else targetName
+            when (val restored = fileSystem.moveEntryAsNoReplace(
+                current, TRASH_FILES, item.originalParent, candidate,
+            )) {
+            is OperationResult.Failure -> {
+                if (restored.code != ErrorCode.ALREADY_EXISTS || conflictAction != RestoreConflictAction.KEEP_BOTH) {
+                    return restored
+                }
+            }
             is OperationResult.Success -> {
                 dao.find(item.id)?.let { dao.delete(it) }
-                restored
+                return restored
             }
+            }
+            attempt += 1
+            if (attempt > MAX_RESTORE_ATTEMPTS) return OperationResult.Failure(
+                ErrorCode.ALREADY_EXISTS, "恢复名称冲突过多",
+            )
         }
     }
 
@@ -214,11 +238,19 @@ class TrashRepository internal constructor(
 
     private fun invalidSource() = OperationResult.Failure(ErrorCode.SOURCE_UNREADABLE, "无法回收此项目")
     private fun invalidTrashItem() = OperationResult.Failure(ErrorCode.OUTCOME_UNCERTAIN, "回收项目已变化，请刷新核对")
+    private fun incrementName(name: EntryName, attempt: Int): EntryName {
+        val draft = com.iamxpp.isaver.transfer.OutputNameDraft.fromDisplayName(name.value)
+        return EntryName.parse(
+            if (draft.extension.isEmpty()) "${draft.stem} ($attempt)"
+            else "${draft.stem} ($attempt).${draft.extension}",
+        ).getOrThrow()
+    }
     private fun isSharedStorage(path: RootPath) = path == SHARED_ROOT || path.value.startsWith("${SHARED_ROOT.value}/")
 
     companion object {
         val SHARED_ROOT: RootPath = RootPath.parse("/storage/emulated/0").getOrThrow()
         val TRASH_ROOT: RootPath = RootPath.parse("/storage/emulated/0/.iSaver/Trash").getOrThrow()
         val TRASH_FILES: RootPath = RootPath.parse("/storage/emulated/0/.iSaver/Trash/files").getOrThrow()
+        const val MAX_RESTORE_ATTEMPTS = 100
     }
 }

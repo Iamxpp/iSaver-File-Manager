@@ -41,6 +41,7 @@ import com.iamxpp.isaver.share.ShareSourceLocationResolver
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.transfer.TransferViewModel
 import com.iamxpp.isaver.remote.RemoteConnectionViewModel
+import com.iamxpp.isaver.preview.RootPreviewRepository
 import kotlinx.coroutines.Dispatchers
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -72,6 +73,7 @@ class MainActivity : ComponentActivity() {
             trashRepository = app.trashRepository,
             checksumFile = app.fileChecksumRepository::sha256,
             bookmarkRepository = app.bookmarkRepository,
+            previewRepository = RootPreviewRepository(app.rootFileSystem),
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -402,6 +404,7 @@ class MainActivity : ComponentActivity() {
                         onShowFileInfo = browserViewModel::showFileInfo,
                         onCalculateSha256 = browserViewModel::calculateSha256,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
+                        onDismissPreview = browserViewModel::dismissPreview,
                         onShareBrowserEntry = browserViewModel::shareEntry,
                         onShareBrowserSelection = browserViewModel::shareSelection,
                         onRecycleBrowserSelection = browserViewModel::recycleSelection,
@@ -460,6 +463,8 @@ class MainActivity : ComponentActivity() {
                         onRecycleEntry = browserViewModel::recycleEntry,
                         onDeleteEntryPermanently = browserViewModel::deleteEntryPermanently,
                         onRestoreTrashItem = browserViewModel::restoreTrashItem,
+                        onRestoreTrashItemWithAction = browserViewModel::restoreTrashItem,
+                        onDismissRestoreConflict = browserViewModel::dismissRestoreConflict,
                         onDeleteTrashItemPermanently = browserViewModel::deleteTrashItemPermanently,
                         onRestoreAllTrashItems = browserViewModel::restoreTrashItems,
                         onClearTrash = browserViewModel::clearTrash,
@@ -561,6 +566,7 @@ internal class BrowserViewModelFactory(
     private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
     private val trashRepository: com.iamxpp.isaver.trash.TrashRepository? = null,
     private val bookmarkRepository: com.iamxpp.isaver.bookmarks.BookmarkRepository? = null,
+    private val previewRepository: RootPreviewRepository? = null,
     private val checksumFile: suspend (com.iamxpp.isaver.domain.DirectoryEntry) -> OperationResult<String> = {
         OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法计算校验和")
     },
@@ -617,6 +623,7 @@ internal class BrowserViewModelFactory(
             trashRepository = trashRepository,
             checksumFile = checksumFile,
             bookmarkRepository = bookmarkRepository,
+            previewRepository = previewRepository ?: RootPreviewRepository(fileSystem),
         ) as T
     }
 }

@@ -5,4 +5,5 @@ enum class ConflictAction {
     SKIP,
     KEEP_BOTH,
     REPLACE,
+    MERGE,
 }

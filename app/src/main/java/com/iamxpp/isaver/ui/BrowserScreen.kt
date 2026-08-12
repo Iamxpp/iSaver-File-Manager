@@ -73,6 +73,13 @@ import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.search.SearchEntryType
 import com.iamxpp.isaver.trash.TrashItem
+import com.iamxpp.isaver.trash.RestoreConflictAction
+import com.iamxpp.isaver.preview.PreviewContent
+import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import com.iamxpp.isaver.trash.TrashItemState
 import java.text.DateFormat
 import java.util.Date
@@ -107,6 +114,7 @@ fun BrowserScreen(
     onShowFileInfo: (DirectoryEntry) -> Unit = {},
     onCalculateSha256: () -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
+    onDismissPreview: () -> Unit = {},
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
     onShareSelection: (() -> Unit)? = null,
     onRecycleSelection: ((List<DirectoryEntry>) -> Unit)? = null,
@@ -129,6 +137,8 @@ fun BrowserScreen(
     onRecycleEntry: ((DirectoryEntry) -> Unit)? = null,
     onDeleteEntryPermanently: ((DirectoryEntry) -> Unit)? = null,
     onRestoreTrashItem: (TrashItem) -> Unit = {},
+    onRestoreTrashItemWithAction: (TrashItem, RestoreConflictAction, String?) -> Unit = { _, _, _ -> },
+    onDismissRestoreConflict: () -> Unit = {},
     onDeleteTrashItemPermanently: (TrashItem) -> Unit = {},
     onRestoreAllTrashItems: (List<TrashItem>) -> Unit = {},
     onClearTrash: (List<TrashItem>) -> Unit = {},
@@ -453,6 +463,15 @@ fun BrowserScreen(
         )
     }
     state.fileOpenError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileOpenError) }
+    if (state.preview != null || state.previewLoading || state.previewError != null) {
+        PreviewDialog(
+            entry = state.previewEntry,
+            content = state.preview,
+            loading = state.previewLoading,
+            error = state.previewError?.userMessage,
+            onDismiss = onDismissPreview,
+        )
+    }
     state.fileShareError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileShareError) }
     state.conflictPrompt?.let { prompt ->
         ConflictDialog(prompt, onResolveConflict)
@@ -462,6 +481,14 @@ fun BrowserScreen(
     }
     state.fileRenameError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileRenameError) }
     state.trashError?.let { MessageDialog(it.userMessage, "关闭", onDismissTrashError) }
+    state.restoreConflictItem?.let { item ->
+        RestoreConflictDialog(
+            item = item,
+            onKeepBoth = { onRestoreTrashItemWithAction(item, RestoreConflictAction.KEEP_BOTH, null) },
+            onRename = { name -> onRestoreTrashItemWithAction(item, RestoreConflictAction.RENAME, name) },
+            onDismiss = onDismissRestoreConflict,
+        )
+    }
     deleteEntry?.let { entry ->
         DeleteConfirmationDialog(
             entry = entry,
@@ -681,6 +708,95 @@ internal fun BrowserContent(
             )
         }
     }
+}
+
+@Composable
+private fun RestoreConflictDialog(
+    item: TrashItem,
+    onKeepBoth: () -> Unit,
+    onRename: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf(item.originalName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("恢复目标已存在") },
+        text = {
+            Column {
+                Text("回收项目仍保留在回收站，请选择恢复方式。")
+                TextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("改名恢复") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onRename(name) }, enabled = name.isNotBlank()) { Text("改名恢复") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onKeepBoth) { Text("保留两者") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun PreviewDialog(
+    entry: DirectoryEntry?,
+    content: PreviewContent?,
+    loading: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(entry?.name ?: "文件预览", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            when {
+                loading -> CircularProgressIndicator(Modifier.padding(24.dp))
+                error != null -> Text(error, color = MaterialTheme.colorScheme.error)
+                content is PreviewContent.Text -> Text(
+                    content.value,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                    color = ISaverPrimaryText,
+                )
+                content is PreviewContent.Image -> {
+                    val bitmap = remember(content.bytes) { decodePreviewBitmap(content.bytes) }
+                    if (bitmap == null) {
+                        Text("图片无法解码", color = MaterialTheme.colorScheme.error)
+                    } else {
+                        Image(
+                            bitmap.asImageBitmap(),
+                            contentDescription = entry?.name,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+private fun decodePreviewBitmap(bytes: ByteArray): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sampleSize = 1
+    while (bounds.outWidth / sampleSize > 4096 || bounds.outHeight / sampleSize > 4096) {
+        sampleSize *= 2
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
 }
 
 @Composable
@@ -1457,6 +1573,9 @@ private fun ConflictDialog(
                 TextButton(onClick = { onResolve(ConflictAction.SKIP, false) }) { Text("跳过") }
                 TextButton(onClick = { onResolve(ConflictAction.REPLACE, false) }) {
                     Text("替换", color = MaterialTheme.colorScheme.error)
+                }
+                if (prompt.entryType == EntryType.DIRECTORY) {
+                    TextButton(onClick = { onResolve(ConflictAction.MERGE, false) }) { Text("合并目录") }
                 }
                 if (prompt.totalCount > 1) {
                     TextButton(onClick = { onResolve(ConflictAction.KEEP_BOTH, true) }) { Text("全部保留两者") }
