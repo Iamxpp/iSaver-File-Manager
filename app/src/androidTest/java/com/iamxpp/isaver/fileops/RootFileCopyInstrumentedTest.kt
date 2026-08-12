@@ -21,6 +21,7 @@ class RootFileCopyInstrumentedTest {
         resetTargets(app)
         try {
             root(app, "printf %s first > ${quote(SOURCE_FILE)}")
+            root(app, "touch -d @1700000001 -- ${quote(SOURCE_FILE)}")
             val source = stat(app, SOURCE_FILE)
 
             val copied = app.fileCopyRepository.copy(
@@ -32,6 +33,7 @@ class RootFileCopyInstrumentedTest {
             assertTrue(copied.toString(), copied is OperationResult.Success)
             assertEquals("first", root(app, "cat -- ${quote(SOURCE_FILE)}"))
             assertEquals("first", root(app, "cat -- ${quote(TARGET_FILE)}"))
+            assertEquals("1700000001", root(app, "stat -c %Y -- ${quote(TARGET_FILE)}"))
 
             root(app, "printf %s changed-source > ${quote(SOURCE_FILE)}")
             val conflictingSource = stat(app, SOURCE_FILE)
@@ -57,6 +59,7 @@ class RootFileCopyInstrumentedTest {
             assertEquals("first", root(app, "cat -- ${quote(TARGET_FILE)}"))
 
             root(app, "printf %s cross-device > ${quote(CROSS_SOURCE_FILE)}")
+            root(app, "touch -d @1700000002 -- ${quote(CROSS_SOURCE_FILE)}")
             val crossSource = stat(app, CROSS_SOURCE_FILE)
             val cross = app.fileCopyRepository.copy(
                 crossSource,
@@ -66,6 +69,7 @@ class RootFileCopyInstrumentedTest {
             assertTrue(cross.toString(), cross is OperationResult.Success)
             assertEquals("cross-device", root(app, "cat -- ${quote(CROSS_SOURCE_FILE)}"))
             assertEquals("cross-device", root(app, "cat -- ${quote(SHARED_TARGET_FILE)}"))
+            assertEquals("1700000002", root(app, "stat -c %Y -- ${quote(SHARED_TARGET_FILE)}"))
             assertEquals(
                 "clean",
                 root(

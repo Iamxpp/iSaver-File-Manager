@@ -739,6 +739,14 @@ static int regular_file_version_matches(
         current->st_ctim.tv_nsec == initial->st_ctim.tv_nsec;
 }
 
+static int preserve_modified_time(int target_fd, const struct stat *source) {
+    struct timespec times[2];
+    times[0].tv_sec = 0;
+    times[0].tv_nsec = UTIME_OMIT;
+    times[1] = source->st_mtim;
+    return futimens(target_fd, times) == 0 ? 0 : write_errno(errno);
+}
+
 static int is_emulated_storage_fd(int fd) {
     struct statfs file_system;
     if (fstatfs(fd, &file_system) != 0) return 0;
@@ -996,6 +1004,7 @@ static int publish_emulated_no_replace(
         }
         if (result != 0) break;
     }
+    if (result == 0) result = preserve_modified_time(final_fd, &source_status);
     if (result == 0 && fsync(final_fd) != 0 && errno != EINVAL) result = write_errno(errno);
     if (result == 0) {
         struct stat verified;
@@ -1189,6 +1198,9 @@ static int copy_publish_from_fd(
             source_final.st_ctim.tv_nsec != source_initial->st_ctim.tv_nsec) {
             result = X_SOURCE_CHANGED;
         }
+    }
+    if (result == 0 && source_initial != NULL) {
+        result = preserve_modified_time(payload_fd, source_initial);
     }
     if (result == 0) {
         int synced;
@@ -2260,6 +2272,7 @@ static int copy_directory_file(
     struct stat target_final;
     if (result == 0 && (fstat(source_fd, &source_final) != 0 ||
         !regular_file_version_matches(&source_final, &source_initial))) result = X_SOURCE_CHANGED;
+    if (result == 0) result = preserve_modified_time(target_fd, &source_initial);
     if (result == 0 && fsync(target_fd) != 0 && errno != EINVAL) result = write_errno(errno);
     if (result == 0 && (fstat(target_fd, &target_final) != 0 ||
         !payload_security_valid(target_directory_fd, &target_final) ||
@@ -2350,6 +2363,7 @@ static int copy_directory_contents(
     struct stat source_final;
     if (result == 0 && (fstat(source_fd, &source_final) != 0 ||
         !directory_version_matches(&source_final, source_initial))) result = X_SOURCE_CHANGED;
+    if (result == 0) result = preserve_modified_time(target_fd, source_initial);
     if (result == 0 && fsync(target_fd) != 0 && errno != EINVAL && errno != EROFS) {
         result = write_errno(errno);
     }

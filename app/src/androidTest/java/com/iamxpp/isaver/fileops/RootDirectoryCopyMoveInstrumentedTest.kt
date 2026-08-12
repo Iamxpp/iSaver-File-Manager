@@ -23,6 +23,9 @@ class RootDirectoryCopyMoveInstrumentedTest {
             root(app, "mkdir -p -- ${quote(SOURCE_TREE + "/empty")} ${quote(SOURCE_TREE + "/" + CHINESE_DIRECTORY)}")
             root(app, "printf %s nested > ${quote(SOURCE_TREE + "/" + CHINESE_DIRECTORY + "/" + SPACED_FILE)}")
             root(app, "touch -- ${quote(SOURCE_TREE + "/zero.bin")}")
+            root(app, "touch -d @1700000011 -- ${quote(SOURCE_TREE + "/" + CHINESE_DIRECTORY + "/" + SPACED_FILE)}")
+            root(app, "touch -d @1700000012 -- ${quote(SOURCE_TREE + "/" + CHINESE_DIRECTORY)}")
+            root(app, "touch -d @1700000013 -- ${quote(SOURCE_TREE)}")
             val source = stat(app, SOURCE_TREE)
 
             val copied = app.fileCopyRepository.copy(source, path(SOURCE_PARENT), path(TARGET_PARENT))
@@ -30,6 +33,9 @@ class RootDirectoryCopyMoveInstrumentedTest {
             assertEquals("nested", root(app, "cat -- ${quote(COPIED_FILE)}"))
             assertEquals("directory", root(app, "test -d ${quote(COPIED_EMPTY)} && echo directory"))
             assertEquals("0", root(app, "stat -c %s -- ${quote(COPIED_ZERO)}"))
+            assertEquals("1700000011", root(app, "stat -c %Y -- ${quote(COPIED_FILE)}"))
+            assertEquals("1700000012", root(app, "stat -c %Y -- ${quote(COPIED_DIRECTORY)}"))
+            assertEquals("1700000013", root(app, "stat -c %Y -- ${quote(COPIED_TREE)}"))
 
             val conflict = app.fileCopyRepository.copy(source, path(SOURCE_PARENT), path(TARGET_PARENT))
             assertEquals(ErrorCode.ALREADY_EXISTS, (conflict as OperationResult.Failure).code)
@@ -122,6 +128,8 @@ class RootDirectoryCopyMoveInstrumentedTest {
         const val CHINESE_DIRECTORY = "中文 目录"
         const val SPACED_FILE = "name with space.txt"
         const val COPIED_FILE = "$TARGET_PARENT/tree/$CHINESE_DIRECTORY/$SPACED_FILE"
+        const val COPIED_DIRECTORY = "$TARGET_PARENT/tree/$CHINESE_DIRECTORY"
+        const val COPIED_TREE = "$TARGET_PARENT/tree"
         const val COPIED_EMPTY = "$TARGET_PARENT/tree/empty"
         const val COPIED_ZERO = "$TARGET_PARENT/tree/zero.bin"
         const val SYMLINK_TARGET_TREE = "$SYMLINK_TARGET_PARENT/tree"
