@@ -1653,6 +1653,67 @@ static int move_noreplace(int argc, char **argv) {
     return 0;
 }
 
+static int rename_noreplace(int argc, char **argv) {
+    if (argc != 10 || !basename_ok(argv[4]) || !basename_ok(argv[9])) return X_USAGE;
+    unsigned long long parent_device;
+    unsigned long long parent_inode;
+    unsigned long long source_device;
+    unsigned long long source_inode;
+    if (!parse_identity(argv, 5, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 7, &source_device, &source_inode)) {
+        return X_USAGE;
+    }
+
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    struct stat source_status;
+    if (retry_fstatat(parent_fd, argv[4], &source_status, AT_SYMLINK_NOFOLLOW) != 0) {
+        int result = errno == ENOENT ? X_NOT_FOUND : X_SOURCE_CHANGED;
+        close(parent_fd);
+        return result;
+    }
+    if (!S_ISREG(source_status.st_mode) ||
+        !identity_matches(&source_status, source_device, source_inode)) {
+        close(parent_fd);
+        return X_SOURCE_CHANGED;
+    }
+    struct stat target_status;
+    if (retry_fstatat(parent_fd, argv[9], &target_status, AT_SYMLINK_NOFOLLOW) == 0) {
+        close(parent_fd);
+        return X_ALREADY_EXISTS;
+    }
+    if (errno != ENOENT) {
+        int result = write_errno(errno);
+        close(parent_fd);
+        return result;
+    }
+    if (syscall(SYS_renameat2, parent_fd, argv[4], parent_fd, argv[9], RENAME_NOREPLACE) != 0) {
+        int result = write_errno(errno);
+        close(parent_fd);
+        return result;
+    }
+    struct stat renamed_status;
+    struct stat source_after;
+    if (retry_fstatat(parent_fd, argv[9], &renamed_status, AT_SYMLINK_NOFOLLOW) != 0 ||
+        !S_ISREG(renamed_status.st_mode) ||
+        !identity_matches(&renamed_status, source_device, source_inode)) {
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (retry_fstatat(parent_fd, argv[4], &source_after, AT_SYMLINK_NOFOLLOW) == 0 ||
+        errno != ENOENT) {
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (fsync(parent_fd) != 0 && errno != EINVAL && errno != EROFS) {
+        close(parent_fd);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    printf("%llu:%llu\n", (unsigned long long) renamed_status.st_dev, (unsigned long long) renamed_status.st_ino);
+    close(parent_fd);
+    return 0;
+}
+
 static int prepare_extraction_stage(int argc, char **argv) {
     if (argc != 7 || !extraction_stage_name_ok(argv[4])) return X_USAGE;
     unsigned long long parent_device;
@@ -1998,6 +2059,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "remove-stage") == 0) return remove_stage(argc, argv);
     if (strcmp(argv[1], "move-noreplace") == 0) return move_noreplace(argc, argv);
+    if (strcmp(argv[1], "rename-noreplace") == 0) return rename_noreplace(argc, argv);
     if (strcmp(argv[1], "prepare-extract-stage") == 0) return prepare_extraction_stage(argc, argv);
     if (strcmp(argv[1], "mkdir-extract") == 0) return mkdir_extract(argc, argv);
     if (strcmp(argv[1], "copy-extract-stdin") == 0) return copy_extract_stdin(argc, argv);

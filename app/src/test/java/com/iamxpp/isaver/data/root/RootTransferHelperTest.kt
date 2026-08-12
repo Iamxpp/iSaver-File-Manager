@@ -65,6 +65,7 @@ class RootTransferHelperTest {
         assertTrue(main.contains("copy-publish-stdin"))
         assertTrue(main.contains("copy-file-publish"))
         assertTrue(main.contains("move-cross-device-noreplace"))
+        assertTrue(main.contains("rename-noreplace"))
         assertFalse(main.contains("strcmp(argv[1], \"copy-publish\")"))
     }
 
@@ -92,6 +93,23 @@ class RootTransferHelperTest {
         assertTrue(command.contains("'move-noreplace' '/source original' '/source canonical'"))
         assertTrue(command.contains("'a'\\'';\n.txt' '1' '2' '3' '4'"))
         assertTrue(command.endsWith("'/target original' '/target canonical' '5' '6'"))
+        assertFalse(command.contains(" mv "))
+        assertFalse(command.contains("sh -c"))
+    }
+
+    @Test
+    fun `rename command binds parent source identity and hostile target name`() {
+        val command = helper.renameNoReplace(
+            original = "/source original",
+            canonical = "/source canonical",
+            sourceName = com.iamxpp.isaver.domain.EntryName.parse("old.txt").getOrThrow(),
+            parentIdentity = RootFileIdentity(1L, 2L),
+            sourceIdentity = RootFileIdentity(3L, 4L),
+            targetName = com.iamxpp.isaver.domain.EntryName.parse("new';\n.txt").getOrThrow(),
+        )
+
+        assertTrue(command.contains("'rename-noreplace' '/source original' '/source canonical'"))
+        assertTrue(command.endsWith("'old.txt' '1' '2' '3' '4' 'new'\\'';\n.txt'"))
         assertFalse(command.contains(" mv "))
         assertFalse(command.contains("sh -c"))
     }

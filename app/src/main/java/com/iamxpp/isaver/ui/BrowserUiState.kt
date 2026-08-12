@@ -46,6 +46,9 @@ data class BrowserUiState(
     val copyingFile: Boolean = false,
     val copiedOutput: DirectoryEntry? = null,
     val fileCopyError: BrowserOperationError? = null,
+    val renamingFile: Boolean = false,
+    val renamedOutput: DirectoryEntry? = null,
+    val fileRenameError: BrowserOperationError? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {

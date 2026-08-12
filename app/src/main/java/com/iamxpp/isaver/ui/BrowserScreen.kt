@@ -91,6 +91,8 @@ fun BrowserScreen(
     onDismissFileMoveError: () -> Unit = {},
     onCopyEntry: ((DirectoryEntry) -> Unit)? = null,
     onDismissFileCopyError: () -> Unit = {},
+    onRenameEntry: ((DirectoryEntry, String) -> Unit)? = null,
+    onDismissFileRenameError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
@@ -108,6 +110,7 @@ fun BrowserScreen(
     var compressDialogVisible by remember { mutableStateOf(false) }
     var serverDialogVisible by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var renameDialogEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
 
     LaunchedEffect(state.currentPath) {
         actionEntry = null
@@ -238,7 +241,9 @@ fun BrowserScreen(
             moveVisible = onMoveEntry != null && entry.type == EntryType.FILE,
             moveEnabled = !state.movingFile,
             copyVisible = onCopyEntry != null && entry.type == EntryType.FILE,
-            copyEnabled = !state.copyingFile,
+             copyEnabled = !state.copyingFile,
+             renameVisible = onRenameEntry != null && entry.type == EntryType.FILE,
+             renameEnabled = !state.renamingFile,
             compressVisible = onCompress != null,
             onShare = {
                 actionEntry = null
@@ -252,10 +257,14 @@ fun BrowserScreen(
                 actionEntry = null
                 onMoveEntry?.invoke(entry)
             },
-            onCopy = {
+             onCopy = {
                 actionEntry = null
                 onCopyEntry?.invoke(entry)
-            },
+             },
+             onRename = {
+                 actionEntry = null
+                 renameDialogEntry = entry
+             },
             onClearSelection = {
                 actionEntry = null
                 onClearSelection()
@@ -277,6 +286,17 @@ fun BrowserScreen(
     state.fileShareError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileShareError) }
     state.fileMoveError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileMoveError) }
     state.fileCopyError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileCopyError) }
+    state.fileRenameError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileRenameError) }
+    renameDialogEntry?.let { entry ->
+        RenameDialog(
+            initialName = entry.name,
+            onDismiss = { renameDialogEntry = null },
+            onConfirm = { newName ->
+                renameDialogEntry = null
+                onRenameEntry?.invoke(entry, newName)
+            },
+        )
+    }
     when (remoteConnectionState) {
         is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
             state = remoteConnectionState,
@@ -396,11 +416,14 @@ private fun FileActionsSheet(
     moveEnabled: Boolean,
     copyVisible: Boolean,
     copyEnabled: Boolean,
+    renameVisible: Boolean,
+    renameEnabled: Boolean,
     compressVisible: Boolean,
     onShare: () -> Unit,
     onCompress: () -> Unit,
     onMove: () -> Unit,
     onCopy: () -> Unit,
+    onRename: () -> Unit,
     onClearSelection: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -447,6 +470,14 @@ private fun FileActionsSheet(
                     description = "复制到其他文件夹",
                     enabled = copyEnabled,
                     onClick = onCopy,
+                )
+            }
+            if (renameVisible) {
+                FileActionRow(
+                    title = "重命名",
+                    description = "修改文件名称",
+                    enabled = renameEnabled,
+                    onClick = onRename,
                 )
             }
             if (compressVisible) {
@@ -517,6 +548,33 @@ private fun CreateFolderDialog(onDismiss: () -> Unit, onConfirm: (String) -> Uni
             )
         },
         confirmButton = { TextButton(onClick = { onConfirm(name.text) }) { Text("确定") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun RenameDialog(
+    initialName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember {
+        mutableStateOf(TextFieldValue(initialName, selection = TextRange(0, initialName.length)))
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名") },
+        text = {
+            TextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                modifier = Modifier.semantics { contentDescription = "新文件名" },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name.text) }, enabled = name.text.isNotBlank()) { Text("确定") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }

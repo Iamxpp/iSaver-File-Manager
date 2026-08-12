@@ -1170,6 +1170,51 @@ class BrowserViewModelTest {
         assertEquals(BrowserMoveSelection(source, sourceDirectory), vm.state.value.moveSelection)
     }
 
+    @Test fun `single file rename emits renamed output and refreshes the current directory`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
+        val output = entry("renamed.txt", EntryType.FILE, path = "${sourceDirectory.value}/renamed.txt")
+        val names = mutableListOf<String>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            renameFile = { selected, _, name ->
+                assertEquals(source, selected)
+                names += name
+                OperationResult.Success(output)
+            },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+
+        vm.renameEntry(source, "renamed.txt")
+        advanceUntilIdle()
+
+        assertEquals(listOf("renamed.txt"), names)
+        assertFalse(vm.state.value.renamingFile)
+        assertEquals(output, vm.state.value.renamedOutput)
+        assertNull(vm.state.value.fileRenameError)
+    }
+
+    @Test fun `rename failure remains visible and does not claim output`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            renameFile = { _, _, _ -> OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件") },
+        )
+
+        vm.renameEntry(source, "renamed.txt")
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.renamingFile)
+        assertNull(vm.state.value.renamedOutput)
+        assertEquals(ErrorCode.ALREADY_EXISTS, vm.state.value.fileRenameError?.code)
+    }
+
     @Test fun `single file copy keeps source identity while choosing and emits copied output`() = runTest {
         val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
         val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()

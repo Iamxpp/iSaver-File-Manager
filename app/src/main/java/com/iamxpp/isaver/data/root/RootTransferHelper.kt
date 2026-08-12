@@ -57,6 +57,24 @@ internal class RootTransferHelper(private val executable:String){
         targetParentIdentity.device,
         targetParentIdentity.inode,
     )
+    fun renameNoReplace(
+        original: String,
+        canonical: String,
+        sourceName: EntryName,
+        parentIdentity: RootFileIdentity,
+        sourceIdentity: RootFileIdentity,
+        targetName: EntryName,
+    ) = command(
+        "rename-noreplace",
+        original,
+        canonical,
+        sourceName.value,
+        parentIdentity.device,
+        parentIdentity.inode,
+        sourceIdentity.device,
+        sourceIdentity.inode,
+        targetName.value,
+    )
     fun copyFilePublish(
         sourceOriginal: String,
         sourceCanonical: String,

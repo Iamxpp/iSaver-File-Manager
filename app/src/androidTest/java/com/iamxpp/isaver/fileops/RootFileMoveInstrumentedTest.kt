@@ -66,6 +66,38 @@ class RootFileMoveInstrumentedTest {
         }
     }
 
+    @Test
+    fun renameFileIsAtomicNoReplaceAndPreservesSourceIdentity() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        resetRenameTargets(app)
+        try {
+            root(app, "printf %s rename-me > ${quote(RENAME_SOURCE_FILE)}")
+            val source = stat(app, RENAME_SOURCE_FILE)
+            val renamed = app.fileRenameRepository.rename(
+                source,
+                path(RENAME_DIRECTORY),
+                "renamed.txt",
+            )
+            assertTrue(renamed.toString(), renamed is OperationResult.Success)
+            assertEquals("rename-me", root(app, "cat -- ${quote(RENAME_TARGET_FILE)}"))
+            assertEquals("missing", root(app, "if [ -e ${quote(RENAME_SOURCE_FILE)} ]; then echo present; else echo missing; fi"))
+
+            root(app, "printf %s keep > ${quote(RENAME_SOURCE_FILE)}")
+            val conflictSource = stat(app, RENAME_SOURCE_FILE)
+            val conflict = app.fileRenameRepository.rename(
+                conflictSource,
+                path(RENAME_DIRECTORY),
+                "renamed.txt",
+            )
+            assertEquals(ErrorCode.ALREADY_EXISTS, (conflict as OperationResult.Failure).code)
+            assertEquals("keep", root(app, "cat -- ${quote(RENAME_SOURCE_FILE)}"))
+            assertEquals("rename-me", root(app, "cat -- ${quote(RENAME_TARGET_FILE)}"))
+        } finally {
+            cleanupRenameTargets(app)
+        }
+    }
+
     private suspend fun resetTargets(app: ISaverApplication) {
         cleanupTargets(app)
         root(
@@ -76,6 +108,15 @@ class RootFileMoveInstrumentedTest {
 
     private suspend fun cleanupTargets(app: ISaverApplication) {
         root(app, "rm -rf -- ${quote(ROOT_TARGET)} ${quote(SHARED_TARGET_DIRECTORY)}")
+    }
+
+    private suspend fun resetRenameTargets(app: ISaverApplication) {
+        cleanupRenameTargets(app)
+        root(app, "mkdir -p -- ${quote(RENAME_DIRECTORY)}")
+    }
+
+    private suspend fun cleanupRenameTargets(app: ISaverApplication) {
+        root(app, "rm -rf -- ${quote(RENAME_ROOT)}")
     }
 
     private suspend fun stat(app: ISaverApplication, value: String) =
@@ -104,5 +145,9 @@ class RootFileMoveInstrumentedTest {
         const val CROSS_SOURCE_FILE = "$SOURCE_DIRECTORY/cross.txt"
         const val SHARED_TARGET_DIRECTORY = "/storage/emulated/0/isaver-test/move-target"
         const val SHARED_TARGET_FILE = "$SHARED_TARGET_DIRECTORY/cross.txt"
+        const val RENAME_ROOT = "/data/local/tmp/isaver-test/rename"
+        const val RENAME_DIRECTORY = "$RENAME_ROOT/source"
+        const val RENAME_SOURCE_FILE = "$RENAME_DIRECTORY/report.txt"
+        const val RENAME_TARGET_FILE = "$RENAME_DIRECTORY/renamed.txt"
     }
 }

@@ -51,6 +51,9 @@ class BrowserViewModel(
     private val copyFile: suspend (DirectoryEntry, RootPath, RootPath) -> OperationResult<DirectoryEntry> = { _, _, _ ->
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法复制文件")
     },
+    private val renameFile: suspend (DirectoryEntry, RootPath, String) -> OperationResult<DirectoryEntry> = { _, _, _ ->
+        OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法重命名文件")
+    },
     private val revokeExport: (ExternalFileGrant) -> Unit = {},
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
@@ -67,6 +70,7 @@ class BrowserViewModel(
     private var moveFileJob: Job? = null
     private var selectionToRestore: BrowserMoveSelection? = null
     private var copyFileJob: Job? = null
+    private var renameFileJob: Job? = null
     private var copySelectionToRestore: BrowserCopySelection? = null
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
@@ -230,7 +234,7 @@ class BrowserViewModel(
     }
 
     fun beginMove(entry: DirectoryEntry): Boolean {
-        if (mutableState.value.movingFile || mutableState.value.copyingFile) return false
+        if (mutableState.value.movingFile || mutableState.value.copyingFile || mutableState.value.renamingFile) return false
         cancelExternalOpen()
         cancelExternalShare()
         if (
@@ -324,7 +328,7 @@ class BrowserViewModel(
     }
 
     fun beginCopy(entry: DirectoryEntry): Boolean {
-        if (mutableState.value.copyingFile || mutableState.value.movingFile) return false
+        if (mutableState.value.copyingFile || mutableState.value.movingFile || mutableState.value.renamingFile) return false
         cancelExternalOpen()
         cancelExternalShare()
         if (
@@ -414,6 +418,51 @@ class BrowserViewModel(
 
     fun dismissFileCopyError() {
         mutableState.value = mutableState.value.copy(fileCopyError = null)
+    }
+
+    fun renameEntry(entry: DirectoryEntry, newName: String) {
+        if (renameFileJob?.isActive == true) return
+        val parent = mutableState.value.currentPath
+        mutableState.value = mutableState.value.copy(
+            renamingFile = true,
+            renamedOutput = null,
+            fileRenameError = null,
+        )
+        renameFileJob = viewModelScope.launch {
+            try {
+                when (val result = withContext(ioDispatcher) { renameFile(entry, parent, newName) }) {
+                    is OperationResult.Failure -> mutableState.value = mutableState.value.copy(
+                        renamingFile = false,
+                        fileRenameError = BrowserOperationError(result.code, result.userMessage),
+                    )
+                    is OperationResult.Success -> {
+                        mutableState.value = mutableState.value.copy(
+                            selectedEntries = emptySet(),
+                            renamingFile = false,
+                            renamedOutput = result.value,
+                            fileRenameError = null,
+                        )
+                        load(parent, result.value.path)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                mutableState.value = mutableState.value.copy(renamingFile = false)
+                throw cancelled
+            } catch (_: Exception) {
+                mutableState.value = mutableState.value.copy(
+                    renamingFile = false,
+                    fileRenameError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "无法重命名文件"),
+                )
+            }
+        }
+    }
+
+    fun consumeRenamedOutput() {
+        mutableState.value = mutableState.value.copy(renamedOutput = null)
+    }
+
+    fun dismissFileRenameError() {
+        mutableState.value = mutableState.value.copy(fileRenameError = null)
     }
 
     fun compress(outputName: String) {
@@ -600,6 +649,9 @@ class BrowserViewModel(
             copyingFile = previousState.copyingFile,
             copiedOutput = previousState.copiedOutput,
             fileCopyError = previousState.fileCopyError,
+            renamingFile = previousState.renamingFile,
+            renamedOutput = previousState.renamedOutput,
+            fileRenameError = previousState.fileRenameError,
             compressionMessage = null,
         )
         val cachedPresentationJob = if (cachedSnapshot != null && cachedEntries.isEmpty()) {

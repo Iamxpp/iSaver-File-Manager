@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.runtime.getValue
@@ -110,6 +111,26 @@ class BrowserScreenTest {
         compose.onNodeWithText("复制到").assertIsDisplayed().performClick()
 
         compose.runOnIdle { assertEquals(file, copied) }
+    }
+
+    @Test
+    fun longPressFileForwardsRenameFromActionSheet() {
+        val file = entry("report.pdf", EntryType.FILE)
+        var renamed: Pair<DirectoryEntry, String>? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onRenameEntry = { entry, name -> renamed = entry to name },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
+        compose.onNodeWithText("重命名").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("新文件名").performTextReplacement("renamed.pdf")
+        compose.onNodeWithText("确定").performClick()
+
+        compose.runOnIdle { assertEquals(file to "renamed.pdf", renamed) }
     }
 
     @Test

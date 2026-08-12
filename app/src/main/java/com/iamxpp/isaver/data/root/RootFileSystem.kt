@@ -44,6 +44,12 @@ interface RootFileSystem {
         targetDirectory: RootPath,
     ): OperationResult<DirectoryEntry> = unsupportedMove()
 
+    suspend fun renameFileNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = unsupportedRename()
+
     suspend fun copyFileNoReplace(
         source: DirectoryEntry,
         sourceDirectory: RootPath,
@@ -86,6 +92,12 @@ private fun unsupportedMove(): OperationResult.Failure = OperationResult.Failure
     ErrorCode.COMMAND_FAILED,
     "不支持安全移动",
     "Same-filesystem move primitive unsupported",
+)
+
+private fun unsupportedRename(): OperationResult.Failure = OperationResult.Failure(
+    ErrorCode.COMMAND_FAILED,
+    "不支持安全重命名",
+    "Same-filesystem rename primitive unsupported",
 )
 
 private fun unsupportedCopy(): OperationResult.Failure = OperationResult.Failure(

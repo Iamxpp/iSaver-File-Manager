@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
             rootExportRepository = app.rootExportRepository,
             fileMoveRepository = app.fileMoveRepository,
             fileCopyRepository = app.fileCopyRepository,
+            fileRenameRepository = app.fileRenameRepository,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -115,7 +116,7 @@ class MainActivity : ComponentActivity() {
                     val pickerActive = transferState != TransferUiState.Idle
                     val movePickerActive = browserState.moveSelection != null
                     val copyPickerActive = browserState.copySelection != null
-                    val fileOperationInFlight = browserState.movingFile || browserState.copyingFile
+                    val fileOperationInFlight = browserState.movingFile || browserState.copyingFile || browserState.renamingFile
 
                     LaunchedEffect(pickerActive) {
                         if (pickerActive) homeViewModel.selectTab(HomeTab.VIEWS)
@@ -210,6 +211,12 @@ class MainActivity : ComponentActivity() {
                         homeViewModel.completeCopy(browserState.currentPath, browserState.rootTitle)
                         browserViewModel.consumeCopiedOutput()
                         Toast.makeText(this@MainActivity, "已复制 ${output.name}", Toast.LENGTH_SHORT).show()
+                    }
+
+                    LaunchedEffect(browserState.renamedOutput) {
+                        val output = browserState.renamedOutput ?: return@LaunchedEffect
+                        browserViewModel.consumeRenamedOutput()
+                        Toast.makeText(this@MainActivity, "已重命名为 ${output.name}", Toast.LENGTH_SHORT).show()
                     }
 
                     LaunchedEffect(archiveState.operation) {
@@ -385,6 +392,8 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onDismissFileCopyError = browserViewModel::dismissFileCopyError,
+                        onRenameBrowserEntry = browserViewModel::renameEntry,
+                        onDismissFileRenameError = browserViewModel::dismissFileRenameError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
                         onConnectServer = remoteConnectionViewModel::connect,
@@ -477,6 +486,7 @@ internal class BrowserViewModelFactory(
     private val rootExportRepository: com.iamxpp.isaver.export.RootExportRepository? = null,
     private val fileMoveRepository: com.iamxpp.isaver.fileops.FileMoveRepository? = null,
     private val fileCopyRepository: com.iamxpp.isaver.fileops.FileCopyRepository? = null,
+    private val fileRenameRepository: com.iamxpp.isaver.fileops.FileRenameRepository? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -513,6 +523,9 @@ internal class BrowserViewModelFactory(
             },
             copyFile = fileCopyRepository?.let { repository -> repository::copy } ?: { _, _, _ ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法复制文件")
+            },
+            renameFile = fileRenameRepository?.let { repository -> repository::rename } ?: { _, _, _ ->
+                OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法重命名文件")
             },
             revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
         ) as T

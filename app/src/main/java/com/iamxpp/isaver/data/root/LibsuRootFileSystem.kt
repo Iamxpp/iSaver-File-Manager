@@ -559,6 +559,80 @@ class LibsuRootFileSystem internal constructor(
         return targetAfter
     }
 
+    override suspend fun renameFileNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> {
+        val sourceName = EntryName.parse(source.name).getOrElse { return invalidRenameSource() }
+        if (
+            source.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            source.symbolicLink ||
+            !source.readable ||
+            source.path != EntryName.join(sourceDirectory, sourceName) ||
+            sourceName == targetName
+        ) return invalidRenameSource()
+        if (RootPathRiskPolicy.isProtected(sourceDirectory)) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览", "Protected rename path")
+        }
+        val parent = prepareWritableDirectory(sourceDirectory)
+        if (parent !is OperationResult.Success) return parent as OperationResult.Failure
+        val prepared = parent.value
+        val expectedSource = EntryName.join(prepared.canonical, sourceName)
+        val currentSource = stat(source.path)
+        if (
+            currentSource !is OperationResult.Success ||
+            currentSource.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            currentSource.value.symbolicLink ||
+            !currentSource.value.readable ||
+            currentSource.value.sizeBytes != source.sizeBytes
+        ) return invalidRenameSource()
+        val canonicalSource = canonicalize(source.path)
+        if (canonicalSource !is OperationResult.Success || canonicalSource.value != expectedSource) {
+            return invalidRenameSource("Source no longer mapped to its selected parent")
+        }
+        val sourceIdentity = readIdentity(expectedSource)
+        if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
+        val targetPath = EntryName.join(prepared.canonical, targetName)
+        when (val target = stat(targetPath)) {
+            is OperationResult.Success -> return failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件", "Rename target already existed")
+            is OperationResult.Failure -> if (target.code != ErrorCode.NOT_FOUND) return target
+        }
+        currentCoroutineContext().ensureActive()
+        val execution = runHelperBounded(
+            transferHelper.renameNoReplace(
+                original = prepared.original.value,
+                canonical = prepared.canonical.value,
+                sourceName = sourceName,
+                parentIdentity = prepared.identity,
+                sourceIdentity = sourceIdentity.value,
+                targetName = targetName,
+            ),
+            helperOperationTimeoutMillis,
+        ).getOrElse { return uncertainRename("Rename helper exceeded its bounded deadline or lost its result") }
+        if (execution.exitCode != 0) {
+            return mapExitCode(execution.exitCode, execution.stderr, "无法重命名文件", "rename-noreplace")
+        }
+        val renamedIdentity = RootFileIdentity.parse(execution.stdout).getOrElse {
+            return uncertainRename("Rename helper returned malformed identity")
+        }
+        if (renamedIdentity != sourceIdentity.value) return uncertainRename("Renamed identity differed from selected source")
+        val renamed = stat(targetPath)
+        val old = stat(expectedSource)
+        val parentAfter = canonicalize(sourceDirectory)
+        val actualIdentity = readIdentity(targetPath)
+        if (
+            renamed !is OperationResult.Success ||
+            renamed.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            renamed.value.symbolicLink ||
+            renamed.value.sizeBytes != source.sizeBytes ||
+            old !is OperationResult.Failure || old.code != ErrorCode.NOT_FOUND ||
+            parentAfter !is OperationResult.Success || parentAfter.value != prepared.canonical ||
+            actualIdentity !is OperationResult.Success || actualIdentity.value != sourceIdentity.value
+        ) return uncertainRename("Rename result could not be fully reconciled")
+        return renamed
+    }
+
     private suspend fun moveAcrossDevices(
         source: DirectoryEntry,
         name: EntryName,
@@ -922,10 +996,18 @@ class LibsuRootFileSystem internal constructor(
             )
             54 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source identity or contents changed")
             56 -> failure(ErrorCode.SOURCE_UNREADABLE, "无法读取来源文件", "Source could not be read")
-            55 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
+            55 -> if (operation == "rename-noreplace") {
+                uncertainRename("Native helper reported an uncertain rename outcome")
+            } else {
+                failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
+            }
             58 -> failure(ErrorCode.CROSS_DEVICE, "暂不支持跨存储移动", "Move crossed a file-system boundary")
             59 -> failure(ErrorCode.MOVE_PARTIAL, "文件已复制，但来源未删除", "Move target was published but source removal failed")
-            137 -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
+            137 -> if (operation == "rename-noreplace") {
+                uncertainRename("Native rename helper was killed after timeout")
+            } else {
+                failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper was killed after timeout")
+            }
             else -> if (operation in STREAM_COPY_OPERATIONS && stderr.looksLikeContentReadFailure()) {
                 failure(
                     ErrorCode.SOURCE_UNREADABLE,
@@ -1159,6 +1241,8 @@ private fun uncertainTransfer(technical:String)=failure(ErrorCode.OUTCOME_UNCERT
 private fun uncertainExtraction(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"解压结果不确定，请刷新目标目录核对",technical)
 private fun uncertainMove(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"移动结果不确定，请刷新来源和目标目录核对",technical)
 private fun invalidMoveSource(technical:String="Move source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法移动此文件",technical)
+private fun uncertainRename(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"重命名结果不确定，请刷新目录核对",technical)
+private fun invalidRenameSource(technical:String="Rename source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法重命名此文件",technical)
 private fun uncertainCopy(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"复制结果不确定，请刷新目标目录核对",technical)
 private fun invalidCopySource(technical:String="Copy source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法复制此文件",technical)
 
