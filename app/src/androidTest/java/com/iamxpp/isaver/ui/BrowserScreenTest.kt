@@ -411,6 +411,58 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun trashDialogForwardsBatchRestoreAndClearActions() {
+        var restored: List<TrashItem>? = null
+        var cleared = false
+        val item = TrashItem(
+            "trash-id", RootPath.parse("/storage/emulated/0/report.txt").getOrThrow(),
+            RootPath.parse("/storage/emulated/0").getOrThrow(), "report.txt",
+            RootPath.parse("/storage/emulated/0/.iSaver/Trash/files/trash-id").getOrThrow(),
+            "trash-id", EntryType.FILE, 10, 1, 2, TrashItemState.ACTIVE, 3,
+        )
+        compose.setContent {
+            BrowserScreen(
+                state = state().copy(trashItems = listOf(item)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onRestoreAllTrashItems = { restored = it },
+                onClearTrash = { cleared = true },
+            )
+        }
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("回收站").performClick()
+        compose.onNodeWithText("恢复全部").performClick()
+        assertEquals(listOf(item), restored)
+        compose.onNodeWithText("关闭").performClick()
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("回收站").performClick()
+        compose.onNodeWithText("清空回收站").performClick()
+        compose.onNodeWithText("确认清空回收站").performClick()
+        assertTrue(cleared)
+    }
+
+    @Test
+    fun selectionBarForwardsBatchDelete() {
+        val first = entry("one.txt", EntryType.FILE)
+        val second = entry("two.txt", EntryType.FILE)
+        var deleted: List<DirectoryEntry>? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(
+                    entries = listOf(first, second),
+                    selectedEntries = setOf(first, second),
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onRecycleSelection = { deleted = it },
+            )
+        }
+        compose.onNodeWithText("删除").performClick()
+        compose.onNodeWithText("继续").performClick()
+        assertEquals(listOf(first, second), deleted)
+    }
+
+    @Test
     fun longPressFileForwardsMoveFromActionSheet() {
         val file = entry("report.pdf", EntryType.FILE)
         var moved: DirectoryEntry? = null

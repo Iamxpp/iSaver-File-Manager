@@ -31,6 +31,12 @@ data class TrashItem(
     val deletedAt: Long,
 )
 
+data class TrashBatchResult(
+    val completed: Int,
+    val total: Int,
+    val failure: OperationResult.Failure?,
+)
+
 class TrashRepository internal constructor(
     private val fileSystem: RootFileSystem,
     private val dao: TrashItemDao,
@@ -87,6 +93,24 @@ class TrashRepository internal constructor(
         }
     }
 
+    suspend fun recycleAll(
+        sources: List<DirectoryEntry>,
+        sourceDirectory: RootPath,
+        onProgress: suspend (Int) -> Unit = {},
+    ): TrashBatchResult {
+        var completed = 0
+        for (source in sources) {
+            when (val result = recycle(source, sourceDirectory)) {
+                is OperationResult.Success -> {
+                    completed += 1
+                    onProgress(completed)
+                }
+                is OperationResult.Failure -> return TrashBatchResult(completed, sources.size, result)
+            }
+        }
+        return TrashBatchResult(completed, sources.size, null)
+    }
+
     suspend fun restore(item: TrashItem): OperationResult<DirectoryEntry> {
         val current = verifiedTrashEntry(item) ?: return invalidTrashItem()
         val targetName = EntryName.parse(item.originalName).getOrElse { return invalidTrashItem() }
@@ -112,11 +136,39 @@ class TrashRepository internal constructor(
         }
     }
 
+    suspend fun restoreAll(
+        items: List<TrashItem>,
+        onProgress: suspend (Int) -> Unit = {},
+    ): TrashBatchResult = runBatch(items, onProgress, ::restore)
+
+    suspend fun deletePermanentlyAll(
+        items: List<TrashItem>,
+        onProgress: suspend (Int) -> Unit = {},
+    ): TrashBatchResult = runBatch(items, onProgress, ::deletePermanently)
+
     suspend fun deletePermanently(source: DirectoryEntry, parent: RootPath): OperationResult<Unit> =
         fileSystem.deleteEntryPermanently(source, parent)
 
     suspend fun reconcilePending() {
         dao.markPendingForReview()
+    }
+
+    private suspend fun runBatch(
+        items: List<TrashItem>,
+        onProgress: suspend (Int) -> Unit,
+        operation: suspend (TrashItem) -> OperationResult<*>,
+    ): TrashBatchResult {
+        var completed = 0
+        for (item in items) {
+            when (val result = operation(item)) {
+                is OperationResult.Success -> {
+                    completed += 1
+                    onProgress(completed)
+                }
+                is OperationResult.Failure -> return TrashBatchResult(completed, items.size, result)
+            }
+        }
+        return TrashBatchResult(completed, items.size, null)
     }
 
     private suspend fun verifiedTrashEntry(item: TrashItem): DirectoryEntry? {

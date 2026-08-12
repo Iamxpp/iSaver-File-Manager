@@ -2,7 +2,7 @@ package com.iamxpp.isaver.tasks
 
 import kotlinx.coroutines.flow.Flow
 
-enum class OperationTaskType { COPY, MOVE, DELETE, ARCHIVE, EXTRACT, CHECKSUM, SEARCH }
+enum class OperationTaskType { COPY, MOVE, DELETE, RESTORE, ARCHIVE, EXTRACT, CHECKSUM, SEARCH }
 
 enum class OperationTaskState {
     QUEUED,

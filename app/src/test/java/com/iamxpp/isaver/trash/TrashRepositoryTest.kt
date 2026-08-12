@@ -97,6 +97,47 @@ class TrashRepositoryTest {
         assertTrue(item.trashedPath !in fileSystem.entries)
     }
 
+    @Test fun `batch restore stops at first conflict and preserves remaining records`() = runTest {
+        val fileSystem = FakeTrashFileSystem()
+        var nextId = 0
+        val repository = TrashRepository(fileSystem, database.trashItemDao(), { 10 }, { "trash-${++nextId}" })
+        val parent = path("/storage/emulated/0/Documents")
+        val firstSource = entry("first.txt", parent, EntryType.FILE)
+        val secondSource = entry("second.txt", parent, EntryType.FILE)
+        fileSystem.entries[firstSource.path] = firstSource
+        fileSystem.entries[secondSource.path] = secondSource
+        val first = (repository.recycle(firstSource, parent) as OperationResult.Success).value
+        val second = (repository.recycle(secondSource, parent) as OperationResult.Success).value
+        fileSystem.entries[second.originalPath] = secondSource
+
+        val result = repository.restoreAll(listOf(first, second))
+
+        assertEquals(1, result.completed)
+        assertEquals(ErrorCode.ALREADY_EXISTS, result.failure?.code)
+        assertEquals(listOf(second.id), repository.items.first().map { it.id })
+    }
+
+    @Test fun `batch permanent delete removes every verified item`() = runTest {
+        val fileSystem = FakeTrashFileSystem()
+        var nextId = 0
+        val repository = TrashRepository(fileSystem, database.trashItemDao(), { 10 }, { "trash-${++nextId}" })
+        val parent = path("/storage/emulated/0/Documents")
+        val sources = listOf(
+            entry("first.txt", parent, EntryType.FILE),
+            entry("second.txt", parent, EntryType.FILE),
+        )
+        sources.forEach { fileSystem.entries[it.path] = it }
+        val items = sources.map { (repository.recycle(it, parent) as OperationResult.Success).value }
+
+        val progress = mutableListOf<Int>()
+        val result = repository.deletePermanentlyAll(items) { progress += it }
+
+        assertEquals(2, result.completed)
+        assertEquals(null, result.failure)
+        assertEquals(listOf(1, 2), progress)
+        assertTrue(repository.items.first().isEmpty())
+    }
+
     private class FakeTrashFileSystem : RootFileSystem {
         val entries = linkedMapOf<RootPath, DirectoryEntry>().apply {
             listOf(

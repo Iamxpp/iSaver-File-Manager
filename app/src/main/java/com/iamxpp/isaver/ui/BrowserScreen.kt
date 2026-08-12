@@ -102,6 +102,7 @@ fun BrowserScreen(
     onDismissFileOpenError: () -> Unit = {},
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
     onShareSelection: (() -> Unit)? = null,
+    onRecycleSelection: ((List<DirectoryEntry>) -> Unit)? = null,
     onDismissFileShareError: () -> Unit = {},
     onMoveEntry: ((DirectoryEntry) -> Unit)? = null,
     onMoveSelection: (() -> Unit)? = null,
@@ -122,6 +123,8 @@ fun BrowserScreen(
     onDeleteEntryPermanently: ((DirectoryEntry) -> Unit)? = null,
     onRestoreTrashItem: (TrashItem) -> Unit = {},
     onDeleteTrashItemPermanently: (TrashItem) -> Unit = {},
+    onRestoreAllTrashItems: (List<TrashItem>) -> Unit = {},
+    onClearTrash: (List<TrashItem>) -> Unit = {},
     onDismissTrashError: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
@@ -149,6 +152,7 @@ fun BrowserScreen(
     var trashVisible by remember { mutableStateOf(false) }
     var bookmarksVisible by remember { mutableStateOf(false) }
     var deleteEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var batchDeleteVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.currentPath) {
         actionEntry = null
@@ -257,7 +261,7 @@ fun BrowserScreen(
                     TextButton(onClick = onClearSelection) { Text("清除") }
                 }
                 if (onShareSelection != null || onMoveSelection != null || onCopySelection != null ||
-                    onPreviewBatchRename != null) {
+                    onPreviewBatchRename != null || onRecycleSelection != null) {
                     Row(Modifier.fillMaxWidth()) {
                         onShareSelection?.let { share ->
                             TextButton(
@@ -286,6 +290,15 @@ fun BrowserScreen(
                                 onClick = { batchRenameDialogVisible = true },
                                 modifier = Modifier.weight(1f),
                             ) { Text("批量重命名") }
+                        }
+                    }
+                    onRecycleSelection?.let {
+                        Row(Modifier.fillMaxWidth()) {
+                            Spacer(Modifier.weight(1f))
+                            TextButton(
+                                enabled = !state.deletingEntry,
+                                onClick = { batchDeleteVisible = true },
+                            ) { Text("删除", color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
@@ -447,6 +460,16 @@ fun BrowserScreen(
             onDismiss = { deleteEntry = null },
         )
     }
+    if (batchDeleteVisible && onRecycleSelection != null) {
+        BatchDeleteConfirmationDialog(
+            count = state.selectedEntries.size,
+            onConfirm = {
+                batchDeleteVisible = false
+                onRecycleSelection(state.selectedEntries.toList())
+            },
+            onDismiss = { batchDeleteVisible = false },
+        )
+    }
     renameDialogEntry?.let { entry ->
         RenameDialog(
             initialName = entry.name,
@@ -488,6 +511,8 @@ fun BrowserScreen(
             busy = state.deletingEntry,
             onRestore = onRestoreTrashItem,
             onDelete = onDeleteTrashItemPermanently,
+            onRestoreAll = onRestoreAllTrashItems,
+            onClear = onClearTrash,
             onDismiss = { trashVisible = false },
         )
     }
@@ -1045,8 +1070,11 @@ private fun TrashDialog(
     busy: Boolean,
     onRestore: (TrashItem) -> Unit,
     onDelete: (TrashItem) -> Unit,
+    onRestoreAll: (List<TrashItem>) -> Unit,
+    onClear: (List<TrashItem>) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var clearConfirmation by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("回收站") },
@@ -1078,7 +1106,48 @@ private fun TrashDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") } },
+        confirmButton = {
+            Row {
+                TextButton(
+                    enabled = !busy && items.any { it.state == TrashItemState.ACTIVE },
+                    onClick = { onRestoreAll(items.filter { it.state == TrashItemState.ACTIVE }) },
+                ) { Text("恢复全部") }
+                TextButton(
+                    enabled = !busy && items.any { it.state == TrashItemState.ACTIVE },
+                    onClick = { clearConfirmation = true },
+                ) { Text("清空回收站", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
+            }
+        },
+    )
+    if (clearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { clearConfirmation = false },
+            title = { Text("清空回收站") },
+            text = { Text("将永久删除所有可核对的回收项目，此操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    clearConfirmation = false
+                    onClear(items.filter { it.state == TrashItemState.ACTIVE })
+                }) { Text("确认清空回收站", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { clearConfirmation = false }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun BatchDeleteConfirmationDialog(
+    count: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除 $count 个项目") },
+        text = { Text("共享存储项目将移入 iSaver 回收站；其他位置需要逐项确认永久删除。") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("继续") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 
@@ -1116,6 +1185,7 @@ private fun com.iamxpp.isaver.tasks.OperationTaskType.taskLabel(): String = when
     com.iamxpp.isaver.tasks.OperationTaskType.COPY -> "复制"
     com.iamxpp.isaver.tasks.OperationTaskType.MOVE -> "移动"
     com.iamxpp.isaver.tasks.OperationTaskType.DELETE -> "删除"
+    com.iamxpp.isaver.tasks.OperationTaskType.RESTORE -> "恢复"
     com.iamxpp.isaver.tasks.OperationTaskType.ARCHIVE -> "压缩"
     com.iamxpp.isaver.tasks.OperationTaskType.EXTRACT -> "解压"
     com.iamxpp.isaver.tasks.OperationTaskType.CHECKSUM -> "校验和"

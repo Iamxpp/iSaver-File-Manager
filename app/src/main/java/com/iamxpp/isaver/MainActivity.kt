@@ -400,6 +400,7 @@ class MainActivity : ComponentActivity() {
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onShareBrowserEntry = browserViewModel::shareEntry,
                         onShareBrowserSelection = browserViewModel::shareSelection,
+                        onRecycleBrowserSelection = browserViewModel::recycleSelection,
                         onDismissFileShareError = browserViewModel::dismissFileShareError,
                         onMoveBrowserEntry = { entry ->
                             if (!pickerActive && browserViewModel.beginMove(entry)) {
@@ -456,6 +457,8 @@ class MainActivity : ComponentActivity() {
                         onDeleteEntryPermanently = browserViewModel::deleteEntryPermanently,
                         onRestoreTrashItem = browserViewModel::restoreTrashItem,
                         onDeleteTrashItemPermanently = browserViewModel::deleteTrashItemPermanently,
+                        onRestoreAllTrashItems = browserViewModel::restoreTrashItems,
+                        onClearTrash = browserViewModel::clearTrash,
                         onDismissTrashError = browserViewModel::dismissTrashError,
                         onDismissFileRenameError = browserViewModel::dismissFileRenameError,
                         onCompress = browserViewModel::compress,

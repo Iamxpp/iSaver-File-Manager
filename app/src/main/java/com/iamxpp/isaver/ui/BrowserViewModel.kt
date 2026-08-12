@@ -991,6 +991,34 @@ class BrowserViewModel(
         }
     }
 
+    fun recycleSelection(entries: List<DirectoryEntry>) {
+        val selected = selectedEntriesInDirectoryOrder()
+        if (entries.toSet() != selected.toSet() || selected.isEmpty()) return
+        if (selected.any { !it.path.value.startsWith("/storage/emulated/0/") }) {
+            mutableState.value = mutableState.value.copy(
+                trashError = BrowserOperationError(
+                    ErrorCode.NOT_WRITABLE,
+                    "批量删除仅支持可进入回收站的共享存储项目",
+                ),
+            )
+            return
+        }
+        val repository = trashRepository ?: return
+        if (fileOperationBusy() || mutableState.value.deletingEntry) return
+        val parent = mutableState.value.currentPath
+        runBatchTrashOperation(
+            total = selected.size,
+            type = OperationTaskType.DELETE,
+            operation = { onProgress -> repository.recycleAll(selected, parent, onProgress) },
+            onFinished = { completed ->
+                selected.drop(completed).takeIf { it.isNotEmpty() }?.let {
+                    selectionToRestore = BrowserMoveSelection(it, parent)
+                }
+                load(parent)
+            },
+        )
+    }
+
     fun deleteEntryPermanently(entry: DirectoryEntry) {
         val repository = trashRepository ?: return
         if (fileOperationBusy() || mutableState.value.deletingEntry) return
@@ -1021,12 +1049,86 @@ class BrowserViewModel(
 
     fun deleteTrashItemPermanently(item: TrashItem) = runTrashItemOperation(item, restore = false)
 
+    fun restoreTrashItems(items: List<TrashItem>) {
+        val repository = trashRepository ?: return
+        val active = items.filter { it.state == com.iamxpp.isaver.trash.TrashItemState.ACTIVE }
+        if (active.isEmpty()) return
+        runBatchTrashOperation(
+            total = active.size,
+            type = OperationTaskType.RESTORE,
+            operation = { onProgress -> repository.restoreAll(active, onProgress) },
+        )
+    }
+
+    fun clearTrash(items: List<TrashItem>) {
+        val repository = trashRepository ?: return
+        val active = items.filter { it.state == com.iamxpp.isaver.trash.TrashItemState.ACTIVE }
+        if (active.isEmpty()) return
+        runBatchTrashOperation(
+            total = active.size,
+            type = OperationTaskType.DELETE,
+            operation = { onProgress -> repository.deletePermanentlyAll(active, onProgress) },
+        )
+    }
+
+    private fun runBatchTrashOperation(
+        total: Int,
+        type: OperationTaskType,
+        operation: suspend (suspend (Int) -> Unit) -> com.iamxpp.isaver.trash.TrashBatchResult,
+        onFinished: (Int) -> Unit = {},
+    ) {
+        if (fileOperationBusy() || mutableState.value.deletingEntry || total == 0) return
+        mutableState.value = mutableState.value.copy(deletingEntry = true, trashError = null)
+        viewModelScope.launch {
+            val taskId = operationTaskStore?.start(type, total)
+            updateTask(taskId, OperationTaskState.RUNNING, 0)
+            try {
+                val result = withContext(ioDispatcher) {
+                    operation { completed ->
+                        updateTask(taskId, OperationTaskState.RUNNING, completed)
+                    }
+                }
+                onFinished(result.completed)
+                val failure = result.failure
+                if (failure == null) {
+                    finishCompletedTask(taskId, result.completed, total)
+                } else {
+                    finishFailedTask(taskId, result.completed, total, failure)
+                }
+                mutableState.value = mutableState.value.copy(
+                    deletingEntry = false,
+                    trashError = failure?.let {
+                        BrowserOperationError(
+                            it.code,
+                            if (result.completed > 0) {
+                                "已完成 ${result.completed}/$total 项：${it.userMessage}"
+                            } else it.userMessage,
+                        )
+                    },
+                )
+            } catch (cancelled: CancellationException) {
+                mutableState.value = mutableState.value.copy(deletingEntry = false)
+                throw cancelled
+            } catch (_: Exception) {
+                val failure = OperationResult.Failure(ErrorCode.COMMAND_FAILED, "批量操作失败")
+                finishFailedTask(taskId, 0, total, failure)
+                mutableState.value = mutableState.value.copy(
+                    deletingEntry = false,
+                    trashError = BrowserOperationError(failure.code, failure.userMessage),
+                )
+            }
+        }
+    }
+
     private fun runTrashItemOperation(item: TrashItem, restore: Boolean) {
         val repository = trashRepository ?: return
         if (fileOperationBusy() || mutableState.value.deletingEntry) return
         mutableState.value = mutableState.value.copy(deletingEntry = true, trashError = null)
         viewModelScope.launch {
-            val taskId = operationTaskStore?.start(OperationTaskType.DELETE, 1)
+            val taskId = operationTaskStore?.start(
+                if (restore) OperationTaskType.RESTORE else OperationTaskType.DELETE,
+                1,
+            )
             updateTask(taskId, OperationTaskState.RUNNING, 0)
             val result = withContext(ioDispatcher) {
                 if (restore) repository.restore(item) else repository.deletePermanently(item)

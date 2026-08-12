@@ -203,6 +203,51 @@ class RootFileMoveInstrumentedTest {
     }
 
     @Test
+    fun sharedTrashBatchRecycleRestoreAndClearUseVerifiedEntries() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        root(app, "rm -rf -- ${quote(TRASH_BATCH_ROOT)}")
+        root(app, "mkdir -p -- ${quote(TRASH_BATCH_SOURCE)}")
+        try {
+            root(app, "printf %s first > ${quote(TRASH_BATCH_FIRST)}")
+            root(app, "printf %s second > ${quote(TRASH_BATCH_SECOND)}")
+            val sources = listOf(stat(app, TRASH_BATCH_FIRST), stat(app, TRASH_BATCH_SECOND))
+
+            val recycled = app.trashRepository.recycleAll(sources, path(TRASH_BATCH_SOURCE))
+            assertEquals(recycled.toString(), 2, recycled.completed)
+            assertEquals(recycled.toString(), null, recycled.failure)
+            val items = app.trashRepository.items.first().filter {
+                it.originalParent == path(TRASH_BATCH_SOURCE)
+            }
+            assertEquals(2, items.size)
+
+            val restored = app.trashRepository.restoreAll(items)
+            assertEquals(restored.toString(), 2, restored.completed)
+            assertEquals("first", root(app, "cat -- ${quote(TRASH_BATCH_FIRST)}"))
+            assertEquals("second", root(app, "cat -- ${quote(TRASH_BATCH_SECOND)}"))
+
+            val recycledAgain = app.trashRepository.recycleAll(
+                listOf(stat(app, TRASH_BATCH_FIRST), stat(app, TRASH_BATCH_SECOND)),
+                path(TRASH_BATCH_SOURCE),
+            )
+            assertEquals(recycledAgain.toString(), 2, recycledAgain.completed)
+            val active = app.trashRepository.items.first().filter {
+                it.originalParent == path(TRASH_BATCH_SOURCE)
+            }
+            val cleared = app.trashRepository.deletePermanentlyAll(active)
+            assertEquals(cleared.toString(), 2, cleared.completed)
+            assertTrue(app.trashRepository.items.first().none { it.originalParent == path(TRASH_BATCH_SOURCE) })
+        } finally {
+            val remaining = app.trashRepository.items.first().filter {
+                it.originalParent == path(TRASH_BATCH_SOURCE) &&
+                    it.state == com.iamxpp.isaver.trash.TrashItemState.ACTIVE
+            }
+            app.trashRepository.deletePermanentlyAll(remaining)
+            root(app, "rm -rf -- ${quote(TRASH_BATCH_ROOT)}")
+        }
+    }
+
+    @Test
     fun sharedCopyAndMoveReplaceKeepRecoverableBackups() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
         assertEquals(RootStatus.Available, app.rootSession.check())
@@ -306,6 +351,10 @@ class RootFileMoveInstrumentedTest {
         const val TRASH_TEST_SOURCE = "$TRASH_TEST_ROOT/source"
         const val TRASH_SOURCE_FILE = "$TRASH_TEST_SOURCE/report.txt"
         const val TRASH_DELETE_DIRECTORY = "$TRASH_TEST_ROOT/delete-folder"
+        const val TRASH_BATCH_ROOT = "/storage/emulated/0/isaver-test/trash-batch"
+        const val TRASH_BATCH_SOURCE = "$TRASH_BATCH_ROOT/source"
+        const val TRASH_BATCH_FIRST = "$TRASH_BATCH_SOURCE/first.txt"
+        const val TRASH_BATCH_SECOND = "$TRASH_BATCH_SOURCE/second.txt"
         const val REPLACE_TEST_ROOT = "/storage/emulated/0/isaver-test/replace"
         const val REPLACE_SOURCE = "$REPLACE_TEST_ROOT/source"
         const val REPLACE_TARGET = "$REPLACE_TEST_ROOT/target"
