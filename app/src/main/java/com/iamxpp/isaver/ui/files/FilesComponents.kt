@@ -414,6 +414,7 @@ fun FilesOverflowMenu(
     canConnectServer: Boolean,
     onAddLocation: (() -> Unit)? = null,
     onOpenTasks: (() -> Unit)? = null,
+    onOpenTrash: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     DropdownMenu(
@@ -444,6 +445,9 @@ fun FilesOverflowMenu(
         }
         if (onOpenTasks != null) {
             FilesMenuItem(text = "任务中心", onClick = onOpenTasks)
+        }
+        if (onOpenTrash != null) {
+            FilesMenuItem(text = "回收站", onClick = onOpenTrash)
         }
         FilesMenuItem(
             text = "压缩文件",

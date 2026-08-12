@@ -1621,7 +1621,10 @@ static int move_noreplace(int argc, char **argv) {
     );
     if (renamed != 0) {
         int error = errno;
-        int result = error == EXDEV ? X_CROSS_DEVICE : write_errno(error);
+        int emulated_fallback = is_emulated_storage_fd(source_parent_fd) &&
+            is_emulated_storage_fd(target_parent_fd) &&
+            (error == EIO || error == ENOSYS || error == EINVAL || error == EOPNOTSUPP);
+        int result = error == EXDEV || emulated_fallback ? X_CROSS_DEVICE : write_errno(error);
         close(target_parent_fd);
         close(source_parent_fd);
         return result;
@@ -2688,6 +2691,54 @@ static int move_directory_cross_device_noreplace(int argc, char **argv) {
     return result == 0 ? 0 : X_MOVE_PARTIAL;
 }
 
+static int delete_entry_bound(int argc, char **argv) {
+    if (argc != 9 || !basename_ok(argv[4])) return X_USAGE;
+    unsigned long long parent_device, parent_inode, source_device, source_inode;
+    if (!parse_identity(argv, 5, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 7, &source_device, &source_inode)) return X_USAGE;
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    struct stat selected;
+    if (fstatat(parent_fd, argv[4], &selected, AT_SYMLINK_NOFOLLOW) != 0 ||
+        !identity_matches(&selected, source_device, source_inode)) {
+        close(parent_fd);
+        return X_SOURCE_CHANGED;
+    }
+    int result = 0;
+    if (S_ISREG(selected.st_mode)) {
+        if (unlinkat(parent_fd, argv[4], 0) != 0) result = write_errno(errno);
+    } else if (S_ISDIR(selected.st_mode)) {
+        int source_fd = openat(parent_fd, argv[4], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        struct stat held;
+        if (source_fd < 0 || fstat(source_fd, &held) != 0 ||
+            !directory_version_matches(&held, &selected)) {
+            if (source_fd >= 0) close(source_fd);
+            close(parent_fd);
+            return X_SOURCE_CHANGED;
+        }
+        unsigned long long items = 1ULL;
+        result = remove_directory_tree_contents(source_fd, 0, &items);
+        close(source_fd);
+        if (result == 0) {
+            struct stat current;
+            if (fstatat(parent_fd, argv[4], &current, AT_SYMLINK_NOFOLLOW) != 0 ||
+                !S_ISDIR(current.st_mode) || current.st_dev != held.st_dev ||
+                current.st_ino != held.st_ino || unlinkat(parent_fd, argv[4], AT_REMOVEDIR) != 0) {
+                result = X_MOVE_PARTIAL;
+            }
+        } else {
+            result = X_MOVE_PARTIAL;
+        }
+    } else {
+        result = X_SOURCE_UNREADABLE;
+    }
+    if (result == 0 && fsync(parent_fd) != 0 && errno != EINVAL && errno != EROFS) {
+        result = X_OUTCOME_UNCERTAIN;
+    }
+    close(parent_fd);
+    return result;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) return X_USAGE;
     if (strcmp(argv[1], "list-dir") == 0) return list_directory(argc, argv);
@@ -2707,6 +2758,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "move-directory-cross-device-noreplace") == 0) {
         return move_directory_cross_device_noreplace(argc, argv);
     }
+    if (strcmp(argv[1], "delete-entry-bound") == 0) return delete_entry_bound(argc, argv);
     if (strcmp(argv[1], "prepare-extract-stage") == 0) return prepare_extraction_stage(argc, argv);
     if (strcmp(argv[1], "mkdir-extract") == 0) return mkdir_extract(argc, argv);
     if (strcmp(argv[1], "copy-extract-stdin") == 0) return copy_extract_stdin(argc, argv);

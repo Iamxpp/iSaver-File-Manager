@@ -10,6 +10,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenameRule
+import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.remote.RemoteConnectionDraft
@@ -77,6 +78,11 @@ fun ISaverHomeScreen(
     onExecuteBatchRename: (() -> Unit)? = null,
     onDismissBatchRename: () -> Unit = {},
     onClearFinishedTasks: () -> Unit = {},
+    onRecycleEntry: ((DirectoryEntry) -> Unit)? = null,
+    onDeleteEntryPermanently: ((DirectoryEntry) -> Unit)? = null,
+    onRestoreTrashItem: (TrashItem) -> Unit = {},
+    onDeleteTrashItemPermanently: (TrashItem) -> Unit = {},
+    onDismissTrashError: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
     onCompress: (String) -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
@@ -212,6 +218,11 @@ fun ISaverHomeScreen(
                 onExecuteBatchRename = if (saveMode) null else onExecuteBatchRename,
                 onDismissBatchRename = onDismissBatchRename,
                 onClearFinishedTasks = onClearFinishedTasks,
+                onRecycleEntry = if (saveMode) null else onRecycleEntry,
+                onDeleteEntryPermanently = if (saveMode) null else onDeleteEntryPermanently,
+                onRestoreTrashItem = onRestoreTrashItem,
+                onDeleteTrashItemPermanently = onDeleteTrashItemPermanently,
+                onDismissTrashError = onDismissTrashError,
                 onDismissFileRenameError = onDismissFileRenameError,
                 onCompress = onCompress,
                 onDismissCompressionMessage = onDismissCompressionMessage,

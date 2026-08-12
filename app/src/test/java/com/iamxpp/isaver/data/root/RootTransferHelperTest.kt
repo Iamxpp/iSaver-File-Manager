@@ -70,7 +70,22 @@ class RootTransferHelperTest {
         assertTrue(main.contains("copy-directory-publish"))
         assertTrue(main.contains("move-directory-noreplace"))
         assertTrue(main.contains("move-directory-cross-device-noreplace"))
+        assertTrue(main.contains("delete-entry-bound"))
         assertFalse(main.contains("strcmp(argv[1], \"copy-publish\")"))
+    }
+
+    @Test
+    fun `permanent delete command binds parent and source identities`() {
+        val command = helper.deleteEntryBound(
+            "/source original", "/source canonical",
+            com.iamxpp.isaver.domain.EntryName.parse("old';\n.txt").getOrThrow(),
+            RootFileIdentity(1, 2), RootFileIdentity(3, 4),
+        )
+
+        assertTrue(command.contains("'delete-entry-bound' '/source original' '/source canonical'"))
+        assertTrue(command.endsWith("'old'\\'';\n.txt' '1' '2' '3' '4'"))
+        assertFalse(command.contains("rm -rf"))
+        assertFalse(command.contains("sh -c"))
     }
 
     @Test

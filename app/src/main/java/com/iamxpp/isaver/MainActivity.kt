@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
             fileCopyRepository = app.fileCopyRepository,
             fileRenameRepository = app.fileRenameRepository,
             operationTaskStore = app.operationTaskRepository,
+            trashRepository = app.trashRepository,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -441,6 +442,11 @@ class MainActivity : ComponentActivity() {
                         onExecuteBatchRename = browserViewModel::executeBatchRename,
                         onDismissBatchRename = browserViewModel::dismissBatchRename,
                         onClearFinishedTasks = browserViewModel::clearFinishedTasks,
+                        onRecycleEntry = browserViewModel::recycleEntry,
+                        onDeleteEntryPermanently = browserViewModel::deleteEntryPermanently,
+                        onRestoreTrashItem = browserViewModel::restoreTrashItem,
+                        onDeleteTrashItemPermanently = browserViewModel::deleteTrashItemPermanently,
+                        onDismissTrashError = browserViewModel::dismissTrashError,
                         onDismissFileRenameError = browserViewModel::dismissFileRenameError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
@@ -536,6 +542,7 @@ internal class BrowserViewModelFactory(
     private val fileCopyRepository: com.iamxpp.isaver.fileops.FileCopyRepository? = null,
     private val fileRenameRepository: com.iamxpp.isaver.fileops.FileRenameRepository? = null,
     private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
+    private val trashRepository: com.iamxpp.isaver.trash.TrashRepository? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -586,6 +593,7 @@ internal class BrowserViewModelFactory(
             },
             revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
             operationTaskStore = operationTaskStore,
+            trashRepository = trashRepository,
         ) as T
     }
 }

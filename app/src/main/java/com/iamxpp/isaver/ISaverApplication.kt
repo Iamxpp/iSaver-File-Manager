@@ -39,6 +39,7 @@ import com.iamxpp.isaver.fileops.FileMoveRepository
 import com.iamxpp.isaver.fileops.FileCopyRepository
 import com.iamxpp.isaver.fileops.FileRenameRepository
 import com.iamxpp.isaver.tasks.OperationTaskRepository
+import com.iamxpp.isaver.trash.TrashRepository
 import com.iamxpp.isaver.remote.KeystoreCredentialStore
 import com.iamxpp.isaver.remote.RemoteFileSystemFactory
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
@@ -59,7 +60,7 @@ class ISaverApplication : Application() {
     internal val rootFileSystem: RootFileSystem by lazy { LibsuRootFileSystem("${applicationInfo.nativeLibraryDir}/libisaver_fs_helper.so") }
     internal val database: ISaverDatabase by lazy {
         Room.databaseBuilder(this, ISaverDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ISaverDatabase.MIGRATION_1_2, ISaverDatabase.MIGRATION_2_3)
+            .addMigrations(ISaverDatabase.MIGRATION_1_2, ISaverDatabase.MIGRATION_2_3, ISaverDatabase.MIGRATION_3_4)
             .build()
     }
     internal val customLocationRepository: CustomLocationRepository by lazy {
@@ -190,6 +191,7 @@ class ISaverApplication : Application() {
     internal val operationTaskRepository: OperationTaskRepository by lazy {
         OperationTaskRepository(database.operationTaskDao())
     }
+    internal val trashRepository: TrashRepository by lazy { TrashRepository(rootFileSystem, database.trashItemDao()) }
     internal val remoteCredentialStore by lazy { KeystoreCredentialStore(this) }
     internal val remoteFileSystemFactory by lazy { RemoteFileSystemFactory(remoteCredentialStore) }
     internal val transferDependencies: TransferDependencies by lazy {
@@ -221,6 +223,7 @@ class ISaverApplication : Application() {
             incomingFileCache.cleanupOrphans(System.currentTimeMillis())
             rootExportCache.cleanupOrphans(System.currentTimeMillis())
             operationTaskRepository.reconcileInterrupted()
+            trashRepository.reconcilePending()
         }
     }
 

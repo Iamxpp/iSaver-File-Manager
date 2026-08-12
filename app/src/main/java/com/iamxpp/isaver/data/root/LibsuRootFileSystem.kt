@@ -8,6 +8,7 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.EntryName
+import com.iamxpp.isaver.domain.RootEntryIdentity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -95,6 +96,9 @@ class LibsuRootFileSystem internal constructor(
 
     override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> =
         execute(buildCanonicalizeCommand(path), "无法解析真实路径").flatMap(::parseCanonicalOutput)
+
+    override suspend fun identity(path: RootPath): OperationResult<RootEntryIdentity> =
+        readIdentity(path).flatMap { OperationResult.Success(RootEntryIdentity(it.device, it.inode)) }
 
     override suspend fun createDirectory(parent:RootPath,name:FolderName):OperationResult<DirectoryEntry>{
         val originalParent=stat(parent);if(originalParent !is OperationResult.Success)return originalParent as OperationResult.Failure
@@ -708,6 +712,47 @@ class LibsuRootFileSystem internal constructor(
         return renamed
     }
 
+    override suspend fun deleteEntryPermanently(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+    ): OperationResult<Unit> {
+        val name = EntryName.parse(source.name).getOrElse { return invalidDeleteSource() }
+        if (RootPathRiskPolicy.isProtected(sourceDirectory)) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域禁止删除", "Protected delete path")
+        }
+        if (source.type == com.iamxpp.isaver.domain.EntryType.OTHER || source.symbolicLink ||
+            !source.readable || source.path != EntryName.join(sourceDirectory, name)
+        ) return invalidDeleteSource()
+        val parent = prepareWritableDirectory(sourceDirectory)
+        if (parent !is OperationResult.Success) return parent as OperationResult.Failure
+        val expected = EntryName.join(parent.value.canonical, name)
+        val canonical = canonicalize(source.path)
+        if (canonical !is OperationResult.Success || canonical.value != expected) return invalidDeleteSource()
+        val current = stat(expected)
+        if (current !is OperationResult.Success || current.value.type != source.type || current.value.symbolicLink) {
+            return invalidDeleteSource()
+        }
+        val sourceIdentity = readIdentity(expected)
+        if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
+        currentCoroutineContext().ensureActive()
+        val execution = runHelperBounded(
+            transferHelper.deleteEntryBound(
+                parent.value.original.value, parent.value.canonical.value, name,
+                parent.value.identity, sourceIdentity.value,
+            ),
+            DIRECTORY_OPERATION_TIMEOUT_MILLIS,
+        ).getOrElse { return uncertainDelete("Delete helper result was lost") }
+        if (execution.exitCode != 0) {
+            return mapExitCode(execution.exitCode, execution.stderr, "无法永久删除项目", "delete-entry-bound")
+        }
+        val after = stat(expected)
+        val parentAfter = canonicalize(sourceDirectory)
+        if (after !is OperationResult.Failure || after.code != ErrorCode.NOT_FOUND ||
+            parentAfter !is OperationResult.Success || parentAfter.value != parent.value.canonical
+        ) return uncertainDelete("Delete result could not be reconciled")
+        return OperationResult.Success(Unit)
+    }
+
     private suspend fun moveAcrossDevices(
         source: DirectoryEntry,
         name: EntryName,
@@ -1146,6 +1191,9 @@ class LibsuRootFileSystem internal constructor(
         uncertainResult(reason)
     }
 
+    private fun invalidDeleteSource() = failure(ErrorCode.SOURCE_UNREADABLE, "无法删除此项目", "Invalid delete source")
+    private fun uncertainDelete(reason: String) = failure(ErrorCode.OUTCOME_UNCERTAIN, "删除结果不确定，请刷新目录核对", reason)
+
     private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<PreparedTransferDirectory> =
         prepareDirectory(original, requireWritable = true)
 
@@ -1271,11 +1319,15 @@ class LibsuRootFileSystem internal constructor(
                 else -> failure(ErrorCode.OUTCOME_UNCERTAIN, "保存结果不确定，请刷新确认", "Native helper reported an uncertain outcome")
             }
             58 -> failure(ErrorCode.CROSS_DEVICE, "暂不支持跨存储移动", "Move crossed a file-system boundary")
-            59 -> failure(
-                ErrorCode.MOVE_PARTIAL,
-                if (operation.isDirectoryOperation()) "目录已复制，但来源未完整删除" else "文件已复制，但来源未删除",
-                "Move target was published but source removal failed",
-            )
+            59 -> if (operation == "delete-entry-bound") {
+                failure(ErrorCode.MOVE_PARTIAL, "目录仅部分删除，请刷新核对", "Recursive deletion stopped after partial progress")
+            } else {
+                failure(
+                    ErrorCode.MOVE_PARTIAL,
+                    if (operation.isDirectoryOperation()) "目录已复制，但来源未完整删除" else "文件已复制，但来源未删除",
+                    "Move target was published but source removal failed",
+                )
+            }
             137 -> when (operation) {
                 "rename-noreplace" -> uncertainRename("Native rename helper was killed after timeout")
                 "create-file-noreplace" -> uncertainCreateFile("Native create-file helper was killed after timeout")

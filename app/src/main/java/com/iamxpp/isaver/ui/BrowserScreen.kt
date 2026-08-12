@@ -69,6 +69,8 @@ import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.tasks.OperationTaskState
+import com.iamxpp.isaver.trash.TrashItem
+import com.iamxpp.isaver.trash.TrashItemState
 import java.text.DateFormat
 import java.util.Date
 
@@ -108,6 +110,11 @@ fun BrowserScreen(
     onExecuteBatchRename: (() -> Unit)? = null,
     onDismissBatchRename: () -> Unit = {},
     onClearFinishedTasks: () -> Unit = {},
+    onRecycleEntry: ((DirectoryEntry) -> Unit)? = null,
+    onDeleteEntryPermanently: ((DirectoryEntry) -> Unit)? = null,
+    onRestoreTrashItem: (TrashItem) -> Unit = {},
+    onDeleteTrashItemPermanently: (TrashItem) -> Unit = {},
+    onDismissTrashError: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
@@ -131,6 +138,8 @@ fun BrowserScreen(
     var renameDialogEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var batchRenameDialogVisible by remember { mutableStateOf(false) }
     var taskCenterVisible by remember { mutableStateOf(false) }
+    var trashVisible by remember { mutableStateOf(false) }
+    var deleteEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
 
     LaunchedEffect(state.currentPath) {
         actionEntry = null
@@ -202,6 +211,10 @@ fun BrowserScreen(
                     onOpenTasks = {
                         menuExpanded = false
                         taskCenterVisible = true
+                    },
+                    onOpenTrash = {
+                        menuExpanded = false
+                        trashVisible = true
                     },
                 )
             },
@@ -319,9 +332,11 @@ fun BrowserScreen(
             moveEnabled = !state.movingFile,
             copyVisible = onCopyEntry != null && entry.type != EntryType.OTHER,
              copyEnabled = !state.copyingFile,
-             renameVisible = onRenameEntry != null && entry.type != EntryType.OTHER,
+            renameVisible = onRenameEntry != null && entry.type != EntryType.OTHER,
              renameEnabled = !state.renamingFile,
             compressVisible = onCompress != null,
+            deleteVisible = onRecycleEntry != null || onDeleteEntryPermanently != null,
+            deleteEnabled = !state.deletingEntry,
             onShare = {
                 actionEntry = null
                 onShareEntry?.invoke(entry)
@@ -346,6 +361,10 @@ fun BrowserScreen(
                  actionEntry = null
                  renameDialogEntry = entry
              },
+            onDelete = {
+                actionEntry = null
+                deleteEntry = entry
+            },
             onClearSelection = {
                 actionEntry = null
                 onClearSelection()
@@ -375,6 +394,22 @@ fun BrowserScreen(
         state.fileCopyError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileCopyError) }
     }
     state.fileRenameError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileRenameError) }
+    state.trashError?.let { MessageDialog(it.userMessage, "关闭", onDismissTrashError) }
+    deleteEntry?.let { entry ->
+        DeleteConfirmationDialog(
+            entry = entry,
+            sharedStorage = entry.path.value.startsWith("/storage/emulated/0/"),
+            onRecycle = {
+                deleteEntry = null
+                onRecycleEntry?.invoke(entry)
+            },
+            onPermanent = {
+                deleteEntry = null
+                onDeleteEntryPermanently?.invoke(entry)
+            },
+            onDismiss = { deleteEntry = null },
+        )
+    }
     renameDialogEntry?.let { entry ->
         RenameDialog(
             initialName = entry.name,
@@ -403,6 +438,15 @@ fun BrowserScreen(
             tasks = state.operationTasks,
             onClearFinished = onClearFinishedTasks,
             onDismiss = { taskCenterVisible = false },
+        )
+    }
+    if (trashVisible) {
+        TrashDialog(
+            items = state.trashItems,
+            busy = state.deletingEntry,
+            onRestore = onRestoreTrashItem,
+            onDelete = onDeleteTrashItemPermanently,
+            onDismiss = { trashVisible = false },
         )
     }
     when (remoteConnectionState) {
@@ -543,12 +587,15 @@ private fun FileActionsSheet(
     renameVisible: Boolean,
     renameEnabled: Boolean,
     compressVisible: Boolean,
+    deleteVisible: Boolean,
+    deleteEnabled: Boolean,
     onOpenWith: () -> Unit,
     onShare: () -> Unit,
     onCompress: () -> Unit,
     onMove: () -> Unit,
     onCopy: () -> Unit,
     onRename: () -> Unit,
+    onDelete: () -> Unit,
     onClearSelection: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -618,6 +665,14 @@ private fun FileActionsSheet(
                     title = "压缩",
                     description = "在当前目录创建 ZIP",
                     onClick = onCompress,
+                )
+            }
+            if (deleteVisible) {
+                FileActionRow(
+                    title = "删除",
+                    description = "共享存储默认进入回收站",
+                    enabled = deleteEnabled,
+                    onClick = onDelete,
                 )
             }
             HorizontalDivider(color = ISaverDivider)
@@ -858,6 +913,87 @@ private fun OperationTaskDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
         dismissButton = { TextButton(onClick = onClearFinished) { Text("清理已完成") } },
+    )
+}
+
+@Composable
+private fun DeleteConfirmationDialog(
+    entry: DirectoryEntry,
+    sharedStorage: Boolean,
+    onRecycle: () -> Unit,
+    onPermanent: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var permanentConfirmation by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (permanentConfirmation) "永久删除" else "删除 ${entry.name}") },
+        text = {
+            Text(
+                if (permanentConfirmation) "此操作不可恢复。确认永久删除此项目？"
+                else if (sharedStorage) "项目将移入 iSaver 回收站，可稍后恢复。"
+                else "此位置不支持回收站，只能永久删除。",
+            )
+        },
+        confirmButton = {
+            if (permanentConfirmation || !sharedStorage) {
+                TextButton(onClick = onPermanent) { Text("确认永久删除", color = MaterialTheme.colorScheme.error) }
+            } else {
+                TextButton(onClick = onRecycle) { Text("移入回收站") }
+            }
+        },
+        dismissButton = {
+            if (sharedStorage && !permanentConfirmation) {
+                TextButton(onClick = { permanentConfirmation = true }) {
+                    Text("永久删除", color = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun TrashDialog(
+    items: List<TrashItem>,
+    busy: Boolean,
+    onRestore: (TrashItem) -> Unit,
+    onDelete: (TrashItem) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("回收站") },
+        text = {
+            if (items.isEmpty()) {
+                Text("回收站为空", color = ISaverSecondaryText)
+            } else {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                    items(items, key = { it.id }) { item ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                            Text(item.originalName, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                if (item.state == TrashItemState.ACTIVE) item.originalParent.value else "需要核对回收结果",
+                                color = ISaverSecondaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (item.state == TrashItemState.ACTIVE) {
+                                Row {
+                                    TextButton(enabled = !busy, onClick = { onRestore(item) }) { Text("恢复") }
+                                    TextButton(enabled = !busy, onClick = { onDelete(item) }) {
+                                        Text("永久删除", color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = ISaverDivider)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") } },
     )
 }
 

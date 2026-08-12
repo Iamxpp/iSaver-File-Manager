@@ -165,6 +165,42 @@ class RootFileMoveInstrumentedTest {
         }
     }
 
+    @Test
+    fun sharedTrashRestoresAndBoundDeleteRemovesNestedDirectory() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        root(app, "rm -rf -- ${quote(TRASH_TEST_ROOT)} ${quote("/storage/emulated/0/.iSaver/Trash")}")
+        root(app, "mkdir -p -- ${quote(TRASH_TEST_SOURCE)} ${quote(TRASH_DELETE_DIRECTORY + "/child")}")
+        try {
+            root(app, "printf %s recycle > ${quote(TRASH_SOURCE_FILE)}")
+            root(app, "printf %s delete > ${quote(TRASH_DELETE_DIRECTORY + "/child/value.txt")}")
+            val recycled = app.trashRepository.recycle(
+                stat(app, TRASH_SOURCE_FILE), path(TRASH_TEST_SOURCE),
+            )
+            assertTrue(recycled.toString(), recycled is OperationResult.Success)
+            val item = (recycled as OperationResult.Success).value
+            assertEquals("missing", root(app, "test ! -e ${quote(TRASH_SOURCE_FILE)} && echo missing"))
+            assertEquals("recycle", root(app, "cat -- ${quote(item.trashedPath.value)}"))
+
+            val restored = app.trashRepository.restore(item)
+            assertTrue(restored.toString(), restored is OperationResult.Success)
+            assertEquals("recycle", root(app, "cat -- ${quote(TRASH_SOURCE_FILE)}"))
+
+            val deleted = app.trashRepository.deletePermanently(
+                stat(app, TRASH_DELETE_DIRECTORY), path(TRASH_TEST_ROOT),
+            )
+            assertTrue(deleted.toString(), deleted is OperationResult.Success)
+            assertEquals("missing", root(app, "test ! -e ${quote(TRASH_DELETE_DIRECTORY)} && echo missing"))
+
+            val protected = app.trashRepository.deletePermanently(
+                stat(app, "/system/build.prop"), path("/system"),
+            )
+            assertEquals(ErrorCode.NOT_WRITABLE, (protected as OperationResult.Failure).code)
+        } finally {
+            root(app, "rm -rf -- ${quote(TRASH_TEST_ROOT)} ${quote("/storage/emulated/0/.iSaver/Trash")}")
+        }
+    }
+
     private suspend fun resetTargets(app: ISaverApplication) {
         cleanupTargets(app)
         root(
@@ -219,5 +255,9 @@ class RootFileMoveInstrumentedTest {
         const val RENAME_TARGET_FILE = "$RENAME_DIRECTORY/renamed.txt"
         const val RENAME_SOURCE_DIRECTORY = "$RENAME_DIRECTORY/folder"
         const val RENAME_TARGET_DIRECTORY = "$RENAME_DIRECTORY/renamed-folder"
+        const val TRASH_TEST_ROOT = "/storage/emulated/0/isaver-test/trash"
+        const val TRASH_TEST_SOURCE = "$TRASH_TEST_ROOT/source"
+        const val TRASH_SOURCE_FILE = "$TRASH_TEST_SOURCE/report.txt"
+        const val TRASH_DELETE_DIRECTORY = "$TRASH_TEST_ROOT/delete-folder"
     }
 }

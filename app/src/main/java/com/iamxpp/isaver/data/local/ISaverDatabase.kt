@@ -6,14 +6,15 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CustomLocationEntity::class, RecentItemEntity::class, OperationTaskEntity::class],
-    version = 3,
+    entities = [CustomLocationEntity::class, RecentItemEntity::class, OperationTaskEntity::class, TrashItemEntity::class],
+    version = 4,
     exportSchema = true,
 )
 abstract class ISaverDatabase : RoomDatabase() {
     abstract fun customLocationDao(): CustomLocationDao
     abstract fun recentItemDao(): RecentItemDao
     abstract fun operationTaskDao(): OperationTaskDao
+    abstract fun trashItemDao(): TrashItemDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -65,6 +66,33 @@ abstract class ISaverDatabase : RoomDatabase() {
                     CREATE INDEX IF NOT EXISTS `index_operation_tasks_updatedAt`
                     ON `operation_tasks` (`updatedAt`)
                     """.trimIndent(),
+                )
+            }
+        }
+
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `trash_items` (
+                        `id` TEXT NOT NULL,
+                        `originalPath` TEXT NOT NULL,
+                        `originalParent` TEXT NOT NULL,
+                        `originalName` TEXT NOT NULL,
+                        `trashedPath` TEXT NOT NULL,
+                        `trashedName` TEXT NOT NULL,
+                        `entryType` TEXT NOT NULL,
+                        `sizeBytes` INTEGER,
+                        `device` INTEGER,
+                        `inode` INTEGER,
+                        `state` TEXT NOT NULL,
+                        `deletedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_trash_items_deletedAt` ON `trash_items` (`deletedAt`)",
                 )
             }
         }

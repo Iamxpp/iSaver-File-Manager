@@ -90,6 +90,16 @@ internal class RootTransferHelper(private val executable:String){
         sourceIdentity.inode,
         targetName.value,
     )
+    fun deleteEntryBound(
+        original: String,
+        canonical: String,
+        name: EntryName,
+        parentIdentity: RootFileIdentity,
+        sourceIdentity: RootFileIdentity,
+    ) = command(
+        "delete-entry-bound", original, canonical, name.value,
+        parentIdentity.device, parentIdentity.inode, sourceIdentity.device, sourceIdentity.inode,
+    )
     fun copyFilePublish(
         sourceOriginal: String,
         sourceCanonical: String,

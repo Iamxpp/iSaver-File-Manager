@@ -10,6 +10,7 @@ import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.tasks.OperationTask
+import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.ui.files.SortSpec
 
 data class BrowserUiState(
@@ -64,6 +65,9 @@ data class BrowserUiState(
     val batchRenamePlan: BatchRenamePlan? = null,
     val batchRenameError: BrowserOperationError? = null,
     val operationTasks: List<OperationTask> = emptyList(),
+    val trashItems: List<TrashItem> = emptyList(),
+    val deletingEntry: Boolean = false,
+    val trashError: BrowserOperationError? = null,
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {

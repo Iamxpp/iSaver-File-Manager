@@ -66,6 +66,18 @@ class ISaverDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration3To4CreatesTrashJournal() {
+        migrationHelper.createDatabase(TEST_DATABASE, 3).close()
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            TEST_DATABASE, 4, true, ISaverDatabase.MIGRATION_3_4,
+        )
+        migrated.query("SELECT COUNT(*) FROM trash_items").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "isaver-migration-test"
     }

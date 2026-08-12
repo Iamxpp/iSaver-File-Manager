@@ -23,6 +23,8 @@ import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskStore
 import com.iamxpp.isaver.tasks.OperationTaskType
+import com.iamxpp.isaver.trash.TrashItem
+import com.iamxpp.isaver.trash.TrashRepository
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -65,6 +67,7 @@ class BrowserViewModel(
     },
     private val revokeExport: (ExternalFileGrant) -> Unit = {},
     private val operationTaskStore: OperationTaskStore? = null,
+    private val trashRepository: TrashRepository? = null,
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
@@ -121,6 +124,11 @@ class BrowserViewModel(
         operationTaskStore?.let { store ->
             viewModelScope.launch {
                 store.tasks.collect { tasks -> mutableState.value = mutableState.value.copy(operationTasks = tasks) }
+            }
+        }
+        trashRepository?.let { repository ->
+            viewModelScope.launch {
+                repository.items.collect { items -> mutableState.value = mutableState.value.copy(trashItems = items) }
             }
         }
         cancelExternalShare()
@@ -843,6 +851,92 @@ class BrowserViewModel(
         operationTaskStore?.let { store -> viewModelScope.launch(ioDispatcher) { store.clearFinished() } }
     }
 
+    fun recycleEntry(entry: DirectoryEntry) {
+        val repository = trashRepository ?: return
+        if (fileOperationBusy() || mutableState.value.deletingEntry) return
+        val parent = mutableState.value.currentPath
+        mutableState.value = mutableState.value.copy(deletingEntry = true, trashError = null)
+        viewModelScope.launch {
+            val taskId = operationTaskStore?.start(OperationTaskType.DELETE, 1)
+            updateTask(taskId, OperationTaskState.RUNNING, 0)
+            when (val result = withContext(ioDispatcher) { repository.recycle(entry, parent) }) {
+                is OperationResult.Success -> {
+                    mutableState.value = mutableState.value.copy(
+                        deletingEntry = false, selectedEntries = emptySet(), trashError = null,
+                    )
+                    updateTask(taskId, OperationTaskState.SUCCESS, 1)
+                    load(parent)
+                }
+                is OperationResult.Failure -> {
+                    mutableState.value = mutableState.value.copy(
+                        deletingEntry = false,
+                        trashError = BrowserOperationError(result.code, result.userMessage),
+                    )
+                    finishFailedTask(taskId, 0, 1, result)
+                }
+            }
+        }
+    }
+
+    fun deleteEntryPermanently(entry: DirectoryEntry) {
+        val repository = trashRepository ?: return
+        if (fileOperationBusy() || mutableState.value.deletingEntry) return
+        val parent = mutableState.value.currentPath
+        mutableState.value = mutableState.value.copy(deletingEntry = true, trashError = null)
+        viewModelScope.launch {
+            val taskId = operationTaskStore?.start(OperationTaskType.DELETE, 1)
+            updateTask(taskId, OperationTaskState.RUNNING, 0)
+            when (val result = withContext(ioDispatcher) { repository.deletePermanently(entry, parent) }) {
+                is OperationResult.Success -> {
+                    mutableState.value = mutableState.value.copy(
+                        deletingEntry = false, selectedEntries = emptySet(), trashError = null,
+                    )
+                    updateTask(taskId, OperationTaskState.SUCCESS, 1)
+                    load(parent)
+                }
+                is OperationResult.Failure -> {
+                    mutableState.value = mutableState.value.copy(
+                        deletingEntry = false, trashError = BrowserOperationError(result.code, result.userMessage),
+                    )
+                    finishFailedTask(taskId, 0, 1, result)
+                }
+            }
+        }
+    }
+
+    fun restoreTrashItem(item: TrashItem) = runTrashItemOperation(item, restore = true)
+
+    fun deleteTrashItemPermanently(item: TrashItem) = runTrashItemOperation(item, restore = false)
+
+    private fun runTrashItemOperation(item: TrashItem, restore: Boolean) {
+        val repository = trashRepository ?: return
+        if (fileOperationBusy() || mutableState.value.deletingEntry) return
+        mutableState.value = mutableState.value.copy(deletingEntry = true, trashError = null)
+        viewModelScope.launch {
+            val taskId = operationTaskStore?.start(OperationTaskType.DELETE, 1)
+            updateTask(taskId, OperationTaskState.RUNNING, 0)
+            val result = withContext(ioDispatcher) {
+                if (restore) repository.restore(item) else repository.deletePermanently(item)
+            }
+            when (result) {
+                is OperationResult.Success -> {
+                    mutableState.value = mutableState.value.copy(deletingEntry = false, trashError = null)
+                    updateTask(taskId, OperationTaskState.SUCCESS, 1)
+                }
+                is OperationResult.Failure -> {
+                    mutableState.value = mutableState.value.copy(
+                        deletingEntry = false, trashError = BrowserOperationError(result.code, result.userMessage),
+                    )
+                    finishFailedTask(taskId, 0, 1, result)
+                }
+            }
+        }
+    }
+
+    fun dismissTrashError() {
+        mutableState.value = mutableState.value.copy(trashError = null)
+    }
+
     private suspend fun updateTask(
         id: String?,
         state: OperationTaskState,
@@ -1008,7 +1102,7 @@ class BrowserViewModel(
     }
 
     private fun fileOperationBusy(): Boolean = mutableState.value.run {
-        creatingDirectory || creatingFile || movingFile || copyingFile || renamingFile || compressing
+        creatingDirectory || creatingFile || movingFile || copyingFile || renamingFile || deletingEntry || compressing
     }
 
     private fun load(

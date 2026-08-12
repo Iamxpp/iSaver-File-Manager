@@ -31,6 +31,8 @@ import com.iamxpp.isaver.tasks.OperationRecoveryPolicy
 import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskType
+import com.iamxpp.isaver.trash.TrashItem
+import com.iamxpp.isaver.trash.TrashItemState
 import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesSaveAction
@@ -287,6 +289,60 @@ class BrowserScreenTest {
         compose.onNodeWithText("清理已完成").performClick()
 
         compose.runOnIdle { assertTrue(cleared) }
+    }
+
+    @Test
+    fun sharedDeleteDefaultsToTrashAndPermanentDeleteNeedsExplicitConfirmation() {
+        val file = DirectoryEntry(
+            RootPath.parse("/storage/emulated/0/report.txt").getOrThrow(), "report.txt",
+            EntryType.FILE, 10, 1, true, true, false,
+        )
+        var recycled = false
+        var permanentlyDeleted = false
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onRecycleEntry = { recycled = true },
+                onDeleteEntryPermanently = { permanentlyDeleted = true },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：report.txt").performTouchInput { longClick() }
+        compose.onNodeWithText("删除").performClick()
+        compose.onNodeWithText("移入回收站").assertIsDisplayed()
+        compose.onNodeWithText("永久删除").performClick()
+        compose.onNodeWithText("确认永久删除").assertIsDisplayed().performClick()
+
+        compose.runOnIdle {
+            assertTrue(permanentlyDeleted)
+            assertEquals(false, recycled)
+        }
+    }
+
+    @Test
+    fun trashDialogRestoresActiveItem() {
+        var restored: TrashItem? = null
+        val item = TrashItem(
+            "trash-id", RootPath.parse("/storage/emulated/0/report.txt").getOrThrow(),
+            RootPath.parse("/storage/emulated/0").getOrThrow(), "report.txt",
+            RootPath.parse("/storage/emulated/0/.iSaver/Trash/files/trash-id").getOrThrow(),
+            "trash-id", EntryType.FILE, 10, 1, 2, TrashItemState.ACTIVE, 3,
+        )
+        compose.setContent {
+            BrowserScreen(
+                state = state().copy(trashItems = listOf(item)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onRestoreTrashItem = { restored = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("回收站").performClick()
+        compose.onNodeWithText("report.txt").assertIsDisplayed()
+        compose.onNodeWithText("恢复").performClick()
+
+        compose.runOnIdle { assertEquals(item, restored) }
     }
 
     @Test

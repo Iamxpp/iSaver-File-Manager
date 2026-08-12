@@ -6,6 +6,7 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.EntryName
 import com.iamxpp.isaver.domain.ErrorCode
+import com.iamxpp.isaver.domain.RootEntryIdentity
 import java.io.OutputStream
 
 interface RootFileSystem {
@@ -21,6 +22,8 @@ interface RootFileSystem {
     suspend fun stat(path: RootPath): OperationResult<DirectoryEntry>
 
     suspend fun canonicalize(path: RootPath): OperationResult<RootPath>
+    suspend fun identity(path: RootPath): OperationResult<RootEntryIdentity> =
+        OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法读取文件身份")
     /**
      * Creates one directory without retrying the write. If the mkdir dispatch is cancelled,
      * implementations perform at most one non-cancellable read-only post-check and then rethrow
@@ -152,6 +155,11 @@ interface RootFileSystem {
 
     suspend fun cleanupExtractionStage(stage: ExtractionStage): OperationResult<Unit> =
         unsupportedExtraction()
+
+    suspend fun deleteEntryPermanently(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+    ): OperationResult<Unit> = OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法删除项目")
 }
 
 private fun unsupportedDirectorySnapshot(): OperationResult.Failure = OperationResult.Failure(
