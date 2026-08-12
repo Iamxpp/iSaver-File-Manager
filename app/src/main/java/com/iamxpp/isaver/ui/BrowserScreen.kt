@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -107,6 +109,9 @@ fun BrowserScreen(
     onCreateDirectory: (String) -> Unit = {},
     onCreateFile: ((String) -> Unit)? = null,
     onToggleSelection: (DirectoryEntry) -> Unit = {},
+    onSelectAllVisible: () -> Unit = {},
+    onInvertVisibleSelection: () -> Unit = {},
+    onSelectSameType: () -> Unit = {},
     onOpenEntry: (DirectoryEntry) -> Unit = onToggleSelection,
     onOpenWithEntry: ((DirectoryEntry) -> Unit)? = null,
     onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
@@ -281,8 +286,19 @@ fun BrowserScreen(
         }
         if (state.selectionMode) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text("已选择 ${state.selectedEntries.size} 项", modifier = Modifier.weight(1f))
+                    TextButton(onClick = onSelectAllVisible) { Text("全选") }
+                    TextButton(onClick = onInvertVisibleSelection) { Text("反选") }
+                    TextButton(
+                        onClick = onSelectSameType,
+                        enabled = state.selectedEntries.map { it.type }.distinct().size == 1,
+                    ) { Text("同类") }
                     TextButton(onClick = onClearSelection) { Text("清除") }
                 }
                 if (onShareSelection != null || onMoveSelection != null || onCopySelection != null ||

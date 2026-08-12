@@ -9,6 +9,10 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.ui.files.HomeTab
+import com.iamxpp.isaver.tasks.OperationTask
+import com.iamxpp.isaver.tasks.OperationTaskState
+import com.iamxpp.isaver.tasks.OperationTaskStore
+import com.iamxpp.isaver.tasks.OperationTaskType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
@@ -156,9 +160,75 @@ class ArchiveViewModelTest {
     }
 
     @Test
+    fun `successful extraction completes an extract task`() = runTest(scheduler) {
+        val taskStore = RecordingOperationTaskStore()
+        val success = ArchiveState.Success(
+            com.iamxpp.isaver.domain.DirectoryEntry(
+                root("/target/output"), "output", com.iamxpp.isaver.domain.EntryType.DIRECTORY,
+                null, 1L, true, true, false,
+            ),
+            ArchiveFormat.ZIP,
+            2L,
+            10L,
+        )
+        val viewModel = ArchiveViewModel(
+            inspectArchive = {
+                OperationResult.Success(
+                    ArchiveListing(
+                        ArchiveFormat.ZIP,
+                        listOf(ArchiveEntry("a.txt", false, 5L), ArchiveEntry("b.txt", false, 5L)),
+                    ),
+                )
+            },
+            extractArchive = { _, _ ->
+                flowOf(
+                    ArchiveState.Running(ArchiveProgress.Publishing(1L, 2L)),
+                    success,
+                )
+            },
+            recordAccess = { _, _ -> },
+            ioDispatcher = dispatcher,
+            operationTaskStore = taskStore,
+        )
+
+        viewModel.open(root("/a.zip"), "a.zip", HomeTab.VIEWS)
+        advanceUntilIdle()
+        viewModel.extractTo(root("/target"))
+        advanceUntilIdle()
+
+        assertEquals(listOf(OperationTaskType.EXTRACT to 2), taskStore.starts)
+        assertEquals(OperationTaskState.RUNNING, taskStore.updates.first().state)
+        assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
+        assertEquals(2, taskStore.updates.last().completedItems)
+    }
+
+    @Test
+    fun `failed extraction records a failed task without exposing exception details`() = runTest(scheduler) {
+        val taskStore = RecordingOperationTaskStore()
+        val viewModel = ArchiveViewModel(
+            inspectArchive = { OperationResult.Success(ArchiveListing(ArchiveFormat.ZIP, emptyList())) },
+            extractArchive = { _, _ ->
+                flowOf(ArchiveState.Failure(ErrorCode.COMMAND_FAILED, "无法解压文件"))
+            },
+            recordAccess = { _, _ -> },
+            ioDispatcher = dispatcher,
+            operationTaskStore = taskStore,
+        )
+
+        viewModel.open(root("/broken.zip"), "broken.zip", HomeTab.VIEWS)
+        advanceUntilIdle()
+        viewModel.extractTo(root("/target"))
+        advanceUntilIdle()
+
+        assertEquals(OperationTaskState.FAILED, taskStore.updates.last().state)
+        assertEquals("无法解压文件", taskStore.updates.last().message)
+    }
+
+    @Test
     fun `cancel shows cleaning until repository cleanup finishes`() = runTest(scheduler) {
         val cleanupStarted = CompletableDeferred<Unit>()
         val allowCleanup = CompletableDeferred<Unit>()
+        val taskStore = RecordingOperationTaskStore()
         val viewModel = ArchiveViewModel(
             inspectArchive = { OperationResult.Success(ArchiveListing(ArchiveFormat.ZIP, emptyList())) },
             extractArchive = { _, _ ->
@@ -176,6 +246,7 @@ class ArchiveViewModelTest {
             },
             recordAccess = { _, _ -> },
             ioDispatcher = dispatcher,
+            operationTaskStore = taskStore,
         )
         viewModel.open(root("/a.zip"), "a.zip", HomeTab.VIEWS)
         advanceUntilIdle()
@@ -190,7 +261,39 @@ class ArchiveViewModelTest {
         allowCleanup.complete(Unit)
         advanceUntilIdle()
         assertNull(viewModel.state.value.operation)
+        assertEquals(OperationTaskState.CANCELLED, taskStore.updates.last().state)
     }
+
+    private class RecordingOperationTaskStore : OperationTaskStore {
+        override val tasks = kotlinx.coroutines.flow.MutableStateFlow(emptyList<OperationTask>())
+        val starts = mutableListOf<Pair<OperationTaskType, Int>>()
+        val updates = mutableListOf<TaskUpdate>()
+
+        override suspend fun start(type: OperationTaskType, totalItems: Int, totalBytes: Long?): String {
+            starts += type to totalItems
+            return "extract-task"
+        }
+
+        override suspend fun update(
+            id: String,
+            state: OperationTaskState,
+            completedItems: Int,
+            failedItems: Int,
+            message: String?,
+            completedBytes: Long?,
+        ) {
+            updates += TaskUpdate(state, completedItems, message)
+        }
+
+        override suspend fun reconcileInterrupted() = Unit
+        override suspend fun clearFinished() = Unit
+    }
+
+    private data class TaskUpdate(
+        val state: OperationTaskState,
+        val completedItems: Int,
+        val message: String?,
+    )
 
     private fun viewModel(
         inspect: suspend (RootPath) -> OperationResult<ArchiveListing>,

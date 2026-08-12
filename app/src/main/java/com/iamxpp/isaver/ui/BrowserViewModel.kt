@@ -217,6 +217,34 @@ class BrowserViewModel(
         mutableState.value = mutableState.value.copy(selectedEntries = emptySet())
     }
 
+    fun selectAllVisible() {
+        val selectable = presentedEntries.filter(::isSelectable)
+        mutableState.value = mutableState.value.copy(
+            selectedEntries = mutableState.value.selectedEntries + selectable,
+        )
+    }
+
+    fun invertVisibleSelection() {
+        val selectable = presentedEntries.filter(::isSelectable)
+        val selected = mutableState.value.selectedEntries.toMutableSet()
+        selectable.forEach { entry ->
+            if (!selected.add(entry)) selected.remove(entry)
+        }
+        mutableState.value = mutableState.value.copy(selectedEntries = selected)
+    }
+
+    fun selectSameType() {
+        val selectedTypes = mutableState.value.selectedEntries.map { it.type }.distinct()
+        if (selectedTypes.size != 1) return
+        val sameType = presentedEntries.filter { it.type == selectedTypes.single() && isSelectable(it) }
+        mutableState.value = mutableState.value.copy(
+            selectedEntries = mutableState.value.selectedEntries + sameType,
+        )
+    }
+
+    private fun isSelectable(entry: DirectoryEntry): Boolean =
+        entry.readable && !entry.symbolicLink && entry.type != EntryType.OTHER
+
     fun dismissFileInfo() {
         checksumJob?.cancel()
         metadataJob?.cancel()

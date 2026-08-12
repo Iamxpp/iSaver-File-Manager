@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
     }
     private val archiveViewModel by viewModels<ArchiveViewModel> {
         val app = application as ISaverApplication
-        ArchiveViewModelFactory(app.archiveRepository, app.recentRepository)
+        ArchiveViewModelFactory(app.archiveRepository, app.recentRepository, app.operationTaskRepository)
     }
     private val remoteConnectionViewModel by viewModels<RemoteConnectionViewModel> {
         val app = application as ISaverApplication
@@ -398,6 +398,9 @@ class MainActivity : ComponentActivity() {
                         onDismissCreateDirectoryError = browserViewModel::dismissCreateDirectoryError,
                         onDismissCreateFileError = browserViewModel::dismissCreateFileError,
                         onToggleSelection = browserViewModel::toggleSelection,
+                        onSelectAllVisible = browserViewModel::selectAllVisible,
+                        onInvertVisibleSelection = browserViewModel::invertVisibleSelection,
+                        onSelectSameType = browserViewModel::selectSameType,
                         onOpenBrowserEntry = browserViewModel::openEntry,
                         onOpenWithBrowserEntry = browserViewModel::openWith,
                         onClearBrowserSelection = browserViewModel::clearSelection,
@@ -646,6 +649,7 @@ internal class RecentViewModelFactory(
 internal class ArchiveViewModelFactory(
     private val repository: com.iamxpp.isaver.archive.ArchiveRepository,
     private val recentRepository: com.iamxpp.isaver.recent.RecentRepository,
+    private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -663,6 +667,7 @@ internal class ArchiveViewModelFactory(
                 )
             },
             ioDispatcher = ioDispatcher,
+            operationTaskStore = operationTaskStore,
         ) as T
     }
 }

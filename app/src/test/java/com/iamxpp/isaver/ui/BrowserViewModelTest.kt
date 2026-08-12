@@ -2111,6 +2111,62 @@ class BrowserViewModelTest {
         assertFalse(vm.state.value.selectionMode)
     }
 
+    @Test fun `selection actions operate on the full filtered directory`() = runTest {
+        val directory = RootPath.parse("/data/local/tmp/selection").getOrThrow()
+        val firstFile = entry("first.txt", EntryType.FILE, path = "${directory.value}/first.txt")
+        val secondFile = entry("second.txt", EntryType.FILE, path = "${directory.value}/second.txt")
+        val folder = entry("folder", EntryType.DIRECTORY, path = "${directory.value}/folder")
+        val other = entry("device", EntryType.OTHER, path = "${directory.value}/device")
+        val unreadable = DirectoryEntry(
+            RootPath.parse("${directory.value}/blocked").getOrThrow(),
+            "blocked",
+            EntryType.FILE,
+            1,
+            2,
+            false,
+            false,
+            false,
+        )
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(firstFile, secondFile, folder, other, unreadable)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+
+        vm.openRoot(directory, "选择")
+        advanceUntilIdle()
+        vm.selectAllVisible()
+
+        assertEquals(setOf(firstFile, secondFile, folder), vm.state.value.selectedEntries)
+        vm.setSearchQuery(".txt")
+        advanceUntilIdle()
+        vm.clearSelection()
+        vm.selectEntry(firstFile)
+        vm.selectSameType()
+        assertEquals(setOf(firstFile, secondFile), vm.state.value.selectedEntries)
+        vm.invertVisibleSelection()
+        assertTrue(vm.state.value.selectedEntries.isEmpty())
+    }
+
+    @Test fun `same type selection requires a single selected type`() = runTest {
+        val directory = RootPath.parse("/data/local/tmp/selection").getOrThrow()
+        val file = entry("file.txt", EntryType.FILE, path = "${directory.value}/file.txt")
+        val folder = entry("folder", EntryType.DIRECTORY, path = "${directory.value}/folder")
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(file, folder)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+
+        vm.openRoot(directory, "选择")
+        advanceUntilIdle()
+        vm.selectEntry(file)
+        vm.selectEntry(folder)
+        vm.selectSameType()
+
+        assertEquals(setOf(file, folder), vm.state.value.selectedEntries)
+    }
+
     @Test fun `symlink directory listing failure does not allow folder creation`() = runTest {
         val fs = FakeFileSystem(
             snapshotBlock = {
