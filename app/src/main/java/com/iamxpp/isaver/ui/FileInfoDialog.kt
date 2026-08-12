@@ -16,7 +16,14 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun FileInfoDialog(entry: DirectoryEntry, onDismiss: () -> Unit) {
+fun FileInfoDialog(
+    entry: DirectoryEntry,
+    checksumRunning: Boolean = false,
+    checksumValue: String? = null,
+    checksumError: String? = null,
+    onCalculateSha256: () -> Unit = {},
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("文件信息") },
@@ -31,6 +38,13 @@ fun FileInfoDialog(entry: DirectoryEntry, onDismiss: () -> Unit) {
                 } ?: "—")
                 InfoRow("读取", if (entry.readable) "可读" else "不可读")
                 InfoRow("写入", if (entry.writable) "可写" else "只读")
+                if (entry.type == EntryType.FILE && entry.readable && !entry.symbolicLink) {
+                    checksumValue?.let { InfoRow("SHA-256", it) }
+                    checksumError?.let { InfoRow("SHA-256", it) }
+                    TextButton(onClick = onCalculateSha256, enabled = !checksumRunning) {
+                        Text(if (checksumRunning) "正在计算 SHA-256" else "计算 SHA-256")
+                    }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },

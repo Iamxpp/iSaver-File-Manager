@@ -94,6 +94,8 @@ fun BrowserScreen(
     onSelectEntry: (DirectoryEntry) -> Unit = onToggleSelection,
     onClearSelection: () -> Unit = {},
     onDismissFileInfo: () -> Unit = {},
+    onShowFileInfo: (DirectoryEntry) -> Unit = {},
+    onCalculateSha256: () -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
     onShareSelection: (() -> Unit)? = null,
@@ -368,6 +370,10 @@ fun BrowserScreen(
                 actionEntry = null
                 deleteEntry = entry
             },
+            onInfo = {
+                actionEntry = null
+                onShowFileInfo(entry)
+            },
             onClearSelection = {
                 actionEntry = null
                 onClearSelection()
@@ -387,7 +393,16 @@ fun BrowserScreen(
     state.compressionMessage?.let {
         MessageDialog(it, "关闭", onDismissCompressionMessage)
     }
-    state.fileInfo?.let { FileInfoDialog(it, onDismissFileInfo) }
+    state.fileInfo?.let {
+        FileInfoDialog(
+            entry = it,
+            checksumRunning = state.checksumRunning,
+            checksumValue = state.checksumValue,
+            checksumError = state.checksumError?.userMessage,
+            onCalculateSha256 = onCalculateSha256,
+            onDismiss = onDismissFileInfo,
+        )
+    }
     state.fileOpenError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileOpenError) }
     state.fileShareError?.let { MessageDialog(it.userMessage, "关闭", onDismissFileShareError) }
     state.conflictPrompt?.let { prompt ->
@@ -604,6 +619,7 @@ private fun FileActionsSheet(
     onCopy: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onInfo: () -> Unit,
     onClearSelection: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -683,6 +699,11 @@ private fun FileActionsSheet(
                     onClick = onDelete,
                 )
             }
+            FileActionRow(
+                title = "属性",
+                description = "查看详细信息和校验和",
+                onClick = onInfo,
+            )
             HorizontalDivider(color = ISaverDivider)
             TextButton(
                 onClick = onClearSelection,

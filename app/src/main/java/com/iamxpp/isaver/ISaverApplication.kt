@@ -38,6 +38,7 @@ import com.iamxpp.isaver.export.RootExportRepository
 import com.iamxpp.isaver.fileops.FileMoveRepository
 import com.iamxpp.isaver.fileops.FileCopyRepository
 import com.iamxpp.isaver.fileops.FileRenameRepository
+import com.iamxpp.isaver.fileops.FileChecksumRepository
 import com.iamxpp.isaver.tasks.OperationTaskRepository
 import com.iamxpp.isaver.trash.TrashRepository
 import com.iamxpp.isaver.remote.KeystoreCredentialStore
@@ -194,6 +195,7 @@ class ISaverApplication : Application() {
     internal val fileRenameRepository: FileRenameRepository by lazy {
         FileRenameRepository(rootFileSystem)
     }
+    internal val fileChecksumRepository: FileChecksumRepository by lazy { FileChecksumRepository(rootFileSystem) }
     internal val operationTaskRepository: OperationTaskRepository by lazy {
         OperationTaskRepository(database.operationTaskDao())
     }

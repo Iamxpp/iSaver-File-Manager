@@ -20,6 +20,7 @@ import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenameExecutor
 import com.iamxpp.isaver.fileops.BatchRenamePlanner
 import com.iamxpp.isaver.fileops.BatchRenameRule
+import com.iamxpp.isaver.fileops.FileChecksumRepository
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskStore
 import com.iamxpp.isaver.tasks.OperationTaskType
@@ -69,6 +70,9 @@ class BrowserViewModel(
     private val revokeExport: (ExternalFileGrant) -> Unit = {},
     private val operationTaskStore: OperationTaskStore? = null,
     private val trashRepository: TrashRepository? = null,
+    private val checksumFile: suspend (DirectoryEntry) -> OperationResult<String> = {
+        OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法计算校验和")
+    },
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
@@ -89,6 +93,7 @@ class BrowserViewModel(
     private var activeTaskId: String? = null
     private var activeTaskCompletedBytes = 0L
     private var renameFileJob: Job? = null
+    private var checksumJob: Job? = null
     private val batchRenamePlanner = BatchRenamePlanner()
     private val batchRenameExecutor = BatchRenameExecutor(renameFile)
     private var copySelectionToRestore: BrowserCopySelection? = null
@@ -185,7 +190,58 @@ class BrowserViewModel(
     }
 
     fun dismissFileInfo() {
-        mutableState.value = mutableState.value.copy(fileInfo = null)
+        checksumJob?.cancel()
+        mutableState.value = mutableState.value.copy(
+            fileInfo = null, checksumRunning = false, checksumValue = null, checksumError = null,
+        )
+    }
+
+    fun showFileInfo(entry: DirectoryEntry) {
+        checksumJob?.cancel()
+        mutableState.value = mutableState.value.copy(
+            fileInfo = entry, checksumRunning = false, checksumValue = null, checksumError = null,
+        )
+    }
+
+    fun calculateSha256() {
+        val entry = mutableState.value.fileInfo ?: return
+        if (entry.type != EntryType.FILE || mutableState.value.checksumRunning) return
+        mutableState.value = mutableState.value.copy(
+            checksumRunning = true, checksumValue = null, checksumError = null,
+        )
+        checksumJob = viewModelScope.launch {
+            val taskId = operationTaskStore?.start(OperationTaskType.CHECKSUM, 1, entry.sizeBytes)
+            updateTask(taskId, OperationTaskState.RUNNING, 0)
+            try {
+                when (val result = withContext(ioDispatcher) { checksumFile(entry) }) {
+                    is OperationResult.Success -> {
+                        if (mutableState.value.fileInfo?.path == entry.path) {
+                            mutableState.value = mutableState.value.copy(
+                                checksumRunning = false, checksumValue = result.value, checksumError = null,
+                            )
+                        }
+                        updateTask(
+                            taskId, OperationTaskState.SUCCESS, 1,
+                            completedBytes = entry.sizeBytes ?: 0,
+                        )
+                    }
+                    is OperationResult.Failure -> {
+                        if (mutableState.value.fileInfo?.path == entry.path) {
+                            mutableState.value = mutableState.value.copy(
+                                checksumRunning = false,
+                                checksumError = BrowserOperationError(result.code, result.userMessage),
+                            )
+                        }
+                        finishFailedTask(taskId, 0, 1, result)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable) {
+                    updateTask(taskId, OperationTaskState.CANCELLED, 0, message = "校验已取消")
+                }
+                throw cancelled
+            }
+        }
     }
 
     fun consumeArchiveOpen() {

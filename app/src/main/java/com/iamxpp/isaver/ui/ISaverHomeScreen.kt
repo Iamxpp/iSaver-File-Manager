@@ -60,6 +60,8 @@ fun ISaverHomeScreen(
     onOpenWithBrowserEntry: (DirectoryEntry) -> Unit = {},
     onClearBrowserSelection: () -> Unit = {},
     onDismissFileInfo: () -> Unit = {},
+    onShowFileInfo: (DirectoryEntry) -> Unit = {},
+    onCalculateSha256: () -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
     onShareBrowserEntry: (DirectoryEntry) -> Unit = {},
     onShareBrowserSelection: () -> Unit = {},
@@ -205,6 +207,8 @@ fun ISaverHomeScreen(
                 onSelectEntry = onToggleSelection,
                 onClearSelection = onClearBrowserSelection,
                 onDismissFileInfo = onDismissFileInfo,
+                onShowFileInfo = onShowFileInfo,
+                onCalculateSha256 = onCalculateSha256,
                 onDismissFileOpenError = onDismissFileOpenError,
                 onShareEntry = onShareBrowserEntry,
                 onShareSelection = if (saveMode) null else onShareBrowserSelection,
@@ -412,7 +416,7 @@ fun ISaverHomeScreen(
             modifier = Modifier.testTag("files-bottom-bar"),
         )
     }
-    recentState.fileInfo?.let { FileInfoDialog(it, onDismissRecentFileInfo) }
+    recentState.fileInfo?.let { FileInfoDialog(entry = it, onDismiss = onDismissRecentFileInfo) }
 }
 
 private fun LocationHomeUiState.visibleLocationCount(): Int =

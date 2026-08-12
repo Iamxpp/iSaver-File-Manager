@@ -36,6 +36,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -1705,6 +1706,51 @@ class BrowserViewModelTest {
             ),
             taskStore.updates.map { it.state to it.completed },
         )
+    }
+
+    @Test fun `sha256 updates current info and persistent task`() = runTest {
+        val file = entry("value.txt", EntryType.FILE, path = "/data/local/tmp/value.txt")
+        val taskStore = RecordingOperationTaskStore()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(file)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            operationTaskStore = taskStore,
+            checksumFile = { OperationResult.Success("a".repeat(64)) },
+        )
+
+        vm.showFileInfo(file)
+        vm.calculateSha256()
+        advanceUntilIdle()
+
+        assertEquals("a".repeat(64), vm.state.value.checksumValue)
+        assertEquals(listOf(OperationTaskType.CHECKSUM to 1), taskStore.starts)
+        assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
+    }
+
+    @Test fun `closing info cancels checksum and clears late result`() = runTest {
+        val file = entry("value.txt", EntryType.FILE, path = "/data/local/tmp/value.txt")
+        val release = CompletableDeferred<Unit>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(file)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            checksumFile = {
+                release.await()
+                OperationResult.Success("b".repeat(64))
+            },
+        )
+        vm.showFileInfo(file)
+        vm.calculateSha256()
+        runCurrent()
+
+        vm.dismissFileInfo()
+        release.complete(Unit)
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.fileInfo)
+        assertNull(vm.state.value.checksumValue)
+        assertFalse(vm.state.value.checksumRunning)
     }
 
     @Test fun `copy conflict keeps one task while waiting and resuming`() = runTest {

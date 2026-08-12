@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
             fileRenameRepository = app.fileRenameRepository,
             operationTaskStore = app.operationTaskRepository,
             trashRepository = app.trashRepository,
+            checksumFile = app.fileChecksumRepository::sha256,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -390,6 +391,8 @@ class MainActivity : ComponentActivity() {
                         onOpenWithBrowserEntry = browserViewModel::openWith,
                         onClearBrowserSelection = browserViewModel::clearSelection,
                         onDismissFileInfo = browserViewModel::dismissFileInfo,
+                        onShowFileInfo = browserViewModel::showFileInfo,
+                        onCalculateSha256 = browserViewModel::calculateSha256,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onShareBrowserEntry = browserViewModel::shareEntry,
                         onShareBrowserSelection = browserViewModel::shareSelection,
@@ -546,6 +549,9 @@ internal class BrowserViewModelFactory(
     private val fileRenameRepository: com.iamxpp.isaver.fileops.FileRenameRepository? = null,
     private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
     private val trashRepository: com.iamxpp.isaver.trash.TrashRepository? = null,
+    private val checksumFile: suspend (com.iamxpp.isaver.domain.DirectoryEntry) -> OperationResult<String> = {
+        OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法计算校验和")
+    },
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -597,6 +603,7 @@ internal class BrowserViewModelFactory(
             revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
             operationTaskStore = operationTaskStore,
             trashRepository = trashRepository,
+            checksumFile = checksumFile,
         ) as T
     }
 }
