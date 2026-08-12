@@ -23,6 +23,8 @@ import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskStore
 import com.iamxpp.isaver.tasks.OperationTaskType
+import com.iamxpp.isaver.search.LocalSearchCriteria
+import com.iamxpp.isaver.search.LocalSearchRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1828,6 +1830,60 @@ class BrowserViewModelTest {
 
         assertNull(changedVm.state.value.fileMetadata)
         assertEquals("文件已变化，请刷新核对", changedVm.state.value.fileMetadataError)
+    }
+
+    @Test fun `deep search reports results progress and persistent task`() = runTest {
+        val root = RootPath.parse(BrowserViewModel.INITIAL_PATH).getOrThrow()
+        val result = entry("report.txt", EntryType.FILE, path = "${root.value}/report.txt")
+        val fileSystem = FakeFileSystem(
+            snapshotBlock = {
+                OperationResult.Success(DirectorySnapshot(1, 2, true, true, listOf(result)))
+            },
+        ) { OperationResult.Success(emptyList()) }
+        val taskStore = RecordingOperationTaskStore()
+        val vm = BrowserViewModel(
+            fileSystem,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            operationTaskStore = taskStore,
+            localSearchRepository = LocalSearchRepository(fileSystem),
+        )
+
+        vm.startDeepSearch(LocalSearchCriteria("report"))
+        advanceUntilIdle()
+
+        assertEquals(listOf(result), vm.state.value.deepSearchResults)
+        assertEquals(1, vm.state.value.deepSearchScannedDirectories)
+        assertEquals(1, vm.state.value.deepSearchScannedEntries)
+        assertFalse(vm.state.value.deepSearchRunning)
+        assertEquals(listOf(OperationTaskType.SEARCH to 1), taskStore.starts)
+        assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
+    }
+
+    @Test fun `deep search cancellation clears running state and cancels task`() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val fileSystem = FakeFileSystem(
+            snapshotBlock = {
+                release.await()
+                OperationResult.Success(DirectorySnapshot(1, 2, true, true, emptyList()))
+            },
+        ) { OperationResult.Success(emptyList()) }
+        val taskStore = RecordingOperationTaskStore()
+        val vm = BrowserViewModel(
+            fileSystem,
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            operationTaskStore = taskStore,
+            localSearchRepository = LocalSearchRepository(fileSystem),
+        )
+        vm.startDeepSearch(LocalSearchCriteria("report"))
+        runCurrent()
+
+        vm.cancelDeepSearch()
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.deepSearchRunning)
+        assertEquals(OperationTaskState.CANCELLED, taskStore.updates.last().state)
     }
 
     @Test fun `closing info cancels checksum and clears late result`() = runTest {

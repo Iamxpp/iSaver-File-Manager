@@ -14,6 +14,7 @@ import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.bookmarks.Bookmark
 import com.iamxpp.isaver.data.root.RootFileMetadata
+import com.iamxpp.isaver.search.LocalSearchCriteria
 
 data class BrowserUiState(
     val currentPath: RootPath,
@@ -38,6 +39,14 @@ data class BrowserUiState(
     val displayMode: DisplayMode = DisplayMode.LIST,
     val sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     val searchQuery: String = "",
+    val deepSearchCriteria: LocalSearchCriteria? = null,
+    val deepSearchResults: List<DirectoryEntry> = emptyList(),
+    val deepSearchRunning: Boolean = false,
+    val deepSearchScannedDirectories: Int = 0,
+    val deepSearchScannedEntries: Int = 0,
+    val deepSearchSkippedDirectories: Int = 0,
+    val deepSearchTruncated: Boolean = false,
+    val deepSearchError: String? = null,
     val presentationError: String? = null,
     val selectedEntries: Set<DirectoryEntry> = emptySet(),
     val fileInfo: DirectoryEntry? = null,

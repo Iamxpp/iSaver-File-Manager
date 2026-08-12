@@ -28,6 +28,7 @@ import com.iamxpp.isaver.ui.recent.RecentUiItem
 import com.iamxpp.isaver.ui.recent.RecentUiState
 import com.iamxpp.isaver.ui.archive.ArchiveScreen
 import com.iamxpp.isaver.ui.archive.ArchiveUiState
+import com.iamxpp.isaver.search.LocalSearchCriteria
 
 @Composable
 fun ISaverHomeScreen(
@@ -49,6 +50,10 @@ fun ISaverHomeScreen(
     onBrowserForward: () -> Unit = {},
     onToggleCurrentBookmark: () -> Unit = {},
     onOpenBookmark: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit = {},
+    onStartDeepSearch: (LocalSearchCriteria) -> Unit = {},
+    onCancelDeepSearch: () -> Unit = {},
+    onClearDeepSearch: () -> Unit = {},
+    onOpenDeepSearchResultLocation: (DirectoryEntry) -> Unit = {},
     onRetryBrowser: () -> Unit,
     onLoadMore: () -> Unit,
     onSearchQueryChange: (String) -> Unit = {},
@@ -201,6 +206,10 @@ fun ISaverHomeScreen(
                 onForward = onBrowserForward,
                 onToggleCurrentBookmark = onToggleCurrentBookmark,
                 onOpenBookmark = onOpenBookmark,
+                onStartDeepSearch = onStartDeepSearch,
+                onCancelDeepSearch = onCancelDeepSearch,
+                onClearDeepSearch = onClearDeepSearch,
+                onOpenDeepSearchResultLocation = onOpenDeepSearchResultLocation,
                 onRetry = onRetryBrowser,
                 onLoadMore = onLoadMore,
                 onSearchQueryChange = onSearchQueryChange,

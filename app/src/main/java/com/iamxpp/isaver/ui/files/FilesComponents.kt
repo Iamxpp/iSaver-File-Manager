@@ -419,6 +419,7 @@ fun FilesOverflowMenu(
     onToggleBookmark: (() -> Unit)? = null,
     currentPathBookmarked: Boolean = false,
     onOpenBookmarks: (() -> Unit)? = null,
+    onOpenDeepSearch: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     DropdownMenu(
@@ -464,6 +465,9 @@ fun FilesOverflowMenu(
         }
         if (onOpenBookmarks != null) {
             FilesMenuItem(text = "书签", onClick = onOpenBookmarks)
+        }
+        if (onOpenDeepSearch != null) {
+            FilesMenuItem(text = "深度搜索", onClick = onOpenDeepSearch)
         }
         FilesMenuItem(
             text = "压缩文件",

@@ -32,6 +32,7 @@ import com.iamxpp.isaver.tasks.OperationRecoveryPolicy
 import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskType
+import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.trash.TrashItemState
 import com.iamxpp.isaver.ui.files.DisplayMode
@@ -736,6 +737,57 @@ class BrowserScreenTest {
         }
         compose.onNodeWithContentDescription("更多操作").performClick()
         compose.onNodeWithText("新建文件夹").assertIsNotEnabled()
+    }
+
+    @Test fun deepSearchDialogStartsAndShowsSourcePaths() {
+        var criteria: LocalSearchCriteria? = null
+        var currentState by mutableStateOf(state())
+        val result = DirectoryEntry(
+            RootPath.parse("/documents/archive/report.txt").getOrThrow(),
+            "report.txt", EntryType.FILE, 12, 1, true, false, false,
+        )
+        compose.setContent {
+            BrowserScreen(
+                state = currentState,
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onStartDeepSearch = {
+                    criteria = it
+                    currentState = currentState.copy(
+                        deepSearchCriteria = it,
+                        deepSearchResults = listOf(result),
+                        deepSearchScannedDirectories = 3,
+                        deepSearchScannedEntries = 12,
+                    )
+                },
+            )
+        }
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("深度搜索").performClick()
+        compose.onNodeWithText("名称").performTextInput("report.*")
+        compose.onNodeWithText("正则表达式").performClick()
+        compose.onNodeWithText("扩展名，例如 txt").performTextInput("txt")
+        compose.onNodeWithText("文件").performClick()
+        compose.onNodeWithText("开始").performClick()
+
+        assertEquals("report.*", criteria?.query)
+        assertTrue(criteria?.regularExpression == true)
+        assertEquals("txt", criteria?.extension)
+        compose.onNodeWithText("已扫描 3 个目录、12 个项目").assertIsDisplayed()
+        compose.onNodeWithText("/documents/archive").assertIsDisplayed()
+    }
+
+    @Test fun deepSearchIsHiddenWhileChoosingDestination() {
+        compose.setContent {
+            BrowserScreen(
+                state = state(), onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                saveAction = FilesSaveAction(enabled = true, onSave = {}, label = "移动到这里"),
+                fileActionsEnabled = false,
+            )
+        }
+
+        compose.onNodeWithContentDescription("更多操作").assertDoesNotExist()
+        compose.onNodeWithText("深度搜索").assertDoesNotExist()
     }
 
     @Test fun createFileDialogForwardsExactName() {

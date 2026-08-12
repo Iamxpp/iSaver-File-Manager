@@ -23,6 +23,9 @@ import com.iamxpp.isaver.fileops.BatchRenameExecutor
 import com.iamxpp.isaver.fileops.BatchRenamePlanner
 import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.fileops.FileChecksumRepository
+import com.iamxpp.isaver.search.LocalSearchCriteria
+import com.iamxpp.isaver.search.LocalSearchProgress
+import com.iamxpp.isaver.search.LocalSearchRepository
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskStore
 import com.iamxpp.isaver.tasks.OperationTaskType
@@ -76,6 +79,7 @@ class BrowserViewModel(
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法计算校验和")
     },
     private val bookmarkRepository: BookmarkRepository? = null,
+    private val localSearchRepository: LocalSearchRepository = LocalSearchRepository(rootFileSystem),
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
@@ -99,6 +103,7 @@ class BrowserViewModel(
     private var renameFileJob: Job? = null
     private var checksumJob: Job? = null
     private var metadataJob: Job? = null
+    private var deepSearchJob: Job? = null
     private val batchRenamePlanner = BatchRenamePlanner()
     private val batchRenameExecutor = BatchRenameExecutor(renameFile)
     private var copySelectionToRestore: BrowserCopySelection? = null
@@ -1432,6 +1437,91 @@ class BrowserViewModel(
 
     private fun fileOperationBusy(): Boolean = mutableState.value.run {
         creatingDirectory || creatingFile || movingFile || copyingFile || renamingFile || deletingEntry || compressing
+    }
+
+    fun startDeepSearch(criteria: LocalSearchCriteria) {
+        if (deepSearchJob?.isActive == true) return
+        val root = mutableState.value.currentPath
+        mutableState.value = mutableState.value.copy(
+            deepSearchCriteria = criteria,
+            deepSearchResults = emptyList(),
+            deepSearchRunning = true,
+            deepSearchScannedDirectories = 0,
+            deepSearchScannedEntries = 0,
+            deepSearchSkippedDirectories = 0,
+            deepSearchTruncated = false,
+            deepSearchError = null,
+        )
+        deepSearchJob = viewModelScope.launch {
+            val taskId = operationTaskStore?.start(OperationTaskType.SEARCH, 1)
+            updateTask(taskId, OperationTaskState.RUNNING, 0)
+            try {
+                val result = withContext(ioDispatcher) {
+                    localSearchRepository.search(root, criteria, ::updateDeepSearchProgress)
+                }
+                when (result) {
+                    is OperationResult.Success -> {
+                        mutableState.value = mutableState.value.copy(
+                            deepSearchResults = result.value.entries,
+                            deepSearchRunning = false,
+                            deepSearchScannedDirectories = result.value.scannedDirectories,
+                            deepSearchScannedEntries = result.value.scannedEntries,
+                            deepSearchSkippedDirectories = result.value.skippedDirectories,
+                            deepSearchTruncated = result.value.truncated,
+                        )
+                        updateTask(
+                            taskId, OperationTaskState.SUCCESS, 1,
+                            message = "找到 ${result.value.entries.size} 项",
+                        )
+                    }
+                    is OperationResult.Failure -> {
+                        mutableState.value = mutableState.value.copy(
+                            deepSearchRunning = false,
+                            deepSearchError = result.userMessage,
+                        )
+                        updateTask(taskId, OperationTaskState.FAILED, 0, 1, result.userMessage)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                mutableState.value = mutableState.value.copy(deepSearchRunning = false)
+                withContext(NonCancellable) {
+                    updateTask(taskId, OperationTaskState.CANCELLED, 0, message = "搜索已取消")
+                }
+                throw cancelled
+            }
+        }
+    }
+
+    private fun updateDeepSearchProgress(progress: LocalSearchProgress) {
+        mutableState.value = mutableState.value.copy(
+            deepSearchScannedDirectories = progress.scannedDirectories,
+            deepSearchScannedEntries = progress.scannedEntries,
+        )
+    }
+
+    fun cancelDeepSearch() {
+        deepSearchJob?.cancel()
+    }
+
+    fun clearDeepSearch() {
+        deepSearchJob?.cancel()
+        mutableState.value = mutableState.value.copy(
+            deepSearchCriteria = null,
+            deepSearchResults = emptyList(),
+            deepSearchRunning = false,
+            deepSearchScannedDirectories = 0,
+            deepSearchScannedEntries = 0,
+            deepSearchSkippedDirectories = 0,
+            deepSearchTruncated = false,
+            deepSearchError = null,
+        )
+    }
+
+    fun openDeepSearchResultLocation(entry: DirectoryEntry) {
+        val parentValue = entry.path.value.substringBeforeLast('/', "").ifEmpty { "/" }
+        val parent = RootPath.parse(parentValue).getOrElse { return }
+        clearDeepSearch()
+        openRoot(parent, parentValue)
     }
 
     private fun load(

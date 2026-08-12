@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -69,6 +70,8 @@ import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.tasks.OperationTaskState
+import com.iamxpp.isaver.search.LocalSearchCriteria
+import com.iamxpp.isaver.search.SearchEntryType
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.trash.TrashItemState
 import java.text.DateFormat
@@ -83,6 +86,10 @@ fun BrowserScreen(
     onForward: () -> Unit = {},
     onToggleCurrentBookmark: () -> Unit = {},
     onOpenBookmark: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit = {},
+    onStartDeepSearch: (LocalSearchCriteria) -> Unit = {},
+    onCancelDeepSearch: () -> Unit = {},
+    onClearDeepSearch: () -> Unit = {},
+    onOpenDeepSearchResultLocation: (DirectoryEntry) -> Unit = {},
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
@@ -151,6 +158,7 @@ fun BrowserScreen(
     var taskCenterVisible by remember { mutableStateOf(false) }
     var trashVisible by remember { mutableStateOf(false) }
     var bookmarksVisible by remember { mutableStateOf(false) }
+    var deepSearchVisible by remember { mutableStateOf(false) }
     var deleteEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var batchDeleteVisible by remember { mutableStateOf(false) }
 
@@ -244,6 +252,12 @@ fun BrowserScreen(
                         menuExpanded = false
                         bookmarksVisible = true
                     },
+                    onOpenDeepSearch = if (fileActionsEnabled && saveAction == null) {
+                        {
+                            menuExpanded = false
+                            deepSearchVisible = true
+                        }
+                    } else null,
                 )
             },
         )
@@ -527,6 +541,23 @@ fun BrowserScreen(
                 onOpenBookmark(it)
             },
             onDismiss = { bookmarksVisible = false },
+        )
+    }
+    if (deepSearchVisible) {
+        DeepSearchDialog(
+            state = state,
+            onStart = onStartDeepSearch,
+            onCancel = onCancelDeepSearch,
+            onOpenLocation = {
+                deepSearchVisible = false
+                onOpenDeepSearchResultLocation(it)
+            },
+            onDismiss = {
+                if (!state.deepSearchRunning) {
+                    deepSearchVisible = false
+                    onClearDeepSearch()
+                }
+            },
         )
     }
     when (remoteConnectionState) {
@@ -1181,6 +1212,169 @@ private fun BookmarkDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+@Composable
+private fun DeepSearchDialog(
+    state: BrowserUiState,
+    onStart: (LocalSearchCriteria) -> Unit,
+    onCancel: () -> Unit,
+    onOpenLocation: (DirectoryEntry) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var regularExpression by remember { mutableStateOf(false) }
+    var extension by remember { mutableStateOf("") }
+    var entryType by remember { mutableStateOf(SearchEntryType.ALL) }
+    var minimumMegabytes by remember { mutableStateOf("") }
+    var maximumMegabytes by remember { mutableStateOf("") }
+    var recentDays by remember { mutableStateOf("") }
+    val hasSearch = state.deepSearchCriteria != null
+    AlertDialog(
+        onDismissRequest = { if (!state.deepSearchRunning) onDismiss() },
+        title = { Text("深度搜索") },
+        text = {
+            Column {
+                Text(
+                    "范围：${state.currentPath.value}",
+                    color = ISaverSecondaryText,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!hasSearch) {
+                    TextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("名称") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            regularExpression = !regularExpression
+                        },
+                    ) {
+                        Checkbox(regularExpression, null)
+                        Text("正则表达式")
+                    }
+                    TextField(
+                        value = extension,
+                        onValueChange = { extension = it },
+                        label = { Text("扩展名，例如 txt") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        SearchEntryType.entries.forEach { type ->
+                            TextButton(
+                                onClick = { entryType = type },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(
+                                    when (type) {
+                                        SearchEntryType.ALL -> "全部"
+                                        SearchEntryType.FILE -> "文件"
+                                        SearchEntryType.DIRECTORY -> "文件夹"
+                                    },
+                                    color = if (entryType == type) ISaverBlue else ISaverSecondaryText,
+                                )
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth()) {
+                        TextField(
+                            value = minimumMegabytes,
+                            onValueChange = { minimumMegabytes = it.filter(Char::isDigit) },
+                            label = { Text("最小 MB") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        TextField(
+                            value = maximumMegabytes,
+                            onValueChange = { maximumMegabytes = it.filter(Char::isDigit) },
+                            label = { Text("最大 MB") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    TextField(
+                        value = recentDays,
+                        onValueChange = { recentDays = it.filter(Char::isDigit) },
+                        label = { Text("最近 N 天修改") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                } else {
+                    Text(
+                        "已扫描 ${state.deepSearchScannedDirectories} 个目录、${state.deepSearchScannedEntries} 个项目",
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    if (state.deepSearchRunning) {
+                        CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally).padding(16.dp))
+                    }
+                    state.deepSearchError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                    }
+                    if (!state.deepSearchRunning && state.deepSearchError == null) {
+                        val summary = buildString {
+                            append("找到 ${state.deepSearchResults.size} 项")
+                            if (state.deepSearchSkippedDirectories > 0) {
+                                append("，跳过 ${state.deepSearchSkippedDirectories} 个不可读目录")
+                            }
+                            if (state.deepSearchTruncated) append("，已达到扫描上限")
+                        }
+                        Text(summary, color = ISaverSecondaryText, modifier = Modifier.padding(top = 8.dp))
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                            items(state.deepSearchResults, key = { it.path.value }) { entry ->
+                                ListItem(
+                                    headlineContent = { Text(entry.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                                    supportingContent = {
+                                        Text(
+                                            entry.path.value.substringBeforeLast('/', "/"),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    modifier = Modifier.clickable { onOpenLocation(entry) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                state.deepSearchRunning -> TextButton(onClick = onCancel) { Text("取消搜索") }
+                hasSearch -> TextButton(onClick = onDismiss) { Text("关闭") }
+                else -> TextButton(
+                    onClick = {
+                        val bytesPerMegabyte = 1024L * 1024L
+                        val nowSeconds = System.currentTimeMillis() / 1_000L
+                        onStart(
+                            LocalSearchCriteria(
+                                query = query,
+                                regularExpression = regularExpression,
+                                extension = extension,
+                                entryType = entryType,
+                                minimumSizeBytes = minimumMegabytes.toLongOrNull()
+                                    ?.coerceAtMost(Long.MAX_VALUE / bytesPerMegabyte)?.times(bytesPerMegabyte),
+                                maximumSizeBytes = maximumMegabytes.toLongOrNull()
+                                    ?.coerceAtMost(Long.MAX_VALUE / bytesPerMegabyte)?.times(bytesPerMegabyte),
+                                modifiedAfterEpochSeconds = recentDays.toLongOrNull()
+                                    ?.let { nowSeconds - it.coerceAtMost(365_000L) * 86_400L },
+                            ),
+                        )
+                    },
+                ) { Text("开始") }
+            }
+        },
+        dismissButton = if (!state.deepSearchRunning && !hasSearch) {
+            { TextButton(onClick = onDismiss) { Text("取消") } }
+        } else null,
     )
 }
 
