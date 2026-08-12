@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             app.archiveRepository,
             app.recentRepository,
             rootExportRepository = app.rootExportRepository,
+            directoryShareRepository = app.directoryShareRepository,
             fileMoveRepository = app.fileMoveRepository,
             fileCopyRepository = app.fileCopyRepository,
             fileRenameRepository = app.fileRenameRepository,
@@ -560,6 +561,7 @@ internal class BrowserViewModelFactory(
     private val recentRepository: com.iamxpp.isaver.recent.RecentRepository? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val rootExportRepository: com.iamxpp.isaver.export.RootExportRepository? = null,
+    private val directoryShareRepository: com.iamxpp.isaver.archive.DirectoryShareRepository? = null,
     private val fileMoveRepository: com.iamxpp.isaver.fileops.FileMoveRepository? = null,
     private val fileCopyRepository: com.iamxpp.isaver.fileops.FileCopyRepository? = null,
     private val fileRenameRepository: com.iamxpp.isaver.fileops.FileRenameRepository? = null,
@@ -601,6 +603,7 @@ internal class BrowserViewModelFactory(
             shareFile = rootExportRepository?.let { repository -> repository::share } ?: { entry ->
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法分享文件")
             },
+            shareDirectory = directoryShareRepository?.let { repository -> repository::share },
             moveFile = fileMoveRepository?.let { repository ->
                 { entry, sourceDirectory, targetDirectory, conflictAction ->
                     repository.move(entry, sourceDirectory, targetDirectory, conflictAction)

@@ -3,6 +3,7 @@ package com.iamxpp.isaver.export
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
+import java.io.File
 
 class RootExportRepository(
     private val cache: RootExportCache,
@@ -22,6 +23,24 @@ class RootExportRepository(
             entry = entry,
             ttlMillis = ExternalFileRegistry.SHARE_TTL_MILLIS,
             failureMessage = "无法准备文件分享授权",
+        )
+    }
+
+    suspend fun shareLocalFile(
+        file: File,
+        displayName: String,
+        mimeType: String,
+    ): OperationResult<ExternalFileGrant> {
+        val cached = when (val result = cache.cacheLocalFile(file, displayName, mimeType)) {
+            is OperationResult.Failure -> return result
+            is OperationResult.Success -> result.value
+        }
+        return registry.issue(cached, ExternalFileRegistry.SHARE_TTL_MILLIS).fold(
+            onSuccess = { OperationResult.Success(it) },
+            onFailure = {
+                cache.discardNow(cached)
+                OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法准备文件分享授权")
+            },
         )
     }
 

@@ -1311,10 +1311,11 @@ class BrowserViewModelTest {
         assertTrue(vm.state.value.externalFilesToShare.isEmpty())
     }
 
-    @Test fun `multiple share rejects directories before export`() = runTest {
+    @Test fun `multiple share routes directories through archive share`() = runTest {
         val file = entry("first.txt", EntryType.FILE)
         val directory = entry("folder", EntryType.DIRECTORY)
         var exportCalls = 0
+        val grant = ExternalFileGrant("content://test/archive", "aa".repeat(32), "iSaver-share.zip", "application/zip")
         val vm = BrowserViewModel(
             FakeFileSystem { OperationResult.Success(emptyList()) },
             StandardTestDispatcher(testScheduler),
@@ -1322,6 +1323,10 @@ class BrowserViewModelTest {
             shareFile = {
                 exportCalls += 1
                 error("must not export")
+            },
+            shareDirectory = { entries ->
+                assertEquals(listOf(file, directory), entries)
+                OperationResult.Success(grant)
             },
         )
         vm.selectEntry(file)
@@ -1331,7 +1336,7 @@ class BrowserViewModelTest {
         advanceUntilIdle()
 
         assertEquals(0, exportCalls)
-        assertEquals(ErrorCode.SOURCE_UNREADABLE, vm.state.value.fileShareError?.code)
+        assertEquals(grant, vm.state.value.externalFileToShare)
     }
 
     @Test fun `multiple share failure revokes grants prepared before the failure`() = runTest {

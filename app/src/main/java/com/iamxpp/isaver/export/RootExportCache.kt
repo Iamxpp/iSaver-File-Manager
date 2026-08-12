@@ -103,6 +103,55 @@ class RootExportCache internal constructor(
             }
         }
 
+    suspend fun cacheLocalFile(
+        source: File,
+        displayName: String,
+        mimeType: String,
+    ): OperationResult<CachedExportFile> = withContext(ioDispatcher) {
+        if (Files.isSymbolicLink(source.toPath())) return@withContext sourceUnreadable()
+        val sourceFile = try { source.canonicalFile } catch (_: IOException) { return@withContext cacheFailure() }
+        if (!sourceFile.isFile || !ensureExportDirectory()) return@withContext cacheFailure()
+        val uuid = uuidFactory().toString()
+        val stage = File(exportDir, "$uuid.tmp")
+        val target = File(exportDir, "$uuid.export")
+        try {
+            if (!stage.createNewFile()) return@withContext cacheFailure()
+            sourceFile.inputStream().use { input ->
+                stage.outputStream().use { output -> input.copyTo(output) }
+            }
+            val sourceSize = sourceFile.length()
+            val identity = identityOf(stage)
+            if (!identity.regularFile || identity.sizeBytes != sourceSize) {
+                discardStage(stage)
+                return@withContext cacheFailure()
+            }
+            atomicMove(stage, target)
+            val targetIdentity = identityOf(target)
+            if (!targetIdentity.regularFile || targetIdentity.sizeBytes != sourceSize) {
+                discardStage(target)
+                return@withContext cacheFailure()
+            }
+            OperationResult.Success(
+                CachedExportFile(
+                    file = target,
+                    sizeBytes = targetIdentity.sizeBytes,
+                    device = targetIdentity.device,
+                    inode = targetIdentity.inode,
+                    displayName = displayName,
+                    mimeType = mimeType,
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            discardStage(stage)
+            discardStage(target)
+            throw cancelled
+        } catch (_: Exception) {
+            discardStage(stage)
+            discardStage(target)
+            cacheFailure()
+        }
+    }
+
     fun validateNow(cached: CachedExportFile): Boolean {
         val candidate = try {
             cached.file.canonicalFile

@@ -65,6 +65,7 @@ class BrowserViewModel(
     private val shareFile: suspend (DirectoryEntry) -> OperationResult<ExternalFileGrant> = {
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法分享文件")
     },
+    private val shareDirectory: (suspend (List<DirectoryEntry>) -> OperationResult<ExternalFileGrant>)? = null,
     private val moveFile: suspend (DirectoryEntry, RootPath, RootPath, ConflictAction) -> OperationResult<DirectoryEntry> = { _, _, _, _ ->
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法移动文件")
     },
@@ -376,14 +377,11 @@ class BrowserViewModel(
     private fun shareEntries(entries: List<DirectoryEntry>) {
         val request = cancelExternalShare()
         cancelExternalOpen()
-        if (
-            entries.isEmpty() ||
-            entries.any { it.type != EntryType.FILE || !it.readable || it.symbolicLink }
-        ) {
+        if (entries.isEmpty() || entries.any { it.type == EntryType.OTHER || !it.readable || it.symbolicLink }) {
             mutableState.value = mutableState.value.copy(
                 fileShareError = BrowserOperationError(
                     ErrorCode.SOURCE_UNREADABLE,
-                    if (entries.size > 1) "多文件分享不能包含目录或不可读项目" else "无法分享此文件",
+                    if (entries.size > 1) "无法分享选中的项目" else "无法分享此项目",
                 ),
             )
             return
@@ -396,19 +394,38 @@ class BrowserViewModel(
         shareFileJob = viewModelScope.launch {
             val grants = mutableListOf<ExternalFileGrant>()
             try {
-                for (entry in entries) {
-                    when (val result = shareFile(entry)) {
+                val directoryShareResult = if (entries.any { it.type == EntryType.DIRECTORY }) {
+                    shareDirectory?.invoke(entries)
+                        ?: OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法准备目录分享")
+                } else null
+                if (directoryShareResult != null) {
+                    when (directoryShareResult) {
                         is OperationResult.Failure -> {
-                            grants.forEach(revokeExport)
                             if (request == shareFileGeneration) {
                                 mutableState.value = mutableState.value.copy(
                                     sharingFile = false,
-                                    fileShareError = BrowserOperationError(result.code, result.userMessage),
+                                    fileShareError = BrowserOperationError(directoryShareResult.code, directoryShareResult.userMessage),
                                 )
                             }
                             return@launch
                         }
-                        is OperationResult.Success -> grants += result.value
+                        is OperationResult.Success -> grants += directoryShareResult.value
+                    }
+                } else {
+                    for (entry in entries) {
+                        when (val result = shareFile(entry)) {
+                            is OperationResult.Failure -> {
+                                grants.forEach(revokeExport)
+                                if (request == shareFileGeneration) {
+                                    mutableState.value = mutableState.value.copy(
+                                        sharingFile = false,
+                                        fileShareError = BrowserOperationError(result.code, result.userMessage),
+                                    )
+                                }
+                                return@launch
+                            }
+                            is OperationResult.Success -> grants += result.value
+                        }
                     }
                 }
                 if (request != shareFileGeneration) {

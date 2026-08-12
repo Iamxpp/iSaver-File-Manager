@@ -30,6 +30,7 @@ import com.iamxpp.isaver.transfer.RootFileTransferRepository
 import com.iamxpp.isaver.transfer.TargetNameResolver
 import com.iamxpp.isaver.transfer.TransferDependencies
 import com.iamxpp.isaver.archive.ArchiveRepository
+import com.iamxpp.isaver.archive.DirectoryShareRepository
 import com.iamxpp.isaver.archive.LocalArchiveEngine
 import com.iamxpp.isaver.export.ExternalFileRegistry
 import com.iamxpp.isaver.export.MimeResolver
@@ -186,6 +187,9 @@ class ISaverApplication : Application() {
             registry = externalFileRegistry,
             mimeResolver = MimeResolver(),
         )
+    }
+    internal val directoryShareRepository: DirectoryShareRepository by lazy {
+        DirectoryShareRepository(archiveRepository, rootExportRepository)
     }
     internal val trashRepository: TrashRepository by lazy { TrashRepository(rootFileSystem, database.trashItemDao()) }
     internal val fileMoveRepository: FileMoveRepository by lazy {

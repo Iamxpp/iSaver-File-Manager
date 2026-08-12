@@ -46,6 +46,42 @@ class ArchiveRepository(
     private val incomingDir = File(cacheDir, "incoming")
     private val extractionDir = File(cacheDir, "archive-extract")
 
+    suspend fun createZipCache(sources: List<DirectoryEntry>): OperationResult<File> {
+        if (sources.isEmpty()) return OperationResult.Failure(ErrorCode.SOURCE_UNREADABLE, "压缩源为空")
+        val localSources = mutableListOf<LocalArchiveSource>()
+        val sourceCaches = mutableListOf<File>()
+        val archiveFile = newIncomingFile()
+        return try {
+            for (entry in sources) {
+                when (val collected = collectSource(entry, entry.name, localSources, sourceCaches)) {
+                    is OperationResult.Failure -> {
+                        archiveFile.delete()
+                        return collected
+                    }
+                    is OperationResult.Success -> Unit
+                }
+            }
+            localEngine.createZip(localSources, archiveFile).fold(
+                onSuccess = { OperationResult.Success(archiveFile) },
+                onFailure = {
+                    archiveFile.delete()
+                    OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法创建分享压缩包")
+                },
+            )
+        } catch (cancelled: CancellationException) {
+            archiveFile.delete()
+            throw cancelled
+        } finally {
+            sourceCaches.forEach(File::delete)
+        }
+    }
+
+    fun discardArchiveCache(file: File) {
+        val directory = runCatching { incomingDir.canonicalFile }.getOrNull() ?: return
+        val candidate = runCatching { file.canonicalFile }.getOrNull() ?: return
+        if (candidate.parentFile == directory && ARCHIVE_CACHE_NAME.matches(candidate.name)) candidate.delete()
+    }
+
     fun createZip(
         sources: List<DirectoryEntry>,
         targetDirectory: RootPath,
@@ -376,5 +412,6 @@ class ArchiveRepository(
 
     private companion object {
         const val MAX_EXTRACTION_NAME_ATTEMPTS = 100
+        val ARCHIVE_CACHE_NAME = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\\.tmp")
     }
 }
