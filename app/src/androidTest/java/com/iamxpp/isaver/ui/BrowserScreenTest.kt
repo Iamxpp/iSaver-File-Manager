@@ -101,6 +101,34 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun multipleSelectionForwardsMoveAndCopyFromSelectionBar() {
+        val first = entry("first.txt", EntryType.FILE)
+        val second = entry("second.pdf", EntryType.FILE)
+        var moved = false
+        var copied = false
+        compose.setContent {
+            BrowserScreen(
+                state = state(
+                    entries = listOf(first, second),
+                    allEntries = listOf(first, second),
+                    selectedEntries = setOf(first, second),
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onMoveSelection = { moved = true },
+                onCopySelection = { copied = true },
+            )
+        }
+
+        compose.onNodeWithText("移动到").performClick()
+        compose.onNodeWithText("复制到").performClick()
+
+        compose.runOnIdle {
+            assertTrue(moved)
+            assertTrue(copied)
+        }
+    }
+
+    @Test
     fun longPressFileForwardsMoveFromActionSheet() {
         val file = entry("report.pdf", EntryType.FILE)
         var moved: DirectoryEntry? = null

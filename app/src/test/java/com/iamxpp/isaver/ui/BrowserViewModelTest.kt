@@ -1251,6 +1251,74 @@ class BrowserViewModelTest {
         assertEquals(BrowserMoveSelection(source, sourceDirectory), vm.state.value.moveSelection)
     }
 
+    @Test fun `multiple selected files move in directory order and report completed count`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
+        val second = entry("second.txt", EntryType.FILE, path = "${sourceDirectory.value}/second.txt")
+        val outputs = listOf(
+            entry("first.txt", EntryType.FILE, path = "${targetDirectory.value}/first.txt"),
+            entry("second.txt", EntryType.FILE, path = "${targetDirectory.value}/second.txt"),
+        )
+        val requests = mutableListOf<DirectoryEntry>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            moveFile = { selected, _, _ ->
+                requests += selected
+                OperationResult.Success(outputs[requests.lastIndex])
+            },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(second)
+        vm.selectEntry(first)
+
+        assertTrue(vm.beginMoveSelection())
+        assertEquals(listOf(first, second), vm.state.value.moveSelection?.entries)
+        vm.moveTo(targetDirectory)
+        advanceUntilIdle()
+
+        assertEquals(listOf(first, second), requests)
+        assertEquals(2, vm.state.value.moveCompletedCount)
+        assertEquals(2, vm.state.value.moveTotalCount)
+        assertEquals(outputs.last(), vm.state.value.movedOutput)
+        assertNull(vm.state.value.fileMoveError)
+    }
+
+    @Test fun `multiple move partial failure reports completed count without replay`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
+        val second = entry("second.txt", EntryType.FILE, path = "${sourceDirectory.value}/second.txt")
+        val output = entry("first.txt", EntryType.FILE, path = "${targetDirectory.value}/first.txt")
+        var calls = 0
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            moveFile = { _, _, _ ->
+                calls += 1
+                if (calls == 1) OperationResult.Success(output)
+                else OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+            },
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+
+        vm.beginMoveSelection()
+        vm.moveTo(targetDirectory)
+        advanceUntilIdle()
+
+        assertEquals(2, calls)
+        assertNull(vm.state.value.moveSelection)
+        assertEquals(output, vm.state.value.movedOutput)
+        assertEquals("已移动 1/2 项；目标位置已存在同名文件", vm.state.value.fileMoveError?.userMessage)
+    }
+
     @Test fun `single file rename emits renamed output and refreshes the current directory`() = runTest {
         val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
         val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
@@ -1326,6 +1394,29 @@ class BrowserViewModelTest {
         assertNull(vm.state.value.copySelection)
         assertEquals(output, vm.state.value.copiedOutput)
         assertTrue(vm.state.value.selectedEntries.isEmpty())
+    }
+
+    @Test fun `multiple selected files copy and restore the full selection when picker is cancelled`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
+        val second = entry("second.txt", EntryType.FILE, path = "${sourceDirectory.value}/second.txt")
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+
+        assertTrue(vm.beginCopySelection())
+        assertEquals(listOf(first, second), vm.state.value.copySelection?.entries)
+        assertTrue(vm.cancelCopy(restoreSelection = true))
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+
+        assertEquals(setOf(first, second), vm.state.value.selectedEntries)
     }
 
     @Test fun `copy to source directory stays in picker and never dispatches`() = runTest {

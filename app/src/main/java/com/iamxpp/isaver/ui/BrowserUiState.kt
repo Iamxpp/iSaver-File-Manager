@@ -40,10 +40,14 @@ data class BrowserUiState(
     val fileShareError: BrowserOperationError? = null,
     val moveSelection: BrowserMoveSelection? = null,
     val movingFile: Boolean = false,
+    val moveCompletedCount: Int = 0,
+    val moveTotalCount: Int = 0,
     val movedOutput: DirectoryEntry? = null,
     val fileMoveError: BrowserOperationError? = null,
     val copySelection: BrowserCopySelection? = null,
     val copyingFile: Boolean = false,
+    val copyCompletedCount: Int = 0,
+    val copyTotalCount: Int = 0,
     val copiedOutput: DirectoryEntry? = null,
     val fileCopyError: BrowserOperationError? = null,
     val renamingFile: Boolean = false,
@@ -58,14 +62,18 @@ data class BrowserUiState(
 }
 
 data class BrowserMoveSelection(
-    val entry: DirectoryEntry,
+    val entries: List<DirectoryEntry>,
     val sourceDirectory: RootPath,
-)
+) {
+    constructor(entry: DirectoryEntry, sourceDirectory: RootPath) : this(listOf(entry), sourceDirectory)
+}
 
 data class BrowserCopySelection(
-    val entry: DirectoryEntry,
+    val entries: List<DirectoryEntry>,
     val sourceDirectory: RootPath,
-)
+) {
+    constructor(entry: DirectoryEntry, sourceDirectory: RootPath) : this(listOf(entry), sourceDirectory)
+}
 
 data class BrowserOperationError(
     val code: ErrorCode,

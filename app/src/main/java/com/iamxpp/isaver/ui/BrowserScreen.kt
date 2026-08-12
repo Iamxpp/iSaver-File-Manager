@@ -89,8 +89,10 @@ fun BrowserScreen(
     onShareSelection: (() -> Unit)? = null,
     onDismissFileShareError: () -> Unit = {},
     onMoveEntry: ((DirectoryEntry) -> Unit)? = null,
+    onMoveSelection: (() -> Unit)? = null,
     onDismissFileMoveError: () -> Unit = {},
     onCopyEntry: ((DirectoryEntry) -> Unit)? = null,
+    onCopySelection: (() -> Unit)? = null,
     onDismissFileCopyError: () -> Unit = {},
     onRenameEntry: ((DirectoryEntry, String) -> Unit)? = null,
     onDismissFileRenameError: () -> Unit = {},
@@ -181,18 +183,36 @@ fun BrowserScreen(
             )
         }
         if (state.selectionMode) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("已选择 ${state.selectedEntries.size} 项", modifier = Modifier.weight(1f))
-                if (onShareSelection != null) {
-                    TextButton(
-                        enabled = !state.sharingFile,
-                        onClick = onShareSelection,
-                    ) { Text("分享") }
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("已选择 ${state.selectedEntries.size} 项", modifier = Modifier.weight(1f))
+                    TextButton(onClick = onClearSelection) { Text("清除") }
                 }
-                TextButton(onClick = onClearSelection) { Text("清除") }
+                if (onShareSelection != null || onMoveSelection != null || onCopySelection != null) {
+                    Row(Modifier.fillMaxWidth()) {
+                        onShareSelection?.let { share ->
+                            TextButton(
+                                enabled = !state.sharingFile,
+                                onClick = share,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("分享") }
+                        }
+                        onMoveSelection?.let { move ->
+                            TextButton(
+                                enabled = !state.movingFile,
+                                onClick = move,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("移动到") }
+                        }
+                        onCopySelection?.let { copy ->
+                            TextButton(
+                                enabled = !state.copyingFile,
+                                onClick = copy,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("复制到") }
+                        }
+                    }
+                }
             }
         }
         BrowserContent(
@@ -405,7 +425,14 @@ internal fun BrowserContent(
         }
         if (state.movingFile) {
             Text(
-                "正在安全移动文件",
+                "正在安全移动 ${state.moveCompletedCount}/${state.moveTotalCount} 项",
+                color = ISaverSecondaryText,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            )
+        }
+        if (state.copyingFile) {
+            Text(
+                "正在安全复制 ${state.copyCompletedCount}/${state.copyTotalCount} 项",
                 color = ISaverSecondaryText,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
             )

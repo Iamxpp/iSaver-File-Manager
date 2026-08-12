@@ -262,25 +262,32 @@ class BrowserViewModel(
     }
 
     fun beginMove(entry: DirectoryEntry): Boolean {
+        return beginMove(listOf(entry))
+    }
+
+    fun beginMoveSelection(): Boolean = beginMove(selectedEntriesInDirectoryOrder())
+
+    private fun beginMove(entries: List<DirectoryEntry>): Boolean {
         if (mutableState.value.movingFile || mutableState.value.copyingFile || mutableState.value.renamingFile) return false
         cancelExternalOpen()
         cancelExternalShare()
         if (
-            entry.type != EntryType.FILE ||
-            !entry.readable ||
-            entry.symbolicLink ||
+            entries.isEmpty() ||
+            entries.any { it.type != EntryType.FILE || !it.readable || it.symbolicLink } ||
             RootPathRiskPolicy.isProtected(mutableState.value.currentPath)
         ) {
             mutableState.value = mutableState.value.copy(
                 fileMoveError = BrowserOperationError(
                     ErrorCode.SOURCE_UNREADABLE,
-                    "当前仅支持移动单个普通文件",
+                    "当前仅支持移动选中的普通文件",
                 ),
             )
             return false
         }
         mutableState.value = mutableState.value.copy(
-            moveSelection = BrowserMoveSelection(entry, mutableState.value.currentPath),
+            moveSelection = BrowserMoveSelection(entries, mutableState.value.currentPath),
+            moveCompletedCount = 0,
+            moveTotalCount = entries.size,
             movedOutput = null,
             fileMoveError = null,
         )
@@ -298,31 +305,54 @@ class BrowserViewModel(
         }
         mutableState.value = mutableState.value.copy(
             movingFile = true,
+            moveCompletedCount = 0,
+            moveTotalCount = selection.entries.size,
             movedOutput = null,
             fileMoveError = null,
         )
         moveFileJob = viewModelScope.launch {
             try {
-                when (
-                    val result = withContext(ioDispatcher) {
-                        moveFile(selection.entry, selection.sourceDirectory, targetDirectory)
-                    }
-                ) {
-                    is OperationResult.Failure -> mutableState.value = mutableState.value.copy(
-                        movingFile = false,
-                        fileMoveError = BrowserOperationError(result.code, result.userMessage),
-                    )
-                    is OperationResult.Success -> {
-                        mutableState.value = mutableState.value.copy(
-                            selectedEntries = emptySet(),
-                            moveSelection = null,
-                            movingFile = false,
-                            movedOutput = result.value,
-                            fileMoveError = null,
-                        )
-                        recordSuccessfulFileAccess(result.value)
+                val completed = mutableListOf<DirectoryEntry>()
+                for (entry in selection.entries) {
+                    when (
+                        val result = withContext(ioDispatcher) {
+                            moveFile(entry, selection.sourceDirectory, targetDirectory)
+                        }
+                    ) {
+                        is OperationResult.Failure -> {
+                            mutableState.value = if (completed.isEmpty()) {
+                                mutableState.value.copy(
+                                    movingFile = false,
+                                    fileMoveError = BrowserOperationError(result.code, result.userMessage),
+                                )
+                            } else {
+                                mutableState.value.copy(
+                                    selectedEntries = emptySet(),
+                                    moveSelection = null,
+                                    movingFile = false,
+                                    movedOutput = completed.last(),
+                                    fileMoveError = BrowserOperationError(
+                                        result.code,
+                                        "已移动 ${completed.size}/${selection.entries.size} 项；${result.userMessage}",
+                                    ),
+                                )
+                            }
+                            return@launch
+                        }
+                        is OperationResult.Success -> {
+                            completed += result.value
+                            mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
+                            recordSuccessfulFileAccess(result.value)
+                        }
                     }
                 }
+                mutableState.value = mutableState.value.copy(
+                    selectedEntries = emptySet(),
+                    moveSelection = null,
+                    movingFile = false,
+                    movedOutput = completed.last(),
+                    fileMoveError = null,
+                )
             } catch (cancelled: CancellationException) {
                 mutableState.value = mutableState.value.copy(movingFile = false)
                 throw cancelled
@@ -356,24 +386,31 @@ class BrowserViewModel(
     }
 
     fun beginCopy(entry: DirectoryEntry): Boolean {
+        return beginCopy(listOf(entry))
+    }
+
+    fun beginCopySelection(): Boolean = beginCopy(selectedEntriesInDirectoryOrder())
+
+    private fun beginCopy(entries: List<DirectoryEntry>): Boolean {
         if (mutableState.value.copyingFile || mutableState.value.movingFile || mutableState.value.renamingFile) return false
         cancelExternalOpen()
         cancelExternalShare()
         if (
-            entry.type != EntryType.FILE ||
-            !entry.readable ||
-            entry.symbolicLink
+            entries.isEmpty() ||
+            entries.any { it.type != EntryType.FILE || !it.readable || it.symbolicLink }
         ) {
             mutableState.value = mutableState.value.copy(
                 fileCopyError = BrowserOperationError(
                     ErrorCode.SOURCE_UNREADABLE,
-                    "当前仅支持复制单个普通文件",
+                    "当前仅支持复制选中的普通文件",
                 ),
             )
             return false
         }
         mutableState.value = mutableState.value.copy(
-            copySelection = BrowserCopySelection(entry, mutableState.value.currentPath),
+            copySelection = BrowserCopySelection(entries, mutableState.value.currentPath),
+            copyCompletedCount = 0,
+            copyTotalCount = entries.size,
             copiedOutput = null,
             fileCopyError = null,
         )
@@ -391,31 +428,54 @@ class BrowserViewModel(
         }
         mutableState.value = mutableState.value.copy(
             copyingFile = true,
+            copyCompletedCount = 0,
+            copyTotalCount = selection.entries.size,
             copiedOutput = null,
             fileCopyError = null,
         )
         copyFileJob = viewModelScope.launch {
             try {
-                when (
-                    val result = withContext(ioDispatcher) {
-                        copyFile(selection.entry, selection.sourceDirectory, targetDirectory)
-                    }
-                ) {
-                    is OperationResult.Failure -> mutableState.value = mutableState.value.copy(
-                        copyingFile = false,
-                        fileCopyError = BrowserOperationError(result.code, result.userMessage),
-                    )
-                    is OperationResult.Success -> {
-                        mutableState.value = mutableState.value.copy(
-                            selectedEntries = emptySet(),
-                            copySelection = null,
-                            copyingFile = false,
-                            copiedOutput = result.value,
-                            fileCopyError = null,
-                        )
-                        recordSuccessfulFileAccess(result.value)
+                val completed = mutableListOf<DirectoryEntry>()
+                for (entry in selection.entries) {
+                    when (
+                        val result = withContext(ioDispatcher) {
+                            copyFile(entry, selection.sourceDirectory, targetDirectory)
+                        }
+                    ) {
+                        is OperationResult.Failure -> {
+                            mutableState.value = if (completed.isEmpty()) {
+                                mutableState.value.copy(
+                                    copyingFile = false,
+                                    fileCopyError = BrowserOperationError(result.code, result.userMessage),
+                                )
+                            } else {
+                                mutableState.value.copy(
+                                    selectedEntries = emptySet(),
+                                    copySelection = null,
+                                    copyingFile = false,
+                                    copiedOutput = completed.last(),
+                                    fileCopyError = BrowserOperationError(
+                                        result.code,
+                                        "已复制 ${completed.size}/${selection.entries.size} 项；${result.userMessage}",
+                                    ),
+                                )
+                            }
+                            return@launch
+                        }
+                        is OperationResult.Success -> {
+                            completed += result.value
+                            mutableState.value = mutableState.value.copy(copyCompletedCount = completed.size)
+                            recordSuccessfulFileAccess(result.value)
+                        }
                     }
                 }
+                mutableState.value = mutableState.value.copy(
+                    selectedEntries = emptySet(),
+                    copySelection = null,
+                    copyingFile = false,
+                    copiedOutput = completed.last(),
+                    fileCopyError = null,
+                )
             } catch (cancelled: CancellationException) {
                 mutableState.value = mutableState.value.copy(copyingFile = false)
                 throw cancelled
@@ -666,15 +726,19 @@ class BrowserViewModel(
             displayMode = previousState.displayMode,
             sortSpec = previousState.sortSpec,
             searchQuery = previousState.searchQuery,
-            selectedEntries = (restoredSelection?.entry ?: restoredCopySelection?.entry)
-                ?.let(::setOf)
-                .orEmpty(),
+            selectedEntries = restoredSelection?.entries?.toSet()
+                ?: restoredCopySelection?.entries?.toSet()
+                ?: emptySet(),
             moveSelection = previousState.moveSelection,
             movingFile = previousState.movingFile,
+            moveCompletedCount = previousState.moveCompletedCount,
+            moveTotalCount = previousState.moveTotalCount,
             movedOutput = previousState.movedOutput,
             fileMoveError = previousState.fileMoveError,
             copySelection = previousState.copySelection,
             copyingFile = previousState.copyingFile,
+            copyCompletedCount = previousState.copyCompletedCount,
+            copyTotalCount = previousState.copyTotalCount,
             copiedOutput = previousState.copiedOutput,
             fileCopyError = previousState.fileCopyError,
             renamingFile = previousState.renamingFile,
@@ -886,6 +950,11 @@ class BrowserViewModel(
         path == selectedRootPath && path.value == "/" -> "/"
         path == selectedRootPath -> mutableState.value.rootTitle
         else -> path.value.substringAfterLast('/').ifEmpty { "/" }
+    }
+
+    private fun selectedEntriesInDirectoryOrder(): List<DirectoryEntry> {
+        val selected = mutableState.value.selectedEntries
+        return mutableState.value.allEntries.filter { it in selected }
     }
 
     private fun resetPresentationWindow() {

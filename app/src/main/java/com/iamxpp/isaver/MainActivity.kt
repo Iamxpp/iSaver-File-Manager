@@ -208,14 +208,24 @@ class MainActivity : ComponentActivity() {
                         val output = browserState.movedOutput ?: return@LaunchedEffect
                         homeViewModel.completeMove(browserState.currentPath, browserState.rootTitle)
                         browserViewModel.consumeMovedOutput()
-                        Toast.makeText(this@MainActivity, "已移动 ${output.name}", Toast.LENGTH_SHORT).show()
+                        val message = if (browserState.moveTotalCount > 1) {
+                            "已移动 ${browserState.moveCompletedCount}/${browserState.moveTotalCount} 项"
+                        } else {
+                            "已移动 ${output.name}"
+                        }
+                        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
                     }
 
                     LaunchedEffect(browserState.copiedOutput) {
                         val output = browserState.copiedOutput ?: return@LaunchedEffect
                         homeViewModel.completeCopy(browserState.currentPath, browserState.rootTitle)
                         browserViewModel.consumeCopiedOutput()
-                        Toast.makeText(this@MainActivity, "已复制 ${output.name}", Toast.LENGTH_SHORT).show()
+                        val message = if (browserState.copyTotalCount > 1) {
+                            "已复制 ${browserState.copyCompletedCount}/${browserState.copyTotalCount} 项"
+                        } else {
+                            "已复制 ${output.name}"
+                        }
+                        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
                     }
 
                     LaunchedEffect(browserState.renamedOutput) {
@@ -371,6 +381,11 @@ class MainActivity : ComponentActivity() {
                                 homeViewModel.chooseMoveTarget()
                             }
                         },
+                        onMoveBrowserSelection = {
+                            if (!pickerActive && browserViewModel.beginMoveSelection()) {
+                                homeViewModel.chooseMoveTarget()
+                            }
+                        },
                         onMoveHere = {
                             val move = homeState.destination as? HomeDestination.MoveTarget
                             if (
@@ -384,6 +399,11 @@ class MainActivity : ComponentActivity() {
                         onDismissFileMoveError = browserViewModel::dismissFileMoveError,
                         onCopyBrowserEntry = { entry ->
                             if (!pickerActive && !movePickerActive && browserViewModel.beginCopy(entry)) {
+                                homeViewModel.chooseCopyTarget()
+                            }
+                        },
+                        onCopyBrowserSelection = {
+                            if (!pickerActive && !movePickerActive && browserViewModel.beginCopySelection()) {
                                 homeViewModel.chooseCopyTarget()
                             }
                         },
