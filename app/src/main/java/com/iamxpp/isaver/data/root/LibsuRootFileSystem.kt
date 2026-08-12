@@ -629,9 +629,17 @@ class LibsuRootFileSystem internal constructor(
         sourceDirectory: RootPath,
         targetName: EntryName,
     ): OperationResult<DirectoryEntry> {
+        return renameEntryNoReplace(source, sourceDirectory, targetName)
+    }
+
+    override suspend fun renameEntryNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> {
         val sourceName = EntryName.parse(source.name).getOrElse { return invalidRenameSource() }
         if (
-            source.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            source.type == com.iamxpp.isaver.domain.EntryType.OTHER ||
             source.symbolicLink ||
             !source.readable ||
             source.path != EntryName.join(sourceDirectory, sourceName) ||
@@ -647,10 +655,11 @@ class LibsuRootFileSystem internal constructor(
         val currentSource = stat(source.path)
         if (
             currentSource !is OperationResult.Success ||
-            currentSource.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            currentSource.value.type != source.type ||
             currentSource.value.symbolicLink ||
             !currentSource.value.readable ||
-            currentSource.value.sizeBytes != source.sizeBytes
+            (source.type == com.iamxpp.isaver.domain.EntryType.FILE &&
+                currentSource.value.sizeBytes != source.sizeBytes)
         ) return invalidRenameSource()
         val canonicalSource = canonicalize(source.path)
         if (canonicalSource !is OperationResult.Success || canonicalSource.value != expectedSource) {
@@ -660,7 +669,7 @@ class LibsuRootFileSystem internal constructor(
         if (sourceIdentity !is OperationResult.Success) return sourceIdentity as OperationResult.Failure
         val targetPath = EntryName.join(prepared.canonical, targetName)
         when (val target = stat(targetPath)) {
-            is OperationResult.Success -> return failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件", "Rename target already existed")
+            is OperationResult.Success -> return failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名项目", "Rename target already existed")
             is OperationResult.Failure -> if (target.code != ErrorCode.NOT_FOUND) return target
         }
         currentCoroutineContext().ensureActive()
@@ -676,7 +685,7 @@ class LibsuRootFileSystem internal constructor(
             helperOperationTimeoutMillis,
         ).getOrElse { return uncertainRename("Rename helper exceeded its bounded deadline or lost its result") }
         if (execution.exitCode != 0) {
-            return mapExitCode(execution.exitCode, execution.stderr, "无法重命名文件", "rename-noreplace")
+            return mapExitCode(execution.exitCode, execution.stderr, "无法重命名项目", "rename-noreplace")
         }
         val renamedIdentity = RootFileIdentity.parse(execution.stdout).getOrElse {
             return uncertainRename("Rename helper returned malformed identity")
@@ -688,9 +697,10 @@ class LibsuRootFileSystem internal constructor(
         val actualIdentity = readIdentity(targetPath)
         if (
             renamed !is OperationResult.Success ||
-            renamed.value.type != com.iamxpp.isaver.domain.EntryType.FILE ||
+            renamed.value.type != source.type ||
             renamed.value.symbolicLink ||
-            renamed.value.sizeBytes != source.sizeBytes ||
+            (source.type == com.iamxpp.isaver.domain.EntryType.FILE &&
+                renamed.value.sizeBytes != source.sizeBytes) ||
             old !is OperationResult.Failure || old.code != ErrorCode.NOT_FOUND ||
             parentAfter !is OperationResult.Success || parentAfter.value != prepared.canonical ||
             actualIdentity !is OperationResult.Success || actualIdentity.value != sourceIdentity.value

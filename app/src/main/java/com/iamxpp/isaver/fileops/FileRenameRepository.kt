@@ -12,7 +12,7 @@ import com.iamxpp.isaver.domain.RootPathRiskPolicy
 class FileRenameRepository internal constructor(
     private val renameFile: suspend (DirectoryEntry, RootPath, EntryName) -> OperationResult<DirectoryEntry>,
 ) {
-    constructor(fileSystem: RootFileSystem) : this(fileSystem::renameFileNoReplace)
+    constructor(fileSystem: RootFileSystem) : this(fileSystem::renameEntryNoReplace)
 
     suspend fun rename(
         source: DirectoryEntry,
@@ -24,10 +24,10 @@ class FileRenameRepository internal constructor(
             return OperationResult.Failure(ErrorCode.COMMAND_FAILED, "文件名无效")
         }
         if (
-            source.type != EntryType.FILE ||
+            source.type == EntryType.OTHER ||
             !source.readable ||
             source.symbolicLink ||
-            source.sizeBytes == null ||
+            (source.type == EntryType.FILE && source.sizeBytes == null) ||
             source.path != EntryName.join(sourceDirectory, name)
         ) {
             return invalidSource()
@@ -43,6 +43,6 @@ class FileRenameRepository internal constructor(
 
     private fun invalidSource() = OperationResult.Failure(
         ErrorCode.SOURCE_UNREADABLE,
-        "当前仅支持重命名单个普通文件",
+        "无法重命名此项目",
     )
 }

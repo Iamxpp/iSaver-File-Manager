@@ -110,6 +110,29 @@ class RootFileMoveInstrumentedTest {
         }
     }
 
+    @Test
+    fun renameDirectoryIsAtomicNoReplaceAndPreservesTree() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        resetRenameTargets(app)
+        try {
+            root(app, "mkdir -p -- ${quote(RENAME_SOURCE_DIRECTORY + "/child")}")
+            root(app, "printf %s nested > ${quote(RENAME_SOURCE_DIRECTORY + "/child/value.txt")}")
+            val sourceIdentity = root(app, "stat -c %d:%i -- ${quote(RENAME_SOURCE_DIRECTORY)}")
+
+            val renamed = app.fileRenameRepository.rename(
+                stat(app, RENAME_SOURCE_DIRECTORY), path(RENAME_DIRECTORY), "renamed-folder",
+            )
+
+            assertTrue(renamed.toString(), renamed is OperationResult.Success)
+            assertEquals(sourceIdentity, root(app, "stat -c %d:%i -- ${quote(RENAME_TARGET_DIRECTORY)}"))
+            assertEquals("nested", root(app, "cat -- ${quote(RENAME_TARGET_DIRECTORY + "/child/value.txt")}"))
+            assertEquals("missing", root(app, "test ! -e ${quote(RENAME_SOURCE_DIRECTORY)} && echo missing"))
+        } finally {
+            cleanupRenameTargets(app)
+        }
+    }
+
     private suspend fun resetTargets(app: ISaverApplication) {
         cleanupTargets(app)
         root(
@@ -162,5 +185,7 @@ class RootFileMoveInstrumentedTest {
         const val RENAME_DIRECTORY = "$RENAME_ROOT/source"
         const val RENAME_SOURCE_FILE = "$RENAME_DIRECTORY/report.txt"
         const val RENAME_TARGET_FILE = "$RENAME_DIRECTORY/renamed.txt"
+        const val RENAME_SOURCE_DIRECTORY = "$RENAME_DIRECTORY/folder"
+        const val RENAME_TARGET_DIRECTORY = "$RENAME_DIRECTORY/renamed-folder"
     }
 }

@@ -293,7 +293,7 @@ fun BrowserScreen(
             moveEnabled = !state.movingFile,
             copyVisible = onCopyEntry != null && entry.type != EntryType.OTHER,
              copyEnabled = !state.copyingFile,
-             renameVisible = onRenameEntry != null && entry.type == EntryType.FILE,
+             renameVisible = onRenameEntry != null && entry.type != EntryType.OTHER,
              renameEnabled = !state.renamingFile,
             compressVisible = onCompress != null,
             onShare = {
@@ -562,7 +562,7 @@ private fun FileActionsSheet(
             if (renameVisible) {
                 FileActionRow(
                     title = "重命名",
-                    description = "修改文件名称",
+                    description = "修改项目名称",
                     enabled = renameEnabled,
                     onClick = onRename,
                 )

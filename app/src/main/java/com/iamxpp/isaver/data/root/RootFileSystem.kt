@@ -86,6 +86,12 @@ interface RootFileSystem {
         targetName: EntryName,
     ): OperationResult<DirectoryEntry> = unsupportedRename()
 
+    suspend fun renameEntryNoReplace(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        targetName: EntryName,
+    ): OperationResult<DirectoryEntry> = renameFileNoReplace(source, sourceDirectory, targetName)
+
     suspend fun copyFileNoReplace(
         source: DirectoryEntry,
         sourceDirectory: RootPath,

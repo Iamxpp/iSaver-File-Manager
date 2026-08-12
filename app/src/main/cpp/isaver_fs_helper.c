@@ -1676,7 +1676,7 @@ static int rename_noreplace(int argc, char **argv) {
         close(parent_fd);
         return result;
     }
-    if (!S_ISREG(source_status.st_mode) ||
+    if ((!S_ISREG(source_status.st_mode) && !S_ISDIR(source_status.st_mode)) ||
         !identity_matches(&source_status, source_device, source_inode)) {
         close(parent_fd);
         return X_SOURCE_CHANGED;
@@ -1699,7 +1699,8 @@ static int rename_noreplace(int argc, char **argv) {
     struct stat renamed_status;
     struct stat source_after;
     if (retry_fstatat(parent_fd, argv[9], &renamed_status, AT_SYMLINK_NOFOLLOW) != 0 ||
-        !S_ISREG(renamed_status.st_mode) ||
+        ((S_ISREG(source_status.st_mode) && !S_ISREG(renamed_status.st_mode)) ||
+        (S_ISDIR(source_status.st_mode) && !S_ISDIR(renamed_status.st_mode))) ||
         !identity_matches(&renamed_status, source_device, source_inode)) {
         close(parent_fd);
         return X_OUTCOME_UNCERTAIN;

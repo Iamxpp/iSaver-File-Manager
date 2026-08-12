@@ -90,6 +90,26 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun longPressDirectoryForwardsRenameFromActionSheet() {
+        val directory = entry("folder", EntryType.DIRECTORY)
+        var renamed: Pair<DirectoryEntry, String>? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(directory)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onRenameEntry = { entry, name -> renamed = entry to name },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：folder").performTouchInput { longClick() }
+        compose.onNodeWithText("重命名").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("新文件名").performTextReplacement("renamed-folder")
+        compose.onNodeWithText("确定").performClick()
+
+        compose.runOnIdle { assertEquals(directory to "renamed-folder", renamed) }
+    }
+
+    @Test
     fun longPressFileOpensActionSheetAndForwardsShare() {
         val file = entry("report.pdf", EntryType.FILE)
         var selected: DirectoryEntry? = null
