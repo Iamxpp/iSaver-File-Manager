@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
             operationTaskStore = app.operationTaskRepository,
             trashRepository = app.trashRepository,
             checksumFile = app.fileChecksumRepository::sha256,
+            checksumFileByAlgorithm = { entry, algorithm -> app.fileChecksumRepository.checksum(entry, algorithm) },
             bookmarkRepository = app.bookmarkRepository,
             previewRepository = RootPreviewRepository(app.rootFileSystem),
         )
@@ -406,7 +407,8 @@ class MainActivity : ComponentActivity() {
                         onClearBrowserSelection = browserViewModel::clearSelection,
                         onDismissFileInfo = browserViewModel::dismissFileInfo,
                         onShowFileInfo = browserViewModel::showFileInfo,
-                        onCalculateSha256 = browserViewModel::calculateSha256,
+                        onCalculateChecksum = browserViewModel::calculateSelectedChecksum,
+                        onChecksumAlgorithmChange = browserViewModel::setChecksumAlgorithm,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onDismissPreview = browserViewModel::dismissPreview,
                         onShareBrowserEntry = browserViewModel::shareEntry,
@@ -575,6 +577,10 @@ internal class BrowserViewModelFactory(
     private val checksumFile: suspend (com.iamxpp.isaver.domain.DirectoryEntry) -> OperationResult<String> = {
         OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法计算校验和")
     },
+    private val checksumFileByAlgorithm: suspend (com.iamxpp.isaver.domain.DirectoryEntry, com.iamxpp.isaver.fileops.ChecksumAlgorithm) -> OperationResult<String> = { entry, algorithm ->
+        if (algorithm == com.iamxpp.isaver.fileops.ChecksumAlgorithm.SHA256) checksumFile(entry)
+        else OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "不支持此校验算法")
+    },
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -628,6 +634,7 @@ internal class BrowserViewModelFactory(
             operationTaskStore = operationTaskStore,
             trashRepository = trashRepository,
             checksumFile = checksumFile,
+            checksumFileByAlgorithm = checksumFileByAlgorithm,
             bookmarkRepository = bookmarkRepository,
             previewRepository = previewRepository ?: RootPreviewRepository(fileSystem),
         ) as T

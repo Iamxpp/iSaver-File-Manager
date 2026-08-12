@@ -23,6 +23,7 @@ import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenameExecutor
 import com.iamxpp.isaver.fileops.BatchRenamePlanner
 import com.iamxpp.isaver.fileops.BatchRenameRule
+import com.iamxpp.isaver.fileops.ChecksumAlgorithm
 import com.iamxpp.isaver.fileops.FileChecksumRepository
 import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.search.LocalSearchProgress
@@ -81,6 +82,10 @@ class BrowserViewModel(
     private val trashRepository: TrashRepository? = null,
     private val checksumFile: suspend (DirectoryEntry) -> OperationResult<String> = {
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法计算校验和")
+    },
+    private val checksumFileByAlgorithm: suspend (DirectoryEntry, ChecksumAlgorithm) -> OperationResult<String> = { entry, algorithm ->
+        if (algorithm == ChecksumAlgorithm.SHA256) checksumFile(entry)
+        else OperationResult.Failure(ErrorCode.COMMAND_FAILED, "不支持此校验算法")
     },
     private val bookmarkRepository: BookmarkRepository? = null,
     private val localSearchRepository: LocalSearchRepository = LocalSearchRepository(rootFileSystem),
@@ -251,6 +256,7 @@ class BrowserViewModel(
         mutableState.value = mutableState.value.copy(
             fileInfo = null, fileMetadata = null, fileMetadataLoading = false, fileMetadataError = null,
             checksumRunning = false, checksumValue = null, checksumError = null,
+            checksumAlgorithm = ChecksumAlgorithm.SHA256,
         )
     }
 
@@ -260,6 +266,7 @@ class BrowserViewModel(
         mutableState.value = mutableState.value.copy(
             fileInfo = entry, fileMetadata = null, fileMetadataLoading = true, fileMetadataError = null,
             checksumRunning = false, checksumValue = null, checksumError = null,
+            checksumAlgorithm = ChecksumAlgorithm.SHA256,
         )
         metadataJob = viewModelScope.launch {
             val metadata = withContext(ioDispatcher) { rootFileSystem.metadata(entry.path) }
@@ -300,16 +307,34 @@ class BrowserViewModel(
     )
 
     fun calculateSha256() {
+        calculateChecksum(ChecksumAlgorithm.SHA256)
+    }
+
+    fun calculateSelectedChecksum() {
+        calculateChecksum()
+    }
+
+    fun setChecksumAlgorithm(algorithm: ChecksumAlgorithm) {
+        if (mutableState.value.checksumRunning) return
+        mutableState.value = mutableState.value.copy(
+            checksumAlgorithm = algorithm,
+            checksumValue = null,
+            checksumError = null,
+        )
+    }
+
+    fun calculateChecksum(algorithm: ChecksumAlgorithm = mutableState.value.checksumAlgorithm) {
         val entry = mutableState.value.fileInfo ?: return
         if (entry.type != EntryType.FILE || mutableState.value.checksumRunning) return
         mutableState.value = mutableState.value.copy(
+            checksumAlgorithm = algorithm,
             checksumRunning = true, checksumValue = null, checksumError = null,
         )
         checksumJob = viewModelScope.launch {
             val taskId = operationTaskStore?.start(OperationTaskType.CHECKSUM, 1, entry.sizeBytes)
             updateTask(taskId, OperationTaskState.RUNNING, 0)
             try {
-                when (val result = withContext(ioDispatcher) { checksumFile(entry) }) {
+                when (val result = withContext(ioDispatcher) { checksumFileByAlgorithm(entry, algorithm) }) {
                     is OperationResult.Success -> {
                         if (mutableState.value.fileInfo?.path == entry.path) {
                             mutableState.value = mutableState.value.copy(

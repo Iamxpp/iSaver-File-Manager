@@ -32,6 +32,30 @@ class RootChecksumInstrumentedTest {
         }
     }
 
+    @Test fun supportedAlgorithmsMatchIndependentDeviceDigests() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        root(app, "rm -rf -- ${quote(ROOT)}; mkdir -p -- ${quote(ROOT)}")
+        try {
+            root(app, "printf %s iSaver-checksum > ${quote(FILE)}")
+            val entry = app.rootFileSystem.stat(path(FILE)) as OperationResult.Success
+            val expected = mapOf(
+                ChecksumAlgorithm.MD5 to root(app, "md5sum -- ${quote(FILE)}").substringBefore(' '),
+                ChecksumAlgorithm.SHA1 to root(app, "sha1sum -- ${quote(FILE)}").substringBefore(' '),
+                ChecksumAlgorithm.SHA256 to root(app, "sha256sum -- ${quote(FILE)}").substringBefore(' '),
+                ChecksumAlgorithm.SHA512 to root(app, "sha512sum -- ${quote(FILE)}").substringBefore(' '),
+            )
+
+            expected.forEach { (algorithm, digest) ->
+                val actual = app.fileChecksumRepository.checksum(entry.value, algorithm)
+                assertTrue("$algorithm: $actual", actual is OperationResult.Success)
+                assertEquals(digest, (actual as OperationResult.Success).value)
+            }
+        } finally {
+            root(app, "rm -rf -- ${quote(ROOT)}")
+        }
+    }
+
     @Test fun sparseFileBeyondLegacyLimitStreamsAndReportsExactMetadata() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
         assertEquals(RootStatus.Available, app.rootSession.check())

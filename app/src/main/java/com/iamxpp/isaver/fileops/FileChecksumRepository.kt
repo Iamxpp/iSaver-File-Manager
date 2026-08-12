@@ -11,6 +11,13 @@ import com.iamxpp.isaver.domain.OperationResult
 import java.io.OutputStream
 import java.security.MessageDigest
 
+enum class ChecksumAlgorithm(val digestName: String, val label: String) {
+    MD5("MD5", "MD5"),
+    SHA1("SHA-1", "SHA-1"),
+    SHA256("SHA-256", "SHA-256"),
+    SHA512("SHA-512", "SHA-512"),
+}
+
 class FileChecksumRepository private constructor(
     private val copyToOutput: (suspend (DirectoryEntry, OutputStream) -> OperationResult<Long>)?,
     private val readRange: (suspend (DirectoryEntry, Long, Long) -> OperationResult<RootFileChunk>)?,
@@ -32,10 +39,17 @@ class FileChecksumRepository private constructor(
     )
 
     suspend fun sha256(entry: DirectoryEntry): OperationResult<String> {
+        return checksum(entry, ChecksumAlgorithm.SHA256)
+    }
+
+    suspend fun checksum(
+        entry: DirectoryEntry,
+        algorithm: ChecksumAlgorithm,
+    ): OperationResult<String> {
         if (entry.type != EntryType.FILE || entry.symbolicLink || !entry.readable || entry.sizeBytes == null) {
             return OperationResult.Failure(ErrorCode.SOURCE_UNREADABLE, "无法计算此项目的校验和")
         }
-        val digest = MessageDigest.getInstance("SHA-256")
+        val digest = MessageDigest.getInstance(algorithm.digestName)
         val legacyCopy = copyToOutput
         if (legacyCopy != null) {
             val sink = object : OutputStream() {

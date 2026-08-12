@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.iamxpp.isaver.data.root.RootFileMetadata
+import com.iamxpp.isaver.fileops.ChecksumAlgorithm
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPath
@@ -51,7 +52,7 @@ class FileInfoDialogTest {
                     EntryType.FILE, 6, 1, true, false, false,
                 ),
                 checksumValue = "a".repeat(64),
-                onCalculateSha256 = { requested = true },
+                onCalculateChecksum = { requested = true },
                 onDismiss = {},
             )
         }
@@ -82,5 +83,25 @@ class FileInfoDialogTest {
         compose.onNodeWithText("12 / 34").assertIsDisplayed()
         compose.onNodeWithText("正在读取").assertIsDisplayed()
         compose.onNodeWithText("文件已变化，请刷新核对").assertIsDisplayed()
+    }
+
+    @Test
+    fun supportsSelectingNonSha256ChecksumAlgorithm() {
+        var selected: ChecksumAlgorithm? = null
+        compose.setContent {
+            FileInfoDialog(
+                entry = DirectoryEntry(
+                    RootPath.parse("/data/local/tmp/value.txt").getOrThrow(), "value.txt",
+                    EntryType.FILE, 6, 1, true, false, false,
+                ),
+                checksumAlgorithm = ChecksumAlgorithm.SHA512,
+                onChecksumAlgorithmChange = { selected = it },
+                onDismiss = {},
+            )
+        }
+
+        compose.onNodeWithText("SHA-512 ✓").assertIsDisplayed()
+        compose.onNodeWithText("SHA-1").performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(ChecksumAlgorithm.SHA1, selected) }
     }
 }

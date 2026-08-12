@@ -15,6 +15,7 @@ import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.bookmarks.Bookmark
 import com.iamxpp.isaver.data.root.RootFileMetadata
+import com.iamxpp.isaver.fileops.ChecksumAlgorithm
 import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.preview.PreviewContent
 
@@ -56,6 +57,7 @@ data class BrowserUiState(
     val fileMetadataLoading: Boolean = false,
     val fileMetadataError: String? = null,
     val checksumRunning: Boolean = false,
+    val checksumAlgorithm: ChecksumAlgorithm = ChecksumAlgorithm.SHA256,
     val checksumValue: String? = null,
     val checksumError: BrowserOperationError? = null,
     val bookmarks: List<Bookmark> = emptyList(),

@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.data.root.RootFileMetadata
 import com.iamxpp.isaver.domain.EntryType
+import com.iamxpp.isaver.fileops.ChecksumAlgorithm
 import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
 import java.text.DateFormat
@@ -23,9 +24,11 @@ fun FileInfoDialog(
     metadataLoading: Boolean = false,
     metadataError: String? = null,
     checksumRunning: Boolean = false,
+    checksumAlgorithm: ChecksumAlgorithm = ChecksumAlgorithm.SHA256,
     checksumValue: String? = null,
     checksumError: String? = null,
-    onCalculateSha256: () -> Unit = {},
+    onCalculateChecksum: () -> Unit = {},
+    onChecksumAlgorithmChange: (ChecksumAlgorithm) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -50,10 +53,27 @@ fun FileInfoDialog(
                 if (metadataLoading) InfoRow("精确属性", "正在读取")
                 metadataError?.let { InfoRow("精确属性", it) }
                 if (entry.type == EntryType.FILE && entry.readable && !entry.symbolicLink) {
-                    checksumValue?.let { InfoRow("SHA-256", it) }
-                    checksumError?.let { InfoRow("SHA-256", it) }
-                    TextButton(onClick = onCalculateSha256, enabled = !checksumRunning) {
-                        Text(if (checksumRunning) "正在计算 SHA-256" else "计算 SHA-256")
+                    checksumValue?.let { InfoRow(checksumAlgorithm.label, it) }
+                    checksumError?.let { InfoRow(checksumAlgorithm.label, it) }
+                    Text("校验算法", color = ISaverSecondaryText, modifier = Modifier.padding(top = 8.dp))
+                    Column {
+                        ChecksumAlgorithm.entries.chunked(2).forEach { row ->
+                            androidx.compose.foundation.layout.Row {
+                                row.forEach { algorithm ->
+                                    TextButton(
+                                        onClick = { onChecksumAlgorithmChange(algorithm) },
+                                        enabled = !checksumRunning,
+                                    ) {
+                                        Text(
+                                            if (algorithm == checksumAlgorithm) "${algorithm.label} ✓" else algorithm.label,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    TextButton(onClick = onCalculateChecksum, enabled = !checksumRunning) {
+                        Text(if (checksumRunning) "正在计算 ${checksumAlgorithm.label}" else "计算 ${checksumAlgorithm.label}")
                     }
                 }
             }

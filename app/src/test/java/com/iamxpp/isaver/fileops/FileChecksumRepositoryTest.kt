@@ -10,6 +10,31 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class FileChecksumRepositoryTest {
+    @Test fun `computes all supported digest algorithms`() = runTest {
+        val bytes = "iSaver".toByteArray()
+        val repository = FileChecksumRepository { _, output ->
+            output.write(bytes)
+            OperationResult.Success(bytes.size.toLong())
+        }
+
+        assertEquals(
+            "e1a46133232f05b052e30309f599d794",
+            (repository.checksum(entry(bytes.size.toLong()), ChecksumAlgorithm.MD5) as OperationResult.Success).value,
+        )
+        assertEquals(
+            "dc04eb5f798d99373ec95f485308bd5ed850f4bb",
+            (repository.checksum(entry(bytes.size.toLong()), ChecksumAlgorithm.SHA1) as OperationResult.Success).value,
+        )
+        assertEquals(
+            "ab6022dbe2380e400b471fdfb28dd44c1435a2725d00bf99eb31d026f264096b",
+            (repository.checksum(entry(bytes.size.toLong()), ChecksumAlgorithm.SHA256) as OperationResult.Success).value,
+        )
+        assertEquals(
+            "c6c9f237551be84da0a5be07d888693708186a219ed00c87b43d91f1264d5313200882abfc4c102cb5808fe413583354f23fb3644a01d975d05e21a290eda451",
+            (repository.checksum(entry(bytes.size.toLong()), ChecksumAlgorithm.SHA512) as OperationResult.Success).value,
+        )
+    }
+
     @Test fun `streams multiple immutable ranges beyond the legacy limit`() = runTest {
         val chunkSize = 4L
         val bytes = "0123456789".toByteArray()

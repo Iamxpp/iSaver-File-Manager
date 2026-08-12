@@ -22,6 +22,7 @@ import com.iamxpp.isaver.domain.RootEntryIdentity
 import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.BatchRenameMode
 import com.iamxpp.isaver.fileops.BatchRenameRule
+import com.iamxpp.isaver.fileops.ChecksumAlgorithm
 import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskStore
@@ -1807,6 +1808,33 @@ class BrowserViewModelTest {
 
         assertEquals("a".repeat(64), vm.state.value.checksumValue)
         assertEquals(listOf(OperationTaskType.CHECKSUM to 1), taskStore.starts)
+        assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
+    }
+
+    @Test fun `selected checksum algorithm is passed to the operation and task`() = runTest {
+        val file = entry("value.txt", EntryType.FILE, path = "/data/local/tmp/value.txt")
+        val taskStore = RecordingOperationTaskStore()
+        val algorithms = mutableListOf<ChecksumAlgorithm>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(file)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            operationTaskStore = taskStore,
+            checksumFileByAlgorithm = { _, algorithm ->
+                algorithms += algorithm
+                OperationResult.Success("digest")
+            },
+        )
+
+        vm.showFileInfo(file)
+        advanceUntilIdle()
+        vm.setChecksumAlgorithm(ChecksumAlgorithm.SHA512)
+        vm.calculateChecksum()
+        advanceUntilIdle()
+
+        assertEquals(listOf(ChecksumAlgorithm.SHA512), algorithms)
+        assertEquals("digest", vm.state.value.checksumValue)
+        assertEquals(ChecksumAlgorithm.SHA512, vm.state.value.checksumAlgorithm)
         assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
     }
 

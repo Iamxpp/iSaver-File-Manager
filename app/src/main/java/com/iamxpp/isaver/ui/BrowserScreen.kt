@@ -118,7 +118,8 @@ fun BrowserScreen(
     onClearSelection: () -> Unit = {},
     onDismissFileInfo: () -> Unit = {},
     onShowFileInfo: (DirectoryEntry) -> Unit = {},
-    onCalculateSha256: () -> Unit = {},
+    onCalculateChecksum: () -> Unit = {},
+    onChecksumAlgorithmChange: (com.iamxpp.isaver.fileops.ChecksumAlgorithm) -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
     onDismissPreview: () -> Unit = {},
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
@@ -473,9 +474,11 @@ fun BrowserScreen(
             metadataLoading = state.fileMetadataLoading,
             metadataError = state.fileMetadataError,
             checksumRunning = state.checksumRunning,
+            checksumAlgorithm = state.checksumAlgorithm,
             checksumValue = state.checksumValue,
             checksumError = state.checksumError?.userMessage,
-            onCalculateSha256 = onCalculateSha256,
+            onCalculateChecksum = onCalculateChecksum,
+            onChecksumAlgorithmChange = onChecksumAlgorithmChange,
             onDismiss = onDismissFileInfo,
         )
     }
