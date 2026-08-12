@@ -8,6 +8,7 @@ import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.archive.ArchiveRepository
+import com.iamxpp.isaver.archive.ArchiveFormat
 import com.iamxpp.isaver.archive.ArchiveState
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryName
@@ -1360,40 +1361,69 @@ class BrowserViewModel(
         )
     }
 
-    fun compress(outputName: String) {
+    fun compress(outputName: String, format: ArchiveFormat = ArchiveFormat.ZIP) {
         val repository = archiveRepository ?: return
         val current = mutableState.value
         if (current.selectedEntries.isEmpty() || current.compressing) return
-        val draft = OutputNameDraft.fromDisplayName(outputName)
+        val draft = OutputNameDraft(
+            stem = outputName.removeSuffix(".${format.defaultExtension}"),
+            extension = format.defaultExtension,
+        )
         mutableState.value = current.copy(compressing = true, compressionMessage = null)
         viewModelScope.launch {
+            val totalItems = current.selectedEntries.size
+            val taskId = operationTaskStore?.start(OperationTaskType.ARCHIVE, totalItems)
+            updateTask(
+                taskId,
+                OperationTaskState.RUNNING,
+                0,
+                message = "${format.creationLabel} 压缩中",
+            )
             try {
-                repository.createZip(
+                repository.createArchive(
                     sources = current.selectedEntries.toList(),
                     targetDirectory = current.currentPath,
                     outputName = draft,
+                    format = format,
                 ).collect { state ->
                     when (state) {
-                        is ArchiveState.Success -> mutableState.value = mutableState.value.copy(
-                            compressing = false,
-                            compressionMessage = "压缩完成",
-                            selectedEntries = emptySet(),
-                        )
-                        is ArchiveState.Failure -> mutableState.value = mutableState.value.copy(
-                            compressing = false,
-                            compressionMessage = state.message,
-                        )
+                        is ArchiveState.Success -> {
+                            mutableState.value = mutableState.value.copy(
+                                compressing = false,
+                                compressionMessage = "压缩完成",
+                                selectedEntries = emptySet(),
+                            )
+                            updateTask(taskId, OperationTaskState.SUCCESS, totalItems)
+                        }
+                        is ArchiveState.Failure -> {
+                            mutableState.value = mutableState.value.copy(
+                                compressing = false,
+                                compressionMessage = state.message,
+                            )
+                            finishFailedTask(
+                                taskId,
+                                0,
+                                totalItems,
+                                OperationResult.Failure(state.code, state.message),
+                            )
+                        }
                         else -> Unit
                     }
                 }
             } catch (cancelled: CancellationException) {
                 mutableState.value = mutableState.value.copy(compressing = false)
+                withContext(NonCancellable) {
+                    updateTask(taskId, OperationTaskState.CANCELLED, 0, message = "压缩已取消")
+                }
                 throw cancelled
             } catch (_: Exception) {
                 mutableState.value = mutableState.value.copy(
                     compressing = false,
                     compressionMessage = "压缩失败",
                 )
+                withContext(NonCancellable) {
+                    updateTask(taskId, OperationTaskState.FAILED, 0, totalItems, "压缩失败")
+                }
             }
         }
     }

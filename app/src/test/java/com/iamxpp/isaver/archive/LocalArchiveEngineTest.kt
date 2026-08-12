@@ -159,4 +159,59 @@ class LocalArchiveEngineTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun `creates tar tar gz and seven zip from the same regular file sources`() = runBlocking {
+        val root = Files.createTempDirectory("isaver-archive-create-formats").toFile()
+        val source = File(root, "source.txt").apply { writeText("format payload") }
+        try {
+            val engine = LocalArchiveEngine()
+            listOf(
+                ArchiveFormat.TAR to File(root, "created.tar"),
+                ArchiveFormat.TAR_GZ to File(root, "created.tar.gz"),
+                ArchiveFormat.SEVEN_Z to File(root, "created.7z"),
+            ).forEach { (format, output) ->
+                val summary = engine.createArchive(
+                    listOf(LocalArchiveSource("docs/source.txt", source)),
+                    format,
+                    output,
+                ).getOrThrow()
+                assertEquals(format, summary.format)
+                assertEquals(listOf("docs/source.txt"), engine.inspect(output).getOrThrow().entries.map { it.path })
+                val extracted = File(root, "${format.name.lowercase()}-extracted")
+                engine.extract(output, extracted).getOrThrow()
+                assertEquals("format payload", File(extracted, "docs/source.txt").readText())
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `preserves empty directories in every creation format`() = runBlocking {
+        val root = Files.createTempDirectory("isaver-archive-empty-directories").toFile()
+        try {
+            val engine = LocalArchiveEngine()
+            listOf(
+                ArchiveFormat.ZIP to File(root, "empty.zip"),
+                ArchiveFormat.TAR to File(root, "empty.tar"),
+                ArchiveFormat.TAR_GZ to File(root, "empty.tar.gz"),
+                ArchiveFormat.SEVEN_Z to File(root, "empty.7z"),
+            ).forEach { (format, output) ->
+                engine.createArchive(
+                    listOf(LocalArchiveSource("folder/empty", directory = true)),
+                    format,
+                    output,
+                ).getOrThrow()
+                val listing = engine.inspect(output).getOrThrow()
+                assertEquals(listOf("folder/empty"), listing.entries.map { it.path })
+                assertTrue(listing.entries.single().directory)
+                val extracted = File(root, "${format.name.lowercase()}-empty")
+                engine.extract(output, extracted).getOrThrow()
+                assertTrue(File(extracted, "folder/empty").isDirectory)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

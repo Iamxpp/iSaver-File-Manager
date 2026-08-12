@@ -94,6 +94,44 @@ class RootDirectoryCopyMoveInstrumentedTest {
         }
     }
 
+    @Test
+    fun mergesNestedDirectoriesAndKeepsConflictingFiles() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        assertEquals(RootStatus.Available, app.rootSession.check())
+        resetTargets(app)
+        try {
+            root(app, "mkdir -p -- ${quote(COPY_MERGE_SOURCE + "/docs")} ${quote(COPY_MERGE_TARGET + "/docs")}")
+            root(app, "printf %s source-copy > ${quote(COPY_MERGE_SOURCE + "/docs/readme.txt")}")
+            root(app, "printf %s unique-copy > ${quote(COPY_MERGE_SOURCE + "/docs/unique.txt")}")
+            root(app, "printf %s target-copy > ${quote(COPY_MERGE_TARGET + "/docs/readme.txt")}")
+
+            val copied = app.fileCopyRepository.copy(
+                stat(app, COPY_MERGE_SOURCE), path(SOURCE_PARENT), path(TARGET_PARENT), ConflictAction.MERGE,
+            )
+            assertTrue(copied.toString(), copied is OperationResult.Success)
+            assertEquals("target-copy", root(app, "cat -- ${quote(COPY_MERGE_TARGET + "/docs/readme.txt")}"))
+            assertEquals("source-copy", root(app, "cat -- ${quote(COPY_MERGE_TARGET + "/docs/readme (1).txt")}"))
+            assertEquals("unique-copy", root(app, "cat -- ${quote(COPY_MERGE_TARGET + "/docs/unique.txt")}"))
+            assertEquals("source-copy", root(app, "cat -- ${quote(COPY_MERGE_SOURCE + "/docs/readme.txt")}"))
+
+            root(app, "mkdir -p -- ${quote(MOVE_MERGE_SOURCE + "/docs")} ${quote(MOVE_MERGE_TARGET + "/docs")}")
+            root(app, "printf %s source-move > ${quote(MOVE_MERGE_SOURCE + "/docs/readme.txt")}")
+            root(app, "printf %s unique-move > ${quote(MOVE_MERGE_SOURCE + "/docs/unique.txt")}")
+            root(app, "printf %s target-move > ${quote(MOVE_MERGE_TARGET + "/docs/readme.txt")}")
+
+            val moved = app.fileMoveRepository.move(
+                stat(app, MOVE_MERGE_SOURCE), path(SOURCE_PARENT), path(TARGET_PARENT), ConflictAction.MERGE,
+            )
+            assertTrue(moved.toString(), moved is OperationResult.Success)
+            assertEquals("target-move", root(app, "cat -- ${quote(MOVE_MERGE_TARGET + "/docs/readme.txt")}"))
+            assertEquals("source-move", root(app, "cat -- ${quote(MOVE_MERGE_TARGET + "/docs/readme (1).txt")}"))
+            assertEquals("unique-move", root(app, "cat -- ${quote(MOVE_MERGE_TARGET + "/docs/unique.txt")}"))
+            assertEquals("missing", root(app, "test ! -e ${quote(MOVE_MERGE_SOURCE)} && echo missing"))
+        } finally {
+            cleanupTargets(app)
+        }
+    }
+
     private suspend fun resetTargets(app: ISaverApplication) {
         cleanupTargets(app)
         root(
@@ -137,5 +175,9 @@ class RootDirectoryCopyMoveInstrumentedTest {
         const val SAME_MOVE_TARGET = "$TARGET_PARENT/same-move"
         const val CROSS_MOVE_SOURCE = "$SOURCE_PARENT/cross-move"
         const val CROSS_MOVE_TARGET = "$SHARED_TARGET_PARENT/cross-move"
+        const val COPY_MERGE_SOURCE = "$SOURCE_PARENT/copy-merge"
+        const val COPY_MERGE_TARGET = "$TARGET_PARENT/copy-merge"
+        const val MOVE_MERGE_SOURCE = "$SOURCE_PARENT/move-merge"
+        const val MOVE_MERGE_TARGET = "$TARGET_PARENT/move-merge"
     }
 }

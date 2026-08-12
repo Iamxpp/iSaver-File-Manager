@@ -16,16 +16,28 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
+import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipFile
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
 
 class LocalArchiveEngine(
     private val limits: ArchiveLimits = ArchiveLimits(),
 ) {
     suspend fun createZip(
         sources: List<LocalArchiveSource>,
+        output: File,
+        onProgress: suspend (ArchiveProgress) -> Unit = {},
+    ): Result<ArchiveOperationSummary> = createArchive(sources, ArchiveFormat.ZIP, output, onProgress)
+
+    suspend fun createArchive(
+        sources: List<LocalArchiveSource>,
+        format: ArchiveFormat,
         output: File,
         onProgress: suspend (ArchiveProgress) -> Unit = {},
     ): Result<ArchiveOperationSummary> = withContext(Dispatchers.IO) {
@@ -36,37 +48,129 @@ class LocalArchiveEngine(
         try {
             require(!output.exists()) { "archive output already exists" }
             require(sources.isNotEmpty()) { "archive source is empty" }
+            require(format.creationSupported) { "archive creation format is unsupported" }
             temporary.parentFile?.mkdirs()
             onProgress(ArchiveProgress.Preparing)
-            val names = ArchiveEntryNameSet()
-            var expandedBytes = 0L
-            ZipOutputStream(BufferedOutputStream(temporary.outputStream())).use { zip ->
-                sources.forEachIndexed { index, source ->
-                    currentCoroutineContext().ensureActive()
-                    ArchivePathPolicy.rejectSymbolicLink(
-                        source.symbolicLink || Files.isSymbolicLink(source.file.toPath()),
-                    ).getOrThrow()
-                    val name = names.add(source.relativePath).getOrThrow()
-                    require(source.file.isFile) { "archive source is not a regular file" }
-                    val size = source.file.length()
-                    expandedBytes = Math.addExact(expandedBytes, size)
-                    limits.checkEntry(index.toLong() + 1L, size, expandedBytes).getOrThrow()
-                    zip.putNextEntry(ZipEntry(name))
-                    source.file.inputStream().use { input ->
-                        copyBounded(input, zip, size, name, onProgress)
-                    }
-                    zip.closeEntry()
+            val validated = validateSources(sources)
+            when (format) {
+                ArchiveFormat.ZIP -> writeZip(validated, temporary, onProgress)
+                ArchiveFormat.TAR -> temporary.outputStream().buffered().use { output ->
+                    writeTar(validated, output, onProgress)
                 }
+                ArchiveFormat.TAR_GZ -> temporary.outputStream().buffered().use { output ->
+                    GzipCompressorOutputStream(output).use { gzip -> writeTar(validated, gzip, onProgress) }
+                }
+                ArchiveFormat.SEVEN_Z -> writeSevenZ(validated, temporary, onProgress)
+                ArchiveFormat.RAR -> error("archive creation format is unsupported")
             }
             Files.move(
                 temporary.toPath(),
                 output.toPath(),
                 StandardCopyOption.ATOMIC_MOVE,
             )
-            Result.success(ArchiveOperationSummary(ArchiveFormat.ZIP, sources.size.toLong(), expandedBytes))
+            Result.success(
+                ArchiveOperationSummary(
+                    format = format,
+                    entryCount = validated.size.toLong(),
+                    expandedBytes = validated.sumOf(ValidatedSource::size),
+                ),
+            )
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            temporary.delete()
+            throw cancelled
         } catch (error: Throwable) {
             temporary.delete()
             Result.failure(error)
+        }
+    }
+
+    private suspend fun validateSources(sources: List<LocalArchiveSource>): List<ValidatedSource> {
+        val names = ArchiveEntryNameSet()
+        var expandedBytes = 0L
+        return sources.mapIndexed { index, source ->
+            currentCoroutineContext().ensureActive()
+            ArchivePathPolicy.rejectSymbolicLink(
+                source.symbolicLink || source.file?.let { Files.isSymbolicLink(it.toPath()) } == true,
+            ).getOrThrow()
+            val name = names.add(source.relativePath).getOrThrow()
+            require(source.directory || source.file?.isFile == true) { "archive source is not a regular file" }
+            require(!source.directory || source.file == null) { "archive directory source has file content" }
+            val size = source.file?.length() ?: 0L
+            expandedBytes = Math.addExact(expandedBytes, size)
+            limits.checkEntry(index.toLong() + 1L, size, expandedBytes).getOrThrow()
+            ValidatedSource(name, source.file, size, source.directory)
+        }
+    }
+
+    private suspend fun writeZip(
+        sources: List<ValidatedSource>,
+        output: File,
+        onProgress: suspend (ArchiveProgress) -> Unit,
+    ) {
+        ZipOutputStream(BufferedOutputStream(output.outputStream())).use { zip ->
+            sources.forEach { source ->
+                currentCoroutineContext().ensureActive()
+                zip.putNextEntry(ZipEntry(if (source.directory) "${source.name}/" else source.name))
+                if (!source.directory) {
+                    source.file!!.inputStream().use { input ->
+                        copyBounded(input, zip, source.size, source.name, onProgress)
+                    }
+                }
+                zip.closeEntry()
+            }
+        }
+    }
+
+    private suspend fun writeTar(
+        sources: List<ValidatedSource>,
+        output: java.io.OutputStream,
+        onProgress: suspend (ArchiveProgress) -> Unit,
+    ) {
+        TarArchiveOutputStream(output).use { tar ->
+            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_ERROR)
+            sources.forEach { source ->
+                currentCoroutineContext().ensureActive()
+                tar.putArchiveEntry(
+                    TarArchiveEntry(if (source.directory) "${source.name}/" else source.name).apply {
+                        size = source.size
+                    },
+                )
+                if (!source.directory) {
+                    source.file!!.inputStream().use { input ->
+                        copyBounded(input, tar, source.size, source.name, onProgress)
+                    }
+                }
+                tar.closeArchiveEntry()
+            }
+            tar.finish()
+        }
+    }
+
+    private suspend fun writeSevenZ(
+        sources: List<ValidatedSource>,
+        output: File,
+        onProgress: suspend (ArchiveProgress) -> Unit,
+    ) {
+        SevenZOutputFile(output).use { sevenZ ->
+            sources.forEach { source ->
+                currentCoroutineContext().ensureActive()
+                val entry = if (source.directory) {
+                    SevenZArchiveEntry().apply {
+                        name = "${source.name}/"
+                        isDirectory = true
+                    }
+                } else {
+                    sevenZ.createArchiveEntry(source.file!!, source.name)
+                }
+                sevenZ.putArchiveEntry(entry)
+                if (!source.directory) {
+                    source.file!!.inputStream().use { input ->
+                        copyBoundedToSevenZ(input, sevenZ, source.size, source.name, onProgress)
+                    }
+                }
+                sevenZ.closeArchiveEntry()
+            }
+            sevenZ.finish()
         }
     }
 
@@ -296,6 +400,27 @@ class LocalArchiveEngine(
         require(declaredBytes == Long.MAX_VALUE || copied == declaredBytes) { "archive entry size changed" }
     }
 
+    private suspend fun copyBoundedToSevenZ(
+        input: InputStream,
+        output: SevenZOutputFile,
+        declaredBytes: Long,
+        path: String,
+        onProgress: suspend (ArchiveProgress) -> Unit,
+    ) {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var copied = 0L
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val read = input.read(buffer)
+            if (read < 0) break
+            copied = Math.addExact(copied, read.toLong())
+            require(copied <= limits.maxEntryBytes) { "archive entry size limit exceeded" }
+            output.write(buffer, 0, read)
+            onProgress(ArchiveProgress.Entry(path, copied, declaredBytes))
+        }
+        require(copied == declaredBytes) { "archive entry size changed" }
+    }
+
     private fun validateEntry(
         state: ValidationState,
         rawPath: String,
@@ -346,6 +471,13 @@ class LocalArchiveEngine(
         var count = 0L
         var expandedBytes = 0L
     }
+
+    private data class ValidatedSource(
+        val name: String,
+        val file: File?,
+        val size: Long,
+        val directory: Boolean,
+    )
 
     private companion object {
         const val DEFAULT_BUFFER_SIZE = 32 * 1024

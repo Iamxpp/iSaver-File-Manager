@@ -50,7 +50,71 @@ class ArchiveRepositoryTest {
             assertTrue(states.first() is ArchiveState.Preparing)
             assertTrue(states.last() is ArchiveState.Success)
             val listing = LocalArchiveEngine().inspect(published.single().file).getOrThrow()
-            assertEquals(listOf("single.txt", "folder/nested.txt"), listing.entries.map { it.path })
+            assertEquals(listOf("single.txt", "folder", "folder/nested.txt"), listing.entries.map { it.path })
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `creates and publishes each supported archive format`() = runTest {
+        val cacheDir = Files.createTempDirectory("isaver-archive-formats").toFile()
+        val root = FakeRootFileSystem().apply { addFile("/single.txt", "one") }
+        val published = mutableListOf<Pair<OutputNameDraft, CachedIncomingFile>>()
+        val repository = repository(cacheDir, root) { cached, name, _ ->
+            published += name to cached
+            flowOf(successTransfer(name.toEntryName().getOrThrow().value, cached.sizeBytes))
+        }
+        try {
+            listOf(
+                ArchiveFormat.ZIP to OutputNameDraft("archive", "zip"),
+                ArchiveFormat.TAR to OutputNameDraft("archive", "tar"),
+                ArchiveFormat.TAR_GZ to OutputNameDraft("archive", "tar.gz"),
+                ArchiveFormat.SEVEN_Z to OutputNameDraft("archive", "7z"),
+            ).forEach { (format, outputName) ->
+                val states = repository.createArchive(
+                    sources = listOf(fileEntry("/single.txt", 3)),
+                    targetDirectory = path("/target"),
+                    outputName = outputName,
+                    format = format,
+                ).toList()
+                assertEquals(format, (states.last() as ArchiveState.Success).format)
+            }
+            assertEquals(
+                listOf(ArchiveFormat.ZIP, ArchiveFormat.TAR, ArchiveFormat.TAR_GZ, ArchiveFormat.SEVEN_Z),
+                published.map { (_, cached) -> LocalArchiveEngine().inspect(cached.file).getOrThrow().format },
+            )
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `rejects unsupported creation format and mismatched extension`() = runTest {
+        val cacheDir = Files.createTempDirectory("isaver-archive-format-rejection").toFile()
+        val root = FakeRootFileSystem().apply { addFile("/single.txt", "one") }
+        var publishCount = 0
+        val repository = repository(cacheDir, root) { cached, name, target ->
+            publishCount += 1
+            flowOf(successTransfer(name.toEntryName().getOrThrow().value, cached.sizeBytes, target))
+        }
+        try {
+            val mismatched = repository.createArchive(
+                sources = listOf(fileEntry("/single.txt", 3)),
+                targetDirectory = path("/target"),
+                outputName = OutputNameDraft("archive", "zip"),
+                format = ArchiveFormat.TAR,
+            ).toList()
+            val unsupported = repository.createArchive(
+                sources = listOf(fileEntry("/single.txt", 3)),
+                targetDirectory = path("/target"),
+                outputName = OutputNameDraft("archive", "rar"),
+                format = ArchiveFormat.RAR,
+            ).toList()
+
+            assertTrue(mismatched.last() is ArchiveState.Failure)
+            assertTrue(unsupported.last() is ArchiveState.Failure)
+            assertEquals(0, publishCount)
         } finally {
             cacheDir.deleteRecursively()
         }

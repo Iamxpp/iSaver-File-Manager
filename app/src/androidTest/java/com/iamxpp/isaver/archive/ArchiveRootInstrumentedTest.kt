@@ -33,7 +33,7 @@ class ArchiveRootInstrumentedTest {
         resetTarget(app)
         try {
             val sourceDir = "$TARGET/source"
-            root(app, "mkdir -p -- ${quote(sourceDir)}")
+            root(app, "mkdir -p -- ${quote(sourceDir)} ${quote("$sourceDir/empty")}")
             root(app, "printf %s alpha > ${quote("$sourceDir/alpha.txt")}")
             root(app, "printf %s beta > ${quote("$sourceDir/beta.txt")}")
 
@@ -50,7 +50,7 @@ class ArchiveRootInstrumentedTest {
             val listing = archiveRepository.inspect(zipPath)
             assertTrue("ZIP inspect failed: $listing", listing is com.iamxpp.isaver.domain.OperationResult.Success)
             listing as com.iamxpp.isaver.domain.OperationResult.Success
-            assertEquals(2, (listing.value as ArchiveListing).entries.size)
+            assertEquals(3, (listing.value as ArchiveListing).entries.size)
 
             root(app, "mkdir -p -- ${quote("$TARGET/extracted")}")
             val extractTarget = path("$TARGET/extracted")
@@ -58,6 +58,27 @@ class ArchiveRootInstrumentedTest {
             assertTrue("ZIP extract failed: $extracted", extracted is ArchiveState.Success)
             assertEquals("alpha", root(app, "cat -- ${quote("$TARGET/extracted/bundle/alpha.txt")}"))
             assertEquals("beta", root(app, "cat -- ${quote("$TARGET/extracted/bundle/beta.txt")}"))
+            assertEquals("directory", root(app, "test -d ${quote("$TARGET/extracted/bundle/empty")} && echo directory"))
+
+            listOf(
+                ArchiveFormat.TAR to OutputNameDraft("created-tar", "tar"),
+                ArchiveFormat.TAR_GZ to OutputNameDraft("created-tar-gz", "tar.gz"),
+                ArchiveFormat.SEVEN_Z to OutputNameDraft("created-seven", "7z"),
+            ).forEach { (format, outputName) ->
+                val state = archiveRepository.createArchive(
+                    sources = snapshot.entries,
+                    targetDirectory = path(TARGET),
+                    outputName = outputName,
+                    format = format,
+                ).last()
+                assertTrue("$format creation failed: $state", state is ArchiveState.Success)
+                val createdPath = path("$TARGET/${outputName.toEntryName().getOrThrow().value}")
+                val inspected = archiveRepository.inspect(createdPath)
+                assertTrue("$format created archive inspect failed: $inspected", inspected is com.iamxpp.isaver.domain.OperationResult.Success)
+                inspected as com.iamxpp.isaver.domain.OperationResult.Success
+                assertEquals(format, (inspected.value as ArchiveListing).format)
+                assertEquals(listOf("alpha.txt", "beta.txt", "empty"), inspected.value.entries.map { it.path }.sorted())
+            }
 
             root(app, "mkdir -p -- ${quote("$TARGET/formats")}")
             val fixtures = createAdditionalFixtures(app)

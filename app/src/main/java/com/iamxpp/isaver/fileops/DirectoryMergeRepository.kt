@@ -68,7 +68,7 @@ class DirectoryMergeRepository(
             }
             when (conflictAction) {
                 ConflictAction.SKIP -> skipped += 1
-                ConflictAction.KEEP_BOTH -> {
+                ConflictAction.KEEP_BOTH, ConflictAction.MERGE -> {
                     val result = if (moveSource) move(child, source.path, targetDirectory, ConflictAction.KEEP_BOTH)
                     else copy(child, source.path, targetDirectory, ConflictAction.KEEP_BOTH)
                     if (result is OperationResult.Failure) return result

@@ -30,6 +30,7 @@ import com.iamxpp.isaver.ui.archive.ArchiveScreen
 import com.iamxpp.isaver.ui.archive.ArchiveUiState
 import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.trash.RestoreConflictAction
+import com.iamxpp.isaver.archive.ArchiveFormat
 
 @Composable
 fun ISaverHomeScreen(
@@ -104,7 +105,7 @@ fun ISaverHomeScreen(
     onClearTrash: (List<TrashItem>) -> Unit = {},
     onDismissTrashError: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
-    onCompress: (String) -> Unit = {},
+    onCompress: (String, ArchiveFormat) -> Unit = { _, _ -> },
     onDismissCompressionMessage: () -> Unit = {},
     onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
     remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,

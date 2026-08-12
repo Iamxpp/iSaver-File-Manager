@@ -24,6 +24,7 @@ import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.archive.ArchiveFormat
 import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenameItem
 import com.iamxpp.isaver.fileops.BatchRenamePlan
@@ -847,15 +848,64 @@ class BrowserScreenTest {
                     selectedEntries = setOf(file),
                 ),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
-                onCompress = { output = it },
+                onCompress = { name, _ -> output = name },
             )
         }
         compose.onNodeWithContentDescription("更多操作").performClick()
         compose.onNodeWithText("压缩文件").assertIsEnabled().performClick()
         compose.onNodeWithText("压缩文件名称").assertIsDisplayed()
-        compose.onNodeWithText("archive.zip").assertIsDisplayed()
+        compose.onNodeWithText("archive").assertIsDisplayed()
         compose.onNodeWithText("确定").performClick()
         assertEquals("archive.zip", output)
+    }
+
+    @Test fun compressDialogReturnsSelectedTarGzFormat() {
+        val file = entry("说明.txt", EntryType.FILE)
+        var output: String? = null
+        var selectedFormat: ArchiveFormat? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(
+                    entries = listOf(file),
+                    allEntries = listOf(file),
+                    selectedEntries = setOf(file),
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onCompress = { name, format ->
+                    output = name
+                    selectedFormat = format
+                },
+            )
+        }
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("压缩文件").performClick()
+        compose.onNodeWithText("TAR.GZ").performClick()
+        compose.onNodeWithText("确定").performClick()
+
+        assertEquals("archive.tar.gz", output)
+        assertEquals(ArchiveFormat.TAR_GZ, selectedFormat)
+    }
+
+    @Test fun compressDialogDoesNotDuplicateTypedExtension() {
+        val file = entry("说明.txt", EntryType.FILE)
+        var output: String? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(
+                    entries = listOf(file),
+                    allEntries = listOf(file),
+                    selectedEntries = setOf(file),
+                ),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onCompress = { name, _ -> output = name },
+            )
+        }
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("压缩文件").performClick()
+        compose.onNodeWithText("压缩文件名称").performTextReplacement("backup.ZIP")
+        compose.onNodeWithText("确定").performClick()
+
+        assertEquals("backup.zip", output)
     }
 
     @Test fun releaseBrowserDoesNotExposeFrozenRemoteServerEntry() {

@@ -54,26 +54,30 @@ class DirectoryMergeRepositoryTest {
     }
 
     @Test
-    fun `merge cancels on same-name file and leaves source intact`() = runTest {
+    fun `merge keeps both same-name files without overwrite`() = runTest {
         val sourceParent = path("/source-parent")
         val targetParent = path("/target-parent")
         val source = directory("/source-parent/folder", sourceParent)
         val target = directory("/target-parent/folder", targetParent)
         val sourceFile = file("/source-parent/folder/readme.txt", source.path)
         val targetFile = file("/target-parent/folder/readme.txt", target.path)
+        val copied = mutableListOf<Pair<String, ConflictAction>>()
         val repository = DirectoryMergeRepository(
             fileSystem = fakeFileSystem(
                 mapOf(source.path.value to listOf(sourceFile), target.path.value to listOf(targetFile)),
             ),
-            copy = { _, _, _, _ -> error("copy should not be used") },
+            copy = { child, _, _, action ->
+                copied += child.path.value to action
+                OperationResult.Success(child)
+            },
             move = { _, _, _, _ -> error("move should not be used") },
             deleteEmptyDirectory = { _, _ -> error("source must remain") },
         )
 
-        val result = repository.merge(source, sourceParent, target, targetParent, moveSource = true, ConflictAction.MERGE)
+        val result = repository.merge(source, sourceParent, target, targetParent, moveSource = false, ConflictAction.MERGE)
 
-        assertTrue(result is OperationResult.Failure)
-        assertEquals(ErrorCode.ALREADY_EXISTS, (result as OperationResult.Failure).code)
+        assertEquals(1, (result as OperationResult.Success).value.processed)
+        assertEquals(listOf(sourceFile.path.value to ConflictAction.KEEP_BOTH), copied)
     }
 
     @Test

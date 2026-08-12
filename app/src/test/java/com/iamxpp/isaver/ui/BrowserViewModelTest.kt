@@ -1,5 +1,8 @@
 package com.iamxpp.isaver.ui
 
+import com.iamxpp.isaver.archive.ArchiveFormat
+import com.iamxpp.isaver.archive.ArchiveRepository
+import com.iamxpp.isaver.archive.LocalArchiveEngine
 import com.iamxpp.isaver.data.local.BrowserPreferences
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.bookmarks.BookmarkRepository
@@ -25,6 +28,8 @@ import com.iamxpp.isaver.tasks.OperationTaskStore
 import com.iamxpp.isaver.tasks.OperationTaskType
 import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.search.LocalSearchRepository
+import java.io.OutputStream
+import java.nio.file.Files
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1805,6 +1810,41 @@ class BrowserViewModelTest {
         assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
     }
 
+    @Test fun `archive failure records persistent task without paths`() = runTest {
+        val cacheDir = Files.createTempDirectory("isaver-browser-archive").toFile()
+        val file = entry("value.txt", EntryType.FILE, path = "/storage/emulated/0/value.txt")
+        val taskStore = RecordingOperationTaskStore()
+        val fileSystem = FakeFileSystem { OperationResult.Success(listOf(file)) }
+        val repository = ArchiveRepository(
+            rootFileSystem = fileSystem,
+            localEngine = LocalArchiveEngine(),
+            cacheDir = cacheDir,
+            publish = { _, _, _ -> error("unsupported format must not publish") },
+        )
+        try {
+            val vm = BrowserViewModel(
+                fileSystem,
+                StandardTestDispatcher(testScheduler),
+                defaultPreferences(),
+                archiveRepository = repository,
+                operationTaskStore = taskStore,
+            )
+            vm.openInitial()
+            advanceUntilIdle()
+            vm.selectEntry(file)
+
+            vm.compress("archive.rar", ArchiveFormat.RAR)
+            advanceUntilIdle()
+
+            assertEquals("压缩文件名称与所选格式不一致", vm.state.value.compressionMessage)
+            assertEquals(listOf(OperationTaskType.ARCHIVE to 1), taskStore.starts)
+            assertEquals(OperationTaskState.RUNNING, taskStore.updates.first().state)
+            assertEquals(OperationTaskState.FAILED, taskStore.updates.last().state)
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
     @Test fun `file info only exposes metadata while path identity still matches`() = runTest {
         val file = entry("value.txt", EntryType.FILE, path = "/data/local/tmp/value.txt")
         val metadata = RootFileMetadata(0x1A0, 1000, 1001, 12, 34)
@@ -2223,6 +2263,9 @@ class BrowserViewModelTest {
         val identityBlock: suspend (RootPath) -> OperationResult<RootEntryIdentity> = {
             OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法读取文件身份")
         },
+        val copyToOutputBlock: suspend (RootPath, OutputStream) -> OperationResult<Long> = { _, _ ->
+            OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法读取文件")
+        },
         val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>,
     ) : RootFileSystem {
         val listed = mutableListOf<String>()
@@ -2248,6 +2291,8 @@ class BrowserViewModelTest {
         override suspend fun canonicalize(path: RootPath): OperationResult<RootPath> = canonicalBlock(path)
         override suspend fun metadata(source: RootPath): OperationResult<RootFileMetadata> = metadataBlock(source)
         override suspend fun identity(path: RootPath): OperationResult<RootEntryIdentity> = identityBlock(path)
+        override suspend fun copyToOutput(source: RootPath, output: OutputStream): OperationResult<Long> =
+            copyToOutputBlock(source, output)
         override suspend fun createDirectory(parent: RootPath, name: FolderName): OperationResult<DirectoryEntry> = createBlock(parent, name)
         override suspend fun createFileNoReplace(parent: RootPath, name: EntryName): OperationResult<DirectoryEntry> =
             createFileBlock(parent, name)

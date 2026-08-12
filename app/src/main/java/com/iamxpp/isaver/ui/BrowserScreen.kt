@@ -75,6 +75,7 @@ import com.iamxpp.isaver.search.SearchEntryType
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.trash.RestoreConflictAction
 import com.iamxpp.isaver.preview.PreviewContent
+import com.iamxpp.isaver.archive.ArchiveFormat
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
@@ -148,7 +149,7 @@ fun BrowserScreen(
     onDismissPresentationError: () -> Unit = {},
     onDismissCreateError: () -> Unit = {},
     onDismissCreateFileError: () -> Unit = {},
-    onCompress: ((String) -> Unit)? = null,
+    onCompress: ((String, ArchiveFormat) -> Unit)? = null,
     onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
     remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
     onDismissRemoteMessage: () -> Unit = {},
@@ -358,9 +359,9 @@ fun BrowserScreen(
     if (compressDialogVisible) {
         CompressDialog(
             onDismiss = { compressDialogVisible = false },
-            onConfirm = { name ->
+            onConfirm = { name, format ->
                 compressDialogVisible = false
-                onCompress?.invoke(name)
+                onCompress?.invoke(name, format)
             },
         )
     }
@@ -1588,21 +1589,47 @@ private fun ConflictDialog(
 }
 
 @Composable
-private fun CompressDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var name by remember { mutableStateOf("archive.zip") }
+private fun CompressDialog(onDismiss: () -> Unit, onConfirm: (String, ArchiveFormat) -> Unit) {
+    var name by remember { mutableStateOf("archive") }
+    var format by remember { mutableStateOf(ArchiveFormat.ZIP) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("压缩文件") },
         text = {
-            TextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                label = { Text("压缩文件名称") },
-            )
+            Column {
+                TextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("压缩文件名称") },
+                    suffix = { Text(".${format.defaultExtension}") },
+                )
+                Row(Modifier.fillMaxWidth()) {
+                    listOf(
+                        ArchiveFormat.ZIP,
+                        ArchiveFormat.TAR,
+                        ArchiveFormat.TAR_GZ,
+                        ArchiveFormat.SEVEN_Z,
+                    ).forEach { candidate ->
+                        TextButton(
+                            onClick = { format = candidate },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (format == candidate) "[${candidate.creationLabel}]" else candidate.creationLabel)
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("确定") }
+            TextButton(
+                onClick = {
+                    val suffix = ".${format.defaultExtension}"
+                    val stem = if (name.endsWith(suffix, ignoreCase = true)) name.dropLast(suffix.length) else name
+                    onConfirm("$stem$suffix", format)
+                },
+                enabled = name.isNotBlank(),
+            ) { Text("确定") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )

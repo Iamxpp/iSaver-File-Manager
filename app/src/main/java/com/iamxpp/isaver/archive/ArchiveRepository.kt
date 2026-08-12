@@ -86,10 +86,17 @@ class ArchiveRepository(
         sources: List<DirectoryEntry>,
         targetDirectory: RootPath,
         outputName: OutputNameDraft,
+    ): Flow<ArchiveState> = createArchive(sources, targetDirectory, outputName, ArchiveFormat.ZIP)
+
+    fun createArchive(
+        sources: List<DirectoryEntry>,
+        targetDirectory: RootPath,
+        outputName: OutputNameDraft,
+        format: ArchiveFormat,
     ): Flow<ArchiveState> = channelFlow {
         send(ArchiveState.Preparing)
-        if (outputName.extension.lowercase() != "zip") {
-            send(failure(ErrorCode.COMMAND_FAILED, "压缩文件必须使用 zip 扩展名"))
+        if (!format.creationSupported || outputName.extension.lowercase() != format.defaultExtension) {
+            send(failure(ErrorCode.COMMAND_FAILED, "压缩文件名称与所选格式不一致"))
             return@channelFlow
         }
         val localSources = mutableListOf<LocalArchiveSource>()
@@ -105,11 +112,11 @@ class ArchiveRepository(
                 }
             }
             val archiveFile = newIncomingFile()
-            val summary = localEngine.createZip(localSources, archiveFile) { progress ->
+            val summary = localEngine.createArchive(localSources, format, archiveFile) { progress ->
                 send(ArchiveState.Running(progress))
             }.getOrElse {
                 archiveFile.delete()
-                send(failure(ErrorCode.COMMAND_FAILED, "无法创建 ZIP 压缩包"))
+                send(failure(ErrorCode.COMMAND_FAILED, "无法创建压缩包"))
                 return@channelFlow
             }
             val cached = cachedFactory(archiveFile).getOrElse {
@@ -365,6 +372,7 @@ class ArchiveRepository(
             EntryType.DIRECTORY -> when (val listed = rootFileSystem.readDirectory(entry.path)) {
                 is OperationResult.Failure -> listed
                 is OperationResult.Success -> {
+                    output += LocalArchiveSource(relativePath, directory = true)
                     for (child in listed.value.entries) {
                         when (val result = collectSource(child, "$relativePath/${child.name}", output, sourceCaches)) {
                             is OperationResult.Failure -> return result

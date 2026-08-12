@@ -9,6 +9,30 @@ enum class ArchiveFormat {
     TAR_GZ,
     SEVEN_Z,
     RAR,
+
+    ;
+
+    val defaultExtension: String
+        get() = when (this) {
+            ZIP -> "zip"
+            TAR -> "tar"
+            TAR_GZ -> "tar.gz"
+            SEVEN_Z -> "7z"
+            RAR -> "rar"
+        }
+
+    val creationSupported: Boolean
+        get() = this != RAR
+
+    val creationLabel: String
+        get() = when (this) {
+            ZIP -> "ZIP"
+            TAR -> "TAR"
+            TAR_GZ -> "TAR.GZ"
+            SEVEN_Z -> "7Z"
+            RAR -> "RAR"
+        }
+
 }
 
 data class ArchiveLimits(
@@ -43,7 +67,8 @@ data class ArchiveEntry(
 
 data class LocalArchiveSource(
     val relativePath: String,
-    val file: File,
+    val file: File? = null,
+    val directory: Boolean = false,
     val symbolicLink: Boolean = false,
 )
 
