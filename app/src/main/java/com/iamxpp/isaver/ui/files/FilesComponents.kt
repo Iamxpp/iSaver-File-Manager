@@ -413,6 +413,7 @@ fun FilesOverflowMenu(
     canCompress: Boolean,
     canConnectServer: Boolean,
     onAddLocation: (() -> Unit)? = null,
+    onOpenTasks: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     DropdownMenu(
@@ -440,6 +441,9 @@ fun FilesOverflowMenu(
                 enabled = canCreateFile,
                 onClick = onCreateFile,
             )
+        }
+        if (onOpenTasks != null) {
+            FilesMenuItem(text = "任务中心", onClick = onOpenTasks)
         }
         FilesMenuItem(
             text = "压缩文件",

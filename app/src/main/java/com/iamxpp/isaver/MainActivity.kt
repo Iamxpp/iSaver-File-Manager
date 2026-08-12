@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
             fileMoveRepository = app.fileMoveRepository,
             fileCopyRepository = app.fileCopyRepository,
             fileRenameRepository = app.fileRenameRepository,
+            operationTaskStore = app.operationTaskRepository,
         )
     }
     private val recentViewModel by viewModels<RecentViewModel> {
@@ -439,6 +440,7 @@ class MainActivity : ComponentActivity() {
                         onPreviewBatchRename = browserViewModel::previewBatchRename,
                         onExecuteBatchRename = browserViewModel::executeBatchRename,
                         onDismissBatchRename = browserViewModel::dismissBatchRename,
+                        onClearFinishedTasks = browserViewModel::clearFinishedTasks,
                         onDismissFileRenameError = browserViewModel::dismissFileRenameError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
@@ -533,6 +535,7 @@ internal class BrowserViewModelFactory(
     private val fileMoveRepository: com.iamxpp.isaver.fileops.FileMoveRepository? = null,
     private val fileCopyRepository: com.iamxpp.isaver.fileops.FileCopyRepository? = null,
     private val fileRenameRepository: com.iamxpp.isaver.fileops.FileRenameRepository? = null,
+    private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(BrowserViewModel::class.java))
@@ -582,6 +585,7 @@ internal class BrowserViewModelFactory(
                 OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法重命名文件")
             },
             revokeExport = rootExportRepository?.let { repository -> repository::revoke } ?: {},
+            operationTaskStore = operationTaskStore,
         ) as T
     }
 }

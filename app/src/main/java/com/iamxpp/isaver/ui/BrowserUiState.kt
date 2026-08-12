@@ -9,6 +9,7 @@ import com.iamxpp.isaver.fileops.BatchRenamePlan
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
+import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.ui.files.SortSpec
 
 data class BrowserUiState(
@@ -62,6 +63,7 @@ data class BrowserUiState(
     val fileRenameError: BrowserOperationError? = null,
     val batchRenamePlan: BatchRenamePlan? = null,
     val batchRenameError: BrowserOperationError? = null,
+    val operationTasks: List<OperationTask> = emptyList(),
     val compressing: Boolean = false,
     val compressionMessage: String? = null,
 ) {

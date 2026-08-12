@@ -14,6 +14,10 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.BatchRenameMode
 import com.iamxpp.isaver.fileops.BatchRenameRule
+import com.iamxpp.isaver.tasks.OperationTask
+import com.iamxpp.isaver.tasks.OperationTaskState
+import com.iamxpp.isaver.tasks.OperationTaskStore
+import com.iamxpp.isaver.tasks.OperationTaskType
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1667,6 +1671,76 @@ class BrowserViewModelTest {
         assertEquals(setOf(first, second), vm.state.value.selectedEntries)
     }
 
+    @Test fun `copy task records progress and success without persisting paths`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val first = entry("first.txt", EntryType.FILE, path = "${sourceDirectory.value}/first.txt")
+        val second = entry("second.txt", EntryType.FILE, path = "${sourceDirectory.value}/second.txt")
+        val taskStore = RecordingOperationTaskStore()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(first, second)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            copyFile = { source, _, target, _ ->
+                OperationResult.Success(source.copy(path = RootPath.parse("${target.value}/${source.name}").getOrThrow()))
+            },
+            operationTaskStore = taskStore,
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(first)
+        vm.selectEntry(second)
+        vm.beginCopySelection()
+
+        vm.copyTo(targetDirectory)
+        advanceUntilIdle()
+
+        assertEquals(listOf(OperationTaskType.COPY to 2), taskStore.starts)
+        assertEquals(
+            listOf(
+                OperationTaskState.RUNNING to 0,
+                OperationTaskState.RUNNING to 1,
+                OperationTaskState.RUNNING to 2,
+                OperationTaskState.SUCCESS to 2,
+            ),
+            taskStore.updates.map { it.state to it.completed },
+        )
+    }
+
+    @Test fun `copy conflict keeps one task while waiting and resuming`() = runTest {
+        val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val targetDirectory = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
+        val taskStore = RecordingOperationTaskStore()
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(listOf(source)) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            copyFile = { selected, _, target, action ->
+                if (action == com.iamxpp.isaver.fileops.ConflictAction.KEEP_BOTH) {
+                    OperationResult.Success(selected.copy(path = RootPath.parse("${target.value}/report (1).txt").getOrThrow()))
+                } else {
+                    OperationResult.Failure(ErrorCode.ALREADY_EXISTS, "目标位置已存在同名文件")
+                }
+            },
+            operationTaskStore = taskStore,
+        )
+        vm.openRoot(sourceDirectory, "来源")
+        advanceUntilIdle()
+        vm.selectEntry(source)
+        vm.beginCopySelection()
+
+        vm.copyTo(targetDirectory)
+        advanceUntilIdle()
+        vm.resolveConflict(com.iamxpp.isaver.fileops.ConflictAction.KEEP_BOTH)
+        advanceUntilIdle()
+
+        assertEquals(1, taskStore.starts.size)
+        assertTrue(taskStore.updates.any { it.state == OperationTaskState.NEEDS_ACTION })
+        assertEquals(OperationTaskState.SUCCESS, taskStore.updates.last().state)
+        assertTrue(taskStore.updates.all { it.id == "task-1" })
+    }
+
     @Test fun `copy to source directory stays in picker and never dispatches`() = runTest {
         val sourceDirectory = RootPath.parse("/data/local/tmp/source").getOrThrow()
         val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
@@ -1897,6 +1971,32 @@ class BrowserViewModelTest {
         }
         fun emit(value: BrowserPreferences) { preferences.value = value }
     }
+
+    private class RecordingOperationTaskStore : OperationTaskStore {
+        override val tasks = MutableStateFlow(emptyList<OperationTask>())
+        val starts = mutableListOf<Pair<OperationTaskType, Int>>()
+        val updates = mutableListOf<TaskUpdate>()
+
+        override suspend fun start(type: OperationTaskType, totalItems: Int): String {
+            starts += type to totalItems
+            return "task-${starts.size}"
+        }
+
+        override suspend fun update(
+            id: String,
+            state: OperationTaskState,
+            completedItems: Int,
+            failedItems: Int,
+            message: String?,
+        ) {
+            updates += TaskUpdate(id, state, completedItems)
+        }
+
+        override suspend fun reconcileInterrupted() = Unit
+        override suspend fun clearFinished() = Unit
+    }
+
+    private data class TaskUpdate(val id: String, val state: OperationTaskState, val completed: Int)
 
     private fun defaultPreferences() = FakeBrowserPreferencesStore(BrowserPreferences())
 

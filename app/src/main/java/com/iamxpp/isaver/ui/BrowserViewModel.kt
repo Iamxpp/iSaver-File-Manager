@@ -20,6 +20,9 @@ import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenameExecutor
 import com.iamxpp.isaver.fileops.BatchRenamePlanner
 import com.iamxpp.isaver.fileops.BatchRenameRule
+import com.iamxpp.isaver.tasks.OperationTaskState
+import com.iamxpp.isaver.tasks.OperationTaskStore
+import com.iamxpp.isaver.tasks.OperationTaskType
 import com.iamxpp.isaver.ui.files.FileEntrySorter
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.SortSpec
@@ -34,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
 
 class BrowserViewModel(
     private val rootFileSystem: RootFileSystem,
@@ -60,6 +64,7 @@ class BrowserViewModel(
         OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法重命名文件")
     },
     private val revokeExport: (ExternalFileGrant) -> Unit = {},
+    private val operationTaskStore: OperationTaskStore? = null,
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
@@ -112,6 +117,11 @@ class BrowserViewModel(
         if (mutableState.value.selectionMode) {
             selectEntry(entry)
             return
+        }
+        operationTaskStore?.let { store ->
+            viewModelScope.launch {
+                store.tasks.collect { tasks -> mutableState.value = mutableState.value.copy(operationTasks = tasks) }
+            }
         }
         cancelExternalShare()
         val openRequest = cancelExternalOpen()
@@ -332,7 +342,7 @@ class BrowserViewModel(
             movedOutput = null,
             fileMoveError = null,
         )
-        launchMove(selection, targetDirectory, 0, emptyList(), null, ConflictAction.CANCEL)
+        launchMove(selection, targetDirectory, 0, emptyList(), null, ConflictAction.CANCEL, null)
     }
 
     private fun launchMove(
@@ -342,10 +352,14 @@ class BrowserViewModel(
         completedBefore: List<DirectoryEntry>,
         persistentAction: ConflictAction?,
         currentAction: ConflictAction,
+        existingTaskId: String?,
     ) {
         mutableState.value = mutableState.value.copy(movingFile = true, conflictPrompt = null)
         moveFileJob = viewModelScope.launch {
+            var taskId: String? = existingTaskId
             try {
+                taskId = taskId ?: operationTaskStore?.start(OperationTaskType.MOVE, selection.entries.size)
+                updateTask(taskId, OperationTaskState.RUNNING, completedBefore.size)
                 val completed = completedBefore.toMutableList()
                 for (index in startIndex until selection.entries.size) {
                     val entry = selection.entries[index]
@@ -369,6 +383,7 @@ class BrowserViewModel(
                                         completed += kept.value
                                         mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                                         recordSuccessfulFileAccess(kept.value)
+                                        updateTask(taskId, OperationTaskState.RUNNING, completed.size)
                                         continue
                                     }
                                     is OperationResult.Failure -> {
@@ -376,13 +391,14 @@ class BrowserViewModel(
                                             movingFile = false,
                                             fileMoveError = BrowserOperationError(kept.code, kept.userMessage),
                                         )
+                                        finishFailedTask(taskId, completed.size, selection.entries.size, kept)
                                         return@launch
                                     }
                                 }
                             }
                             if (result.code == ErrorCode.ALREADY_EXISTS && action == ConflictAction.CANCEL) {
                                 pendingConflict = PendingConflict.Move(
-                                    selection, targetDirectory, index, completed, persistentAction,
+                                    selection, targetDirectory, index, completed, persistentAction, taskId,
                                 )
                                 mutableState.value = mutableState.value.copy(
                                     movingFile = false,
@@ -391,6 +407,7 @@ class BrowserViewModel(
                                         BrowserConflictOperation.MOVE, entry.name, completed.size, selection.entries.size,
                                     ),
                                 )
+                                updateTask(taskId, OperationTaskState.NEEDS_ACTION, completed.size, message = "等待处理同名冲突")
                                 return@launch
                             }
                             mutableState.value = if (completed.isEmpty()) {
@@ -410,12 +427,14 @@ class BrowserViewModel(
                                     ),
                                 )
                             }
+                            finishFailedTask(taskId, completed.size, selection.entries.size, result)
                             return@launch
                         }
                         is OperationResult.Success -> {
                             completed += result.value
                             mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                             recordSuccessfulFileAccess(result.value)
+                            updateTask(taskId, OperationTaskState.RUNNING, completed.size)
                         }
                     }
                 }
@@ -426,13 +445,23 @@ class BrowserViewModel(
                     movedOutput = completed.lastOrNull(),
                     fileMoveError = null,
                 )
+                finishCompletedTask(taskId, completed.size, selection.entries.size)
             } catch (cancelled: CancellationException) {
                 mutableState.value = mutableState.value.copy(movingFile = false)
+                withContext(NonCancellable) {
+                    updateTask(taskId, OperationTaskState.CANCELLED, mutableState.value.moveCompletedCount, message = "任务已取消")
+                }
                 throw cancelled
             } catch (_: Exception) {
                 mutableState.value = mutableState.value.copy(
                     movingFile = false,
                     fileMoveError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "无法移动文件"),
+                )
+                finishFailedTask(
+                    taskId,
+                    mutableState.value.moveCompletedCount,
+                    selection.entries.size,
+                    OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法移动文件"),
                 )
             }
         }
@@ -508,7 +537,7 @@ class BrowserViewModel(
             copiedOutput = null,
             fileCopyError = null,
         )
-        launchCopy(selection, targetDirectory, 0, emptyList(), null, ConflictAction.CANCEL)
+        launchCopy(selection, targetDirectory, 0, emptyList(), null, ConflictAction.CANCEL, null)
     }
 
     private fun launchCopy(
@@ -518,10 +547,14 @@ class BrowserViewModel(
         completedBefore: List<DirectoryEntry>,
         persistentAction: ConflictAction?,
         currentAction: ConflictAction,
+        existingTaskId: String?,
     ) {
         mutableState.value = mutableState.value.copy(copyingFile = true, conflictPrompt = null)
         copyFileJob = viewModelScope.launch {
+            var taskId: String? = existingTaskId
             try {
+                taskId = taskId ?: operationTaskStore?.start(OperationTaskType.COPY, selection.entries.size)
+                updateTask(taskId, OperationTaskState.RUNNING, completedBefore.size)
                 val completed = completedBefore.toMutableList()
                 for (index in startIndex until selection.entries.size) {
                     val entry = selection.entries[index]
@@ -545,6 +578,7 @@ class BrowserViewModel(
                                         completed += kept.value
                                         mutableState.value = mutableState.value.copy(copyCompletedCount = completed.size)
                                         recordSuccessfulFileAccess(kept.value)
+                                        updateTask(taskId, OperationTaskState.RUNNING, completed.size)
                                         continue
                                     }
                                     is OperationResult.Failure -> {
@@ -552,13 +586,14 @@ class BrowserViewModel(
                                             copyingFile = false,
                                             fileCopyError = BrowserOperationError(kept.code, kept.userMessage),
                                         )
+                                        finishFailedTask(taskId, completed.size, selection.entries.size, kept)
                                         return@launch
                                     }
                                 }
                             }
                             if (result.code == ErrorCode.ALREADY_EXISTS && action == ConflictAction.CANCEL) {
                                 pendingConflict = PendingConflict.Copy(
-                                    selection, targetDirectory, index, completed, persistentAction,
+                                    selection, targetDirectory, index, completed, persistentAction, taskId,
                                 )
                                 mutableState.value = mutableState.value.copy(
                                     copyingFile = false,
@@ -567,6 +602,7 @@ class BrowserViewModel(
                                         BrowserConflictOperation.COPY, entry.name, completed.size, selection.entries.size,
                                     ),
                                 )
+                                updateTask(taskId, OperationTaskState.NEEDS_ACTION, completed.size, message = "等待处理同名冲突")
                                 return@launch
                             }
                             mutableState.value = if (completed.isEmpty()) {
@@ -586,12 +622,14 @@ class BrowserViewModel(
                                     ),
                                 )
                             }
+                            finishFailedTask(taskId, completed.size, selection.entries.size, result)
                             return@launch
                         }
                         is OperationResult.Success -> {
                             completed += result.value
                             mutableState.value = mutableState.value.copy(copyCompletedCount = completed.size)
                             recordSuccessfulFileAccess(result.value)
+                            updateTask(taskId, OperationTaskState.RUNNING, completed.size)
                         }
                     }
                 }
@@ -602,13 +640,23 @@ class BrowserViewModel(
                     copiedOutput = completed.lastOrNull(),
                     fileCopyError = null,
                 )
+                finishCompletedTask(taskId, completed.size, selection.entries.size)
             } catch (cancelled: CancellationException) {
                 mutableState.value = mutableState.value.copy(copyingFile = false)
+                withContext(NonCancellable) {
+                    updateTask(taskId, OperationTaskState.CANCELLED, mutableState.value.copyCompletedCount, message = "任务已取消")
+                }
                 throw cancelled
             } catch (_: Exception) {
                 mutableState.value = mutableState.value.copy(
                     copyingFile = false,
                     fileCopyError = BrowserOperationError(ErrorCode.COMMAND_FAILED, "无法复制文件"),
+                )
+                finishFailedTask(
+                    taskId,
+                    mutableState.value.copyCompletedCount,
+                    selection.entries.size,
+                    OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法复制文件"),
                 )
             }
         }
@@ -651,6 +699,14 @@ class BrowserViewModel(
                     fileCopyError = BrowserOperationError(ErrorCode.ALREADY_EXISTS, message),
                 )
             }
+            viewModelScope.launch {
+                updateTask(
+                    pending.taskId,
+                    if (pending.completed.isEmpty()) OperationTaskState.CANCELLED else OperationTaskState.PARTIAL_SUCCESS,
+                    pending.completed.size,
+                    message = message,
+                )
+            }
             return
         }
         pendingConflict = null
@@ -661,12 +717,14 @@ class BrowserViewModel(
                 if (action == ConflictAction.SKIP) pending.index + 1 else pending.index,
                 pending.completed, persistent,
                 if (action == ConflictAction.SKIP) ConflictAction.CANCEL else action,
+                pending.taskId,
             )
             is PendingConflict.Copy -> launchCopy(
                 pending.selection, pending.targetDirectory,
                 if (action == ConflictAction.SKIP) pending.index + 1 else pending.index,
                 pending.completed, persistent,
                 if (action == ConflictAction.SKIP) ConflictAction.CANCEL else action,
+                pending.taskId,
             )
         }
     }
@@ -779,6 +837,44 @@ class BrowserViewModel(
     fun dismissBatchRename() {
         if (mutableState.value.renamingFile) return
         mutableState.value = mutableState.value.copy(batchRenamePlan = null, batchRenameError = null)
+    }
+
+    fun clearFinishedTasks() {
+        operationTaskStore?.let { store -> viewModelScope.launch(ioDispatcher) { store.clearFinished() } }
+    }
+
+    private suspend fun updateTask(
+        id: String?,
+        state: OperationTaskState,
+        completed: Int,
+        failed: Int = 0,
+        message: String? = null,
+    ) {
+        if (id != null) operationTaskStore?.update(id, state, completed, failed, message)
+    }
+
+    private suspend fun finishFailedTask(
+        id: String?,
+        completed: Int,
+        total: Int,
+        failure: OperationResult.Failure,
+    ) = withContext(NonCancellable) {
+        val state = when {
+            failure.code == ErrorCode.OUTCOME_UNCERTAIN -> OperationTaskState.OUTCOME_UNCERTAIN
+            completed > 0 -> OperationTaskState.PARTIAL_SUCCESS
+            else -> OperationTaskState.FAILED
+        }
+        updateTask(id, state, completed, total - completed, failure.userMessage)
+    }
+
+    private suspend fun finishCompletedTask(id: String?, completed: Int, total: Int) = withContext(NonCancellable) {
+        updateTask(
+            id,
+            if (completed == total) OperationTaskState.SUCCESS else OperationTaskState.PARTIAL_SUCCESS,
+            completed,
+            total - completed,
+            if (completed == total) null else "已跳过 ${total - completed} 项",
+        )
     }
 
     fun compress(outputName: String) {
@@ -1333,6 +1429,7 @@ private sealed class PendingConflict {
     abstract val completed: List<DirectoryEntry>
     abstract val persistentAction: ConflictAction?
     abstract val totalCount: Int
+    abstract val taskId: String?
 
     data class Move(
         val selection: BrowserMoveSelection,
@@ -1340,6 +1437,7 @@ private sealed class PendingConflict {
         override val index: Int,
         override val completed: List<DirectoryEntry>,
         override val persistentAction: ConflictAction?,
+        override val taskId: String?,
     ) : PendingConflict() {
         override val totalCount: Int get() = selection.entries.size
     }
@@ -1350,6 +1448,7 @@ private sealed class PendingConflict {
         override val index: Int,
         override val completed: List<DirectoryEntry>,
         override val persistentAction: ConflictAction?,
+        override val taskId: String?,
     ) : PendingConflict() {
         override val totalCount: Int get() = selection.entries.size
     }

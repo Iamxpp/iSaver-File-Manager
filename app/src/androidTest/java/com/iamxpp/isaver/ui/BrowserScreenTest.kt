@@ -27,6 +27,10 @@ import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenameItem
 import com.iamxpp.isaver.fileops.BatchRenamePlan
 import com.iamxpp.isaver.fileops.BatchRenameRule
+import com.iamxpp.isaver.tasks.OperationRecoveryPolicy
+import com.iamxpp.isaver.tasks.OperationTask
+import com.iamxpp.isaver.tasks.OperationTaskState
+import com.iamxpp.isaver.tasks.OperationTaskType
 import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesSaveAction
@@ -251,6 +255,38 @@ class BrowserScreenTest {
             assertEquals("new", previewRule?.replacement)
             assertTrue(executed)
         }
+    }
+
+    @Test
+    fun taskCenterShowsPersistedProgressAndClearsFinishedTasks() {
+        var cleared = false
+        val task = OperationTask(
+            id = "task-1",
+            type = OperationTaskType.COPY,
+            state = OperationTaskState.RUNNING,
+            totalItems = 3,
+            completedItems = 1,
+            failedItems = 0,
+            recoveryPolicy = OperationRecoveryPolicy.NEVER_REPLAY,
+            message = null,
+            createdAt = 1,
+            updatedAt = 2,
+        )
+        compose.setContent {
+            BrowserScreen(
+                state = state().copy(operationTasks = listOf(task)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onClearFinishedTasks = { cleared = true },
+            )
+        }
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("任务中心").assertIsDisplayed().performClick()
+        compose.onNodeWithText("复制").assertIsDisplayed()
+        compose.onNodeWithText("运行中 · 1/3").assertIsDisplayed()
+        compose.onNodeWithText("清理已完成").performClick()
+
+        compose.runOnIdle { assertTrue(cleared) }
     }
 
     @Test

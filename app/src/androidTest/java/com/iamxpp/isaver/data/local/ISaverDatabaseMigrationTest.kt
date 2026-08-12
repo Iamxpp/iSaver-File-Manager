@@ -49,6 +49,23 @@ class ISaverDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration2To3CreatesPersistentOperationTasks() {
+        migrationHelper.createDatabase(TEST_DATABASE, 2).close()
+
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            3,
+            true,
+            ISaverDatabase.MIGRATION_2_3,
+        )
+
+        migrated.query("SELECT COUNT(*) FROM operation_tasks").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "isaver-migration-test"
     }

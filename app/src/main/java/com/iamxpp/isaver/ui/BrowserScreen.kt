@@ -67,6 +67,8 @@ import com.iamxpp.isaver.ui.theme.ISaverCard
 import com.iamxpp.isaver.ui.theme.ISaverDivider
 import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
+import com.iamxpp.isaver.tasks.OperationTask
+import com.iamxpp.isaver.tasks.OperationTaskState
 import java.text.DateFormat
 import java.util.Date
 
@@ -105,6 +107,7 @@ fun BrowserScreen(
     onPreviewBatchRename: ((BatchRenameRule) -> Unit)? = null,
     onExecuteBatchRename: (() -> Unit)? = null,
     onDismissBatchRename: () -> Unit = {},
+    onClearFinishedTasks: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
     onDismissCompressionMessage: () -> Unit = {},
     onDismissPresentationError: () -> Unit = {},
@@ -127,6 +130,7 @@ fun BrowserScreen(
     var actionEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var renameDialogEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var batchRenameDialogVisible by remember { mutableStateOf(false) }
+    var taskCenterVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.currentPath) {
         actionEntry = null
@@ -195,6 +199,10 @@ fun BrowserScreen(
                         state.selectedEntries.isNotEmpty() &&
                         !state.compressing,
                     canConnectServer = onConnectServer != null,
+                    onOpenTasks = {
+                        menuExpanded = false
+                        taskCenterVisible = true
+                    },
                 )
             },
         )
@@ -388,6 +396,13 @@ fun BrowserScreen(
                 batchRenameDialogVisible = false
                 onDismissBatchRename()
             },
+        )
+    }
+    if (taskCenterVisible) {
+        OperationTaskDialog(
+            tasks = state.operationTasks,
+            onClearFinished = onClearFinishedTasks,
+            onDismiss = { taskCenterVisible = false },
         )
     }
     when (remoteConnectionState) {
@@ -812,6 +827,62 @@ private fun BatchRenameDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !running) { Text("取消") } },
     )
+}
+
+@Composable
+private fun OperationTaskDialog(
+    tasks: List<OperationTask>,
+    onClearFinished: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("任务中心") },
+        text = {
+            if (tasks.isEmpty()) {
+                Text("暂无任务", color = ISaverSecondaryText)
+            } else {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                    items(tasks, key = { it.id }) { task ->
+                        ListItem(
+                            headlineContent = { Text(task.type.taskLabel()) },
+                            supportingContent = {
+                                Text("${task.state.stateLabel()} · ${task.completedItems}/${task.totalItems}" +
+                                    (task.message?.let { " · $it" } ?: ""))
+                            },
+                            colors = ListItemDefaults.colors(containerColor = ISaverCard),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        dismissButton = { TextButton(onClick = onClearFinished) { Text("清理已完成") } },
+    )
+}
+
+private fun com.iamxpp.isaver.tasks.OperationTaskType.taskLabel(): String = when (this) {
+    com.iamxpp.isaver.tasks.OperationTaskType.COPY -> "复制"
+    com.iamxpp.isaver.tasks.OperationTaskType.MOVE -> "移动"
+    com.iamxpp.isaver.tasks.OperationTaskType.DELETE -> "删除"
+    com.iamxpp.isaver.tasks.OperationTaskType.ARCHIVE -> "压缩"
+    com.iamxpp.isaver.tasks.OperationTaskType.EXTRACT -> "解压"
+    com.iamxpp.isaver.tasks.OperationTaskType.CHECKSUM -> "校验和"
+    com.iamxpp.isaver.tasks.OperationTaskType.SEARCH -> "深度搜索"
+}
+
+private fun OperationTaskState.stateLabel(): String = when (this) {
+    OperationTaskState.QUEUED -> "等待中"
+    OperationTaskState.RUNNING -> "运行中"
+    OperationTaskState.PAUSED -> "已暂停"
+    OperationTaskState.CANCELLING -> "取消中"
+    OperationTaskState.NEEDS_ACTION -> "需处理"
+    OperationTaskState.SUCCESS -> "成功"
+    OperationTaskState.PARTIAL_SUCCESS -> "部分成功"
+    OperationTaskState.FAILED -> "失败"
+    OperationTaskState.CANCELLED -> "已取消"
+    OperationTaskState.OUTCOME_UNCERTAIN -> "结果不确定"
+    OperationTaskState.NEEDS_REVIEW -> "需核对"
 }
 
 @Composable
