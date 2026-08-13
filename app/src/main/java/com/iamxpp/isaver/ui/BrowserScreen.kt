@@ -135,6 +135,8 @@ fun BrowserScreen(
     onDismissFileOpenError: () -> Unit = {},
     onDismissPreview: () -> Unit = {},
     onEditPreview: ((DirectoryEntry) -> Unit)? = null,
+    onOpenHex: ((DirectoryEntry) -> Unit)? = null,
+    onCompareSelection: ((List<DirectoryEntry>) -> Unit)? = null,
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
     onShareSelection: (() -> Unit)? = null,
     onRecycleSelection: ((List<DirectoryEntry>) -> Unit)? = null,
@@ -321,7 +323,7 @@ fun BrowserScreen(
                     TextButton(onClick = onClearSelection) { Text("清除") }
                 }
                 if (onShareSelection != null || onMoveSelection != null || onCopySelection != null ||
-                    onPreviewBatchRename != null || onRecycleSelection != null) {
+                    onPreviewBatchRename != null || onRecycleSelection != null || onCompareSelection != null) {
                     Row(Modifier.fillMaxWidth()) {
                         onShareSelection?.let { share ->
                             TextButton(
@@ -350,6 +352,14 @@ fun BrowserScreen(
                                 onClick = { batchRenameDialogVisible = true },
                                 modifier = Modifier.weight(1f),
                             ) { Text("批量重命名") }
+                        }
+                        if (onCompareSelection != null && state.selectedEntries.size == 2 &&
+                            state.selectedEntries.all { it.type == EntryType.FILE && it.readable && !it.symbolicLink }
+                        ) {
+                            TextButton(
+                                onClick = { onCompareSelection(state.selectedEntries.toList()) },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("比较") }
                         }
                     }
                     onRecycleSelection?.let {
@@ -426,6 +436,8 @@ fun BrowserScreen(
     actionEntry?.let { entry ->
         FileActionsDialog(
             entry = entry,
+            hexVisible = onOpenHex != null && entry.type == EntryType.FILE,
+            hexEnabled = entry.readable && !entry.symbolicLink,
             openWithVisible = onOpenWithEntry != null && entry.type == EntryType.FILE,
             openWithEnabled = !state.openingFile && entry.readable && !entry.symbolicLink,
             shareVisible = onShareEntry != null && entry.type != EntryType.OTHER,
@@ -446,6 +458,10 @@ fun BrowserScreen(
             onOpenWith = {
                 actionEntry = null
                 onOpenWithEntry?.invoke(entry)
+            },
+            onOpenHex = {
+                actionEntry = null
+                onOpenHex?.invoke(entry)
             },
             onCompress = {
                 actionEntry = null
@@ -842,6 +858,8 @@ private fun decodePreviewBitmap(bytes: ByteArray): Bitmap? {
 @Composable
 private fun FileActionsDialog(
     entry: DirectoryEntry,
+    hexVisible: Boolean,
+    hexEnabled: Boolean,
     openWithVisible: Boolean,
     openWithEnabled: Boolean,
     shareVisible: Boolean,
@@ -856,6 +874,7 @@ private fun FileActionsDialog(
     deleteVisible: Boolean,
     deleteEnabled: Boolean,
     onOpenWith: () -> Unit,
+    onOpenHex: () -> Unit,
     onShare: () -> Unit,
     onCompress: () -> Unit,
     onMove: () -> Unit,
@@ -870,6 +889,7 @@ private fun FileActionsDialog(
 ) {
     val actions = buildList {
         if (openWithVisible) add(FileAction("打开方式", openWithEnabled, onOpenWith))
+        if (hexVisible) add(FileAction("Hex 查看", hexEnabled, onOpenHex))
         if (shareVisible) add(FileAction("分享", shareEnabled, onShare))
         if (moveVisible) add(FileAction("移动到", moveEnabled, onMove))
         if (copyVisible) add(FileAction("复制到", copyEnabled, onCopy))

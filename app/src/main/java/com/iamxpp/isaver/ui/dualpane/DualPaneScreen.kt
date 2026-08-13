@@ -55,6 +55,7 @@ data class DualPaneBrowserCallbacks(
     val dismissOpenError: () -> Unit,
     val dismissPreview: () -> Unit,
     val editPreview: (DirectoryEntry) -> Unit = {},
+    val compareSelection: (List<DirectoryEntry>) -> Unit = {},
 )
 
 @Composable
@@ -178,6 +179,7 @@ private fun Pane(
             onDismissFileOpenError = callbacks.dismissOpenError,
             onDismissPreview = callbacks.dismissPreview,
             onEditPreview = callbacks.editPreview,
+            onCompareSelection = callbacks.compareSelection,
             fileActionsEnabled = false,
             selectionOnlyLongPress = true,
             forceListMode = true,

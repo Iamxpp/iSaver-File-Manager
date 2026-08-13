@@ -42,6 +42,8 @@ import com.iamxpp.isaver.fileops.FileMoveRepository
 import com.iamxpp.isaver.fileops.FileCopyRepository
 import com.iamxpp.isaver.fileops.FileRenameRepository
 import com.iamxpp.isaver.fileops.FileChecksumRepository
+import com.iamxpp.isaver.filetools.FileComparisonRepository
+import com.iamxpp.isaver.filetools.HexViewerRepository
 import com.iamxpp.isaver.tasks.OperationTaskRepository
 import com.iamxpp.isaver.texteditor.EditorContent
 import com.iamxpp.isaver.texteditor.EditorContentCache
@@ -239,6 +241,10 @@ class ISaverApplication : Application() {
         FileRenameRepository(rootFileSystem)
     }
     internal val fileChecksumRepository: FileChecksumRepository by lazy { FileChecksumRepository(rootFileSystem) }
+    internal val hexViewerRepository by lazy { HexViewerRepository(rootFileSystem) }
+    internal val fileComparisonRepository by lazy {
+        FileComparisonRepository(rootFileSystem, fileChecksumRepository)
+    }
     internal val bookmarkRepository: BookmarkRepository by lazy { BookmarkRepository(database.bookmarkDao()) }
     internal val virtualViewRepository: VirtualViewRepository by lazy { VirtualViewRepository(database) }
     internal val operationTaskRepository: OperationTaskRepository by lazy {

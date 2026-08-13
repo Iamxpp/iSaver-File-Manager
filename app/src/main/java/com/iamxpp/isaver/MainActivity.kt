@@ -56,6 +56,8 @@ import com.iamxpp.isaver.ui.dualpane.PaneId
 import com.iamxpp.isaver.ui.dualpane.other
 import com.iamxpp.isaver.texteditor.TextEditorScreen
 import com.iamxpp.isaver.texteditor.TextEditorViewModel
+import com.iamxpp.isaver.filetools.FileToolsScreen
+import com.iamxpp.isaver.filetools.FileToolsViewModel
 import kotlinx.coroutines.Dispatchers
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -124,6 +126,10 @@ class MainActivity : ComponentActivity() {
         val app = application as ISaverApplication
         TextEditorViewModelFactory(app.textEditorRepository, app.textDraftStore)
     }
+    private val fileToolsViewModel by viewModels<FileToolsViewModel> {
+        val app = application as ISaverApplication
+        FileToolsViewModelFactory(app.hexViewerRepository, app.fileComparisonRepository)
+    }
     private val recentViewModel by viewModels<RecentViewModel> {
         val app = application as ISaverApplication
         RecentViewModelFactory(app.recentRepository, app.rootFileSystem)
@@ -167,6 +173,7 @@ class MainActivity : ComponentActivity() {
                     val secondaryBrowserState by secondaryBrowserViewModel.state.collectAsStateWithLifecycle()
                     val dualPaneState by dualPaneViewModel.state.collectAsStateWithLifecycle()
                     val textEditorState by textEditorViewModel.state.collectAsStateWithLifecycle()
+                    val fileToolsState by fileToolsViewModel.state.collectAsStateWithLifecycle()
                     val recentState by recentViewModel.state.collectAsStateWithLifecycle()
                     val archiveState by archiveViewModel.state.collectAsStateWithLifecycle()
                     val remoteConnectionState by remoteConnectionViewModel.state.collectAsStateWithLifecycle()
@@ -508,7 +515,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     BackHandler(
-                        enabled = !textEditorState.visible && (
+                        enabled = !textEditorState.visible && !fileToolsState.visible && (
                             pickerActive || movePickerActive || copyPickerActive || destination !is HomeDestination.Tab
                         ),
                     ) {
@@ -532,7 +539,17 @@ class MainActivity : ComponentActivity() {
                             destination is HomeDestination.CopyTarget -> cancelCopyPicker()
                         }
                     }
-                    if (textEditorState.visible) {
+                    if (fileToolsState.visible) {
+                        FileToolsScreen(
+                            state = fileToolsState,
+                            onBack = fileToolsViewModel::close,
+                            onPreviousPage = fileToolsViewModel::previousHexPage,
+                            onNextPage = fileToolsViewModel::nextHexPage,
+                            onJumpToOffset = fileToolsViewModel::jumpToOffset,
+                            onAlgorithmChange = fileToolsViewModel::setChecksumAlgorithm,
+                            onRetry = fileToolsViewModel::retry,
+                        )
+                    } else if (textEditorState.visible) {
                         TextEditorScreen(
                             state = textEditorState,
                             onTextChange = textEditorViewModel::updateText,
@@ -574,6 +591,10 @@ class MainActivity : ComponentActivity() {
                                 browserViewModel.dismissPreview()
                                 textEditorViewModel.open(entry, browserState.currentPath)
                             },
+                            compareSelection = { entries ->
+                                browserViewModel.clearSelection()
+                                fileToolsViewModel.openComparison(entries)
+                            },
                         ),
                         secondaryDualPaneCallbacks = DualPaneBrowserCallbacks(
                             enterDirectory = { entry ->
@@ -595,6 +616,10 @@ class MainActivity : ComponentActivity() {
                             editPreview = { entry ->
                                 secondaryBrowserViewModel.dismissPreview()
                                 textEditorViewModel.open(entry, secondaryBrowserState.currentPath)
+                            },
+                            compareSelection = { entries ->
+                                secondaryBrowserViewModel.clearSelection()
+                                fileToolsViewModel.openComparison(entries)
                             },
                         ),
                         onActivatePane = dualPaneViewModel::activate,
@@ -741,6 +766,11 @@ class MainActivity : ComponentActivity() {
                         onEditPreview = { entry ->
                             browserViewModel.dismissPreview()
                             textEditorViewModel.open(entry, browserState.currentPath)
+                        },
+                        onOpenHex = fileToolsViewModel::openHex,
+                        onCompareSelection = { entries ->
+                            browserViewModel.clearSelection()
+                            fileToolsViewModel.openComparison(entries)
                         },
                         onShareBrowserEntry = browserViewModel::shareEntry,
                         onShareBrowserSelection = browserViewModel::shareSelection,
@@ -904,6 +934,17 @@ internal class TextEditorViewModelFactory(
         require(modelClass.isAssignableFrom(TextEditorViewModel::class.java))
         @Suppress("UNCHECKED_CAST")
         return TextEditorViewModel(repository, drafts) as T
+    }
+}
+
+internal class FileToolsViewModelFactory(
+    private val hexRepository: com.iamxpp.isaver.filetools.HexViewerRepository,
+    private val comparisonRepository: com.iamxpp.isaver.filetools.FileComparisonRepository,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(FileToolsViewModel::class.java))
+        @Suppress("UNCHECKED_CAST")
+        return FileToolsViewModel(hexRepository, comparisonRepository) as T
     }
 }
 
