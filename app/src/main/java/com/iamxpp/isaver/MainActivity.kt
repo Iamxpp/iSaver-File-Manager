@@ -10,6 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -51,6 +54,8 @@ import com.iamxpp.isaver.ui.dualpane.DualPaneBrowserCallbacks
 import com.iamxpp.isaver.ui.dualpane.DualPaneViewModel
 import com.iamxpp.isaver.ui.dualpane.PaneId
 import com.iamxpp.isaver.ui.dualpane.other
+import com.iamxpp.isaver.texteditor.TextEditorScreen
+import com.iamxpp.isaver.texteditor.TextEditorViewModel
 import kotlinx.coroutines.Dispatchers
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -115,6 +120,10 @@ class MainActivity : ComponentActivity() {
         ViewModelProvider(this, factory).get("secondary-browser", BrowserViewModel::class.java)
     }
     private val dualPaneViewModel by viewModels<DualPaneViewModel>()
+    private val textEditorViewModel by viewModels<TextEditorViewModel> {
+        val app = application as ISaverApplication
+        TextEditorViewModelFactory(app.textEditorRepository, app.textDraftStore)
+    }
     private val recentViewModel by viewModels<RecentViewModel> {
         val app = application as ISaverApplication
         RecentViewModelFactory(app.recentRepository, app.rootFileSystem)
@@ -157,6 +166,7 @@ class MainActivity : ComponentActivity() {
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
                     val secondaryBrowserState by secondaryBrowserViewModel.state.collectAsStateWithLifecycle()
                     val dualPaneState by dualPaneViewModel.state.collectAsStateWithLifecycle()
+                    val textEditorState by textEditorViewModel.state.collectAsStateWithLifecycle()
                     val recentState by recentViewModel.state.collectAsStateWithLifecycle()
                     val archiveState by archiveViewModel.state.collectAsStateWithLifecycle()
                     val remoteConnectionState by remoteConnectionViewModel.state.collectAsStateWithLifecycle()
@@ -166,6 +176,17 @@ class MainActivity : ComponentActivity() {
                     val copyPickerActive = browserState.copySelection != null
                     val fileOperationInFlight = browserState.movingFile || browserState.copyingFile || browserState.renamingFile ||
                         secondaryBrowserState.movingFile || secondaryBrowserState.copyingFile || secondaryBrowserState.renamingFile
+                    var editorWasVisible by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(textEditorState.visible) {
+                        if (textEditorState.visible) {
+                            editorWasVisible = true
+                        } else if (editorWasVisible) {
+                            editorWasVisible = false
+                            browserViewModel.retry()
+                            if (dualPaneState.enabled) secondaryBrowserViewModel.retry()
+                        }
+                    }
 
                     LaunchedEffect(dualPaneState.enabled) {
                         if (dualPaneState.enabled) {
@@ -487,8 +508,9 @@ class MainActivity : ComponentActivity() {
                     }
 
                     BackHandler(
-                        enabled = pickerActive || movePickerActive || copyPickerActive ||
-                            destination !is HomeDestination.Tab,
+                        enabled = !textEditorState.visible && (
+                            pickerActive || movePickerActive || copyPickerActive || destination !is HomeDestination.Tab
+                        ),
                     ) {
                         when {
                             fileOperationInFlight -> Unit
@@ -510,7 +532,22 @@ class MainActivity : ComponentActivity() {
                             destination is HomeDestination.CopyTarget -> cancelCopyPicker()
                         }
                     }
-                    ISaverHomeScreen(
+                    if (textEditorState.visible) {
+                        TextEditorScreen(
+                            state = textEditorState,
+                            onTextChange = textEditorViewModel::updateText,
+                            onEncodingChange = textEditorViewModel::setEncoding,
+                            onLineEndingChange = textEditorViewModel::setLineEnding,
+                            onBomChange = textEditorViewModel::setBom,
+                            onReplaceAll = textEditorViewModel::replaceAll,
+                            onSave = textEditorViewModel::save,
+                            onReload = textEditorViewModel::reload,
+                            onBack = textEditorViewModel::requestClose,
+                            onDiscard = textEditorViewModel::discardAndClose,
+                            onCancelClose = textEditorViewModel::cancelClose,
+                            onDismissError = textEditorViewModel::dismissError,
+                        )
+                    } else ISaverHomeScreen(
                         homeState = homeState,
                         locationState = locationState,
                         browserState = browserState,
@@ -533,6 +570,10 @@ class MainActivity : ComponentActivity() {
                             dismissCopyError = browserViewModel::dismissFileCopyError,
                             dismissOpenError = browserViewModel::dismissFileOpenError,
                             dismissPreview = browserViewModel::dismissPreview,
+                            editPreview = { entry ->
+                                browserViewModel.dismissPreview()
+                                textEditorViewModel.open(entry, browserState.currentPath)
+                            },
                         ),
                         secondaryDualPaneCallbacks = DualPaneBrowserCallbacks(
                             enterDirectory = { entry ->
@@ -551,6 +592,10 @@ class MainActivity : ComponentActivity() {
                             dismissCopyError = secondaryBrowserViewModel::dismissFileCopyError,
                             dismissOpenError = secondaryBrowserViewModel::dismissFileOpenError,
                             dismissPreview = secondaryBrowserViewModel::dismissPreview,
+                            editPreview = { entry ->
+                                secondaryBrowserViewModel.dismissPreview()
+                                textEditorViewModel.open(entry, secondaryBrowserState.currentPath)
+                            },
                         ),
                         onActivatePane = dualPaneViewModel::activate,
                         onCloseDualPane = { dualPaneViewModel.setEnabled(false) },
@@ -693,6 +738,10 @@ class MainActivity : ComponentActivity() {
                         onChecksumAlgorithmChange = browserViewModel::setChecksumAlgorithm,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onDismissPreview = browserViewModel::dismissPreview,
+                        onEditPreview = { entry ->
+                            browserViewModel.dismissPreview()
+                            textEditorViewModel.open(entry, browserState.currentPath)
+                        },
                         onShareBrowserEntry = browserViewModel::shareEntry,
                         onShareBrowserSelection = browserViewModel::shareSelection,
                         onRecycleBrowserSelection = browserViewModel::recycleSelection,
@@ -844,6 +893,17 @@ class MainActivity : ComponentActivity() {
             source = HomeTab.VIEWS,
             recordAccess = false,
         )
+    }
+}
+
+internal class TextEditorViewModelFactory(
+    private val repository: com.iamxpp.isaver.texteditor.TextEditorRepository,
+    private val drafts: com.iamxpp.isaver.texteditor.TextDraftStore,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(TextEditorViewModel::class.java))
+        @Suppress("UNCHECKED_CAST")
+        return TextEditorViewModel(repository, drafts) as T
     }
 }
 

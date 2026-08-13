@@ -288,9 +288,30 @@ class RootTransferHelperTest {
         }
     }
 
-    private fun source() = RootTransferSource(
+    @Test
+    fun `atomic replace command binds source version and hostile basename`() {
+        val command = helper.replaceFileFromStream(
+            original = "/parent original",
+            canonical = "/parent canonical",
+            sourceName = com.iamxpp.isaver.domain.EntryName.parse("old';\n.txt").getOrThrow(),
+            temporaryName = ".isaver-edit-123e4567-e89b-12d3-a456-426614174000",
+            parentIdentity = RootFileIdentity(1L, 2L),
+            expectedVersion = RootFileVersion(11L, 3L, 4L, 5L, 6L, 7L, 8L),
+            source = source(expectedSize = 13L),
+            timeoutMillis = 1_250L,
+        )
+
+        assertTrue(command.startsWith("set -o pipefail\n'/system/bin/content' 'read' '--uri'"))
+        assertTrue(command.contains("'replace-file-stdin' '/parent original' '/parent canonical'"))
+        assertTrue(command.contains("'old'\\'';\n.txt' '.isaver-edit-123e4567-e89b-12d3-a456-426614174000'"))
+        assertTrue(command.endsWith("'1' '2' '11' '3' '4' '5' '6' '7' '8' '13'"))
+        assertFalse(command.contains(" rm "))
+        assertFalse(command.contains("sh -c"))
+    }
+
+    private fun source(expectedSize: Long = 5L) = RootTransferSource(
         contentUri = "content://com.iamxpp.isaver.incoming-stream/incoming/${"ab".repeat(32)}",
-        expectedSizeBytes = 5L,
+        expectedSizeBytes = expectedSize,
         token = "ab".repeat(32),
     )
 }

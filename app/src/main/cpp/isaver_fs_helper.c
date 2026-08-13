@@ -726,6 +726,23 @@ static int identity_matches(
         (unsigned long long) status->st_ino == inode;
 }
 
+static int edit_stage_name_ok(const char *name) {
+    static const char prefix[] = ".isaver-edit-";
+    if (name == NULL || strncmp(name, prefix, sizeof(prefix) - 1) != 0) return 0;
+    const char *uuid = name + sizeof(prefix) - 1;
+    if (strlen(uuid) != 36) return 0;
+    for (size_t i = 0; i < 36; ++i) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (uuid[i] != '-') return 0;
+        } else if (!((uuid[i] >= '0' && uuid[i] <= '9') ||
+                     (uuid[i] >= 'a' && uuid[i] <= 'f') ||
+                     (uuid[i] >= 'A' && uuid[i] <= 'F'))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int parse_decimal_u64(const char *text, unsigned long long *value) {
     if (text == NULL || text[0] == '\0' || text[0] == '-') return 0;
     errno = 0;
@@ -851,6 +868,51 @@ static int regular_file_version_matches(
         current->st_mtim.tv_nsec == initial->st_mtim.tv_nsec &&
         current->st_ctim.tv_sec == initial->st_ctim.tv_sec &&
         current->st_ctim.tv_nsec == initial->st_ctim.tv_nsec;
+}
+
+static int exchanged_regular_file_matches(
+    const struct stat *current,
+    const struct stat *selected
+) {
+    return S_ISREG(current->st_mode) &&
+        current->st_dev == selected->st_dev &&
+        current->st_ino == selected->st_ino &&
+        current->st_size == selected->st_size &&
+        current->st_mtim.tv_sec == selected->st_mtim.tv_sec &&
+        current->st_mtim.tv_nsec == selected->st_mtim.tv_nsec &&
+        (current->st_mode & 07777) == (selected->st_mode & 07777) &&
+        current->st_uid == selected->st_uid && current->st_gid == selected->st_gid;
+}
+
+static int retired_emulated_file_matches(
+    const struct stat *current,
+    const struct stat *selected
+) {
+    return S_ISREG(current->st_mode) &&
+        current->st_size == selected->st_size &&
+        current->st_mtim.tv_sec == selected->st_mtim.tv_sec &&
+        current->st_mtim.tv_nsec == selected->st_mtim.tv_nsec &&
+        (current->st_mode & 07777) == (selected->st_mode & 07777) &&
+        current->st_uid == selected->st_uid && current->st_gid == selected->st_gid;
+}
+
+static int regular_files_equal(int left_fd, int right_fd, unsigned long long size) {
+    unsigned char left[65536];
+    unsigned char right[65536];
+    unsigned long long offset = 0;
+    while (offset < size) {
+        size_t wanted = size - offset < sizeof(left) ? (size_t) (size - offset) : sizeof(left);
+        ssize_t left_count;
+        ssize_t right_count;
+        do { left_count = pread(left_fd, left, wanted, (off_t) offset); }
+        while (left_count < 0 && errno == EINTR);
+        do { right_count = pread(right_fd, right, wanted, (off_t) offset); }
+        while (right_count < 0 && errno == EINTR);
+        if (left_count != (ssize_t) wanted || right_count != (ssize_t) wanted ||
+            memcmp(left, right, wanted) != 0) return 0;
+        offset += wanted;
+    }
+    return 1;
 }
 
 static int preserve_modified_time(int target_fd, const struct stat *source) {
@@ -1417,6 +1479,252 @@ static int copy_publish_stdin(int argc, char **argv) {
     return copy_publish_from_fd(
         parent_fd, stage_fd, argv[4], argv[5], STDIN_FILENO, expected_size, NULL
     );
+}
+
+static int replace_file_stdin(int argc, char **argv) {
+    if (argc != 16 || !basename_ok(argv[4]) || !edit_stage_name_ok(argv[5])) return X_USAGE;
+    unsigned long long parent_device, parent_inode, expected_size, source_device, source_inode;
+    unsigned long long modified_seconds, modified_nanoseconds, changed_seconds, changed_nanoseconds;
+    unsigned long long replacement_size;
+    if (!parse_identity(argv, 6, &parent_device, &parent_inode) ||
+        !parse_u64(argv[8], &expected_size) ||
+        !parse_identity(argv, 9, &source_device, &source_inode) ||
+        !parse_u64(argv[11], &modified_seconds) ||
+        !parse_u64(argv[12], &modified_nanoseconds) ||
+        !parse_u64(argv[13], &changed_seconds) ||
+        !parse_u64(argv[14], &changed_nanoseconds) ||
+        !parse_u64(argv[15], &replacement_size) ||
+        expected_size > (unsigned long long) LLONG_MAX || replacement_size > (unsigned long long) LLONG_MAX ||
+        modified_seconds > (unsigned long long) LLONG_MAX || changed_seconds > (unsigned long long) LLONG_MAX ||
+        modified_nanoseconds > 999999999ULL || changed_nanoseconds > 999999999ULL) {
+        return X_USAGE;
+    }
+
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    int source_fd = openat(parent_fd, argv[4], O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (source_fd < 0) {
+        int result = errno == ENOENT ? X_NOT_FOUND : X_SOURCE_UNREADABLE;
+        close(parent_fd);
+        return result;
+    }
+    struct stat selected;
+    if (retry_fstat(source_fd, &selected) != 0 || !S_ISREG(selected.st_mode) ||
+        selected.st_nlink != 1 || !identity_matches(&selected, source_device, source_inode) ||
+        (unsigned long long) selected.st_size != expected_size ||
+        (unsigned long long) selected.st_mtim.tv_sec != modified_seconds ||
+        (unsigned long long) selected.st_mtim.tv_nsec != modified_nanoseconds ||
+        (unsigned long long) selected.st_ctim.tv_sec != changed_seconds ||
+        (unsigned long long) selected.st_ctim.tv_nsec != changed_nanoseconds) {
+        close(source_fd);
+        close(parent_fd);
+        return X_SOURCE_CHANGED;
+    }
+
+    int temporary_fd = openat(
+        parent_fd, argv[5], O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+        selected.st_mode & 07777
+    );
+    if (temporary_fd < 0) {
+        int result = write_errno(errno);
+        close(source_fd);
+        close(parent_fd);
+        return result;
+    }
+    struct stat temporary_initial;
+    if (retry_fstat(temporary_fd, &temporary_initial) != 0 || !S_ISREG(temporary_initial.st_mode) ||
+        temporary_initial.st_nlink != 1) {
+        close(temporary_fd);
+        close(source_fd);
+        close(parent_fd);
+        fprintf(stderr, "replace-uncertain:temp-created\n");
+        return X_OUTCOME_UNCERTAIN;
+    }
+
+    int result = 0;
+    if (fchmod(temporary_fd, selected.st_mode & 07777) != 0) result = write_errno(errno);
+    if (result == 0 &&
+        (temporary_initial.st_uid != selected.st_uid || temporary_initial.st_gid != selected.st_gid) &&
+        fchown(temporary_fd, selected.st_uid, selected.st_gid) != 0) {
+        result = write_errno(errno);
+    }
+    unsigned char buffer[65536];
+    unsigned long long copied = 0;
+    while (result == 0 && copied < replacement_size) {
+        size_t wanted = replacement_size - copied < sizeof(buffer)
+            ? (size_t) (replacement_size - copied) : sizeof(buffer);
+        ssize_t read_count;
+        do { read_count = read(STDIN_FILENO, buffer, wanted); } while (read_count < 0 && errno == EINTR);
+        if (read_count < 0) { result = X_SOURCE_UNREADABLE; break; }
+        if (read_count == 0) { result = X_SOURCE_CHANGED; break; }
+        size_t offset = 0;
+        while (offset < (size_t) read_count) {
+            ssize_t write_count;
+            do { write_count = write(temporary_fd, buffer + offset, (size_t) read_count - offset); }
+            while (write_count < 0 && errno == EINTR);
+            if (write_count <= 0) { result = write_count < 0 ? write_errno(errno) : X_IO; break; }
+            offset += (size_t) write_count;
+            copied += (unsigned long long) write_count;
+        }
+    }
+    if (result == 0) {
+        unsigned char extra;
+        ssize_t extra_count;
+        do { extra_count = read(STDIN_FILENO, &extra, 1U); } while (extra_count < 0 && errno == EINTR);
+        if (extra_count < 0) result = X_SOURCE_UNREADABLE;
+        else if (extra_count != 0) result = X_SOURCE_CHANGED;
+    }
+    if (result == 0 && fsync(temporary_fd) != 0 && errno != EINVAL) result = write_errno(errno);
+
+    struct stat replacement;
+    struct stat source_path;
+    if (result == 0 &&
+        (retry_fstat(temporary_fd, &replacement) != 0 || !S_ISREG(replacement.st_mode) ||
+         replacement.st_nlink != 1 || replacement.st_dev != temporary_initial.st_dev ||
+         replacement.st_ino != temporary_initial.st_ino ||
+         (unsigned long long) replacement.st_size != replacement_size ||
+         (replacement.st_mode & 07777) != (selected.st_mode & 07777) ||
+         replacement.st_uid != selected.st_uid || replacement.st_gid != selected.st_gid ||
+         retry_fstat(source_fd, &source_path) != 0 || !regular_file_version_matches(&source_path, &selected) ||
+         retry_fstatat(parent_fd, argv[4], &source_path, AT_SYMLINK_NOFOLLOW) != 0 ||
+         !regular_file_version_matches(&source_path, &selected))) {
+        result = X_SOURCE_CHANGED;
+    }
+
+    if (result != 0) {
+        struct stat visible_temp;
+        int safe_cleanup = retry_fstatat(parent_fd, argv[5], &visible_temp, AT_SYMLINK_NOFOLLOW) == 0 &&
+            identity_matches(&visible_temp, (unsigned long long) temporary_initial.st_dev,
+                             (unsigned long long) temporary_initial.st_ino) &&
+            unlinkat(parent_fd, argv[5], 0) == 0;
+        close(temporary_fd);
+        close(source_fd);
+        close(parent_fd);
+        if (!safe_cleanup) fprintf(stderr, "replace-uncertain:cleanup\n");
+        return safe_cleanup ? result : X_OUTCOME_UNCERTAIN;
+    }
+
+    int emulated_fallback = 0;
+    if (syscall(SYS_renameat2, parent_fd, argv[5], parent_fd, argv[4], RENAME_EXCHANGE) != 0) {
+        int exchange_error = errno;
+        if ((exchange_error == EINVAL || exchange_error == ENOTSUP || exchange_error == EOPNOTSUPP) &&
+            is_emulated_storage_fd(parent_fd)) {
+            struct stat held_before_fallback;
+            struct stat path_before_fallback;
+            if (retry_fstat(source_fd, &held_before_fallback) != 0 ||
+                !regular_file_version_matches(&held_before_fallback, &selected) ||
+                retry_fstatat(parent_fd, argv[4], &path_before_fallback, AT_SYMLINK_NOFOLLOW) != 0 ||
+                !regular_file_version_matches(&path_before_fallback, &selected)) {
+                unlinkat(parent_fd, argv[5], 0);
+                close(temporary_fd);
+                close(source_fd);
+                close(parent_fd);
+                return X_SOURCE_CHANGED;
+            }
+            if (renameat(parent_fd, argv[5], parent_fd, argv[4]) != 0) {
+                int rename_error = errno;
+                unlinkat(parent_fd, argv[5], 0);
+                close(temporary_fd);
+                close(source_fd);
+                close(parent_fd);
+                return write_errno(rename_error);
+            }
+            emulated_fallback = 1;
+        } else {
+            unlinkat(parent_fd, argv[5], 0);
+            close(temporary_fd);
+            close(source_fd);
+            close(parent_fd);
+            return write_errno(exchange_error);
+        }
+    }
+
+    struct stat published;
+    struct stat replacement_after_publish;
+    struct stat retired;
+    int published_fd = -1;
+    int published_verified = 0;
+    if (retry_fstat(temporary_fd, &replacement_after_publish) != 0 ||
+        !S_ISREG(replacement_after_publish.st_mode) || replacement_after_publish.st_nlink != 1 ||
+        (unsigned long long) replacement_after_publish.st_size != replacement_size ||
+        (replacement_after_publish.st_mode & 07777) != (selected.st_mode & 07777) ||
+        replacement_after_publish.st_uid != selected.st_uid || replacement_after_publish.st_gid != selected.st_gid) {
+        close(temporary_fd);
+        close(source_fd);
+        close(parent_fd);
+        fprintf(stderr, "replace-uncertain:publish-verify\n");
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (emulated_fallback) {
+        published_fd = openat(parent_fd, argv[4], O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        struct stat published_fd_status;
+        struct stat published_after_read;
+        int check_open = published_fd >= 0;
+        int check_fd_stat = check_open && retry_fstat(published_fd, &published_fd_status) == 0;
+        int check_path_stat = retry_fstatat(parent_fd, argv[4], &published, AT_SYMLINK_NOFOLLOW) == 0;
+        int check_identity = check_fd_stat && check_path_stat &&
+            identity_matches(&published, (unsigned long long) published_fd_status.st_dev,
+                             (unsigned long long) published_fd_status.st_ino);
+        int check_attributes = check_path_stat && (unsigned long long) published.st_size == replacement_size &&
+            (published.st_mode & 07777) == (selected.st_mode & 07777) &&
+            published.st_uid == selected.st_uid && published.st_gid == selected.st_gid;
+        int check_bytes = check_open && regular_files_equal(temporary_fd, published_fd, replacement_size);
+        int check_stable = check_path_stat &&
+            retry_fstatat(parent_fd, argv[4], &published_after_read, AT_SYMLINK_NOFOLLOW) == 0 &&
+            regular_file_version_matches(&published_after_read, &published);
+        published_verified = check_open && check_fd_stat && check_path_stat && check_identity &&
+            check_attributes && check_bytes && check_stable;
+        if (!published_verified) {
+            fprintf(stderr, "replace-check:%d%d%d%d%d%d%d\n", check_open, check_fd_stat,
+                    check_path_stat, check_identity, check_attributes, check_bytes, check_stable);
+        }
+    } else {
+        published_verified = retry_fstatat(parent_fd, argv[4], &published, AT_SYMLINK_NOFOLLOW) == 0 &&
+            identity_matches(&published, (unsigned long long) replacement_after_publish.st_dev,
+                             (unsigned long long) replacement_after_publish.st_ino) &&
+            (unsigned long long) published.st_size == replacement_size;
+    }
+    int retired_verified = retry_fstat(source_fd, &retired) == 0 &&
+        (emulated_fallback
+            ? retired_emulated_file_matches(&retired, &selected)
+            : exchanged_regular_file_matches(&retired, &selected));
+    if (!published_verified || !retired_verified) {
+        if (published_fd >= 0) close(published_fd);
+        close(temporary_fd);
+        close(source_fd);
+        close(parent_fd);
+        fprintf(stderr, "replace-uncertain:publish-verify\n");
+        return X_OUTCOME_UNCERTAIN;
+    }
+    if (published_fd >= 0) close(published_fd);
+    int temporary_cleared;
+    if (emulated_fallback) {
+        temporary_cleared = retry_fstatat(
+            parent_fd, argv[5], &retired, AT_SYMLINK_NOFOLLOW
+        ) != 0 && errno == ENOENT;
+    } else {
+        temporary_cleared = unlinkat(parent_fd, argv[5], 0) == 0;
+    }
+    int directory_sync = fsync(parent_fd);
+    int directory_sync_error = directory_sync == 0 ? 0 : errno;
+    if (!temporary_cleared ||
+        (directory_sync != 0 && directory_sync_error != EINVAL && directory_sync_error != EROFS &&
+         !(emulated_fallback && (directory_sync_error == EBADF || directory_sync_error == EACCES ||
+                                 directory_sync_error == EPERM || directory_sync_error == ENOTSUP ||
+                                 directory_sync_error == EOPNOTSUPP)))) {
+        close(temporary_fd);
+        close(source_fd);
+        close(parent_fd);
+        fprintf(stderr, "replace-uncertain:finalize-temp-%d-sync-%d\n",
+                temporary_cleared, directory_sync_error);
+        return X_OUTCOME_UNCERTAIN;
+    }
+    printf("%llu:%llu:%llu\n", (unsigned long long) published.st_dev,
+           (unsigned long long) published.st_ino, replacement_size);
+    close(temporary_fd);
+    close(source_fd);
+    close(parent_fd);
+    return 0;
 }
 
 static int copy_file_publish(int argc, char **argv) {
@@ -2875,6 +3183,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "file-metadata") == 0) return file_metadata(argc, argv);
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
+    if (strcmp(argv[1], "replace-file-stdin") == 0) return replace_file_stdin(argc, argv);
     if (strcmp(argv[1], "copy-file-publish") == 0) return copy_file_publish(argc, argv);
     if (strcmp(argv[1], "move-cross-device-noreplace") == 0) {
         return move_cross_device_noreplace(argc, argv);

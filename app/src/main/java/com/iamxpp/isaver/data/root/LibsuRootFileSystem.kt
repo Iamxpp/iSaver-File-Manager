@@ -50,6 +50,7 @@ class LibsuRootFileSystem internal constructor(
     helperExecutable:String="/data/local/tmp/isaver_fs_helper",
     private val stageNameFactory:()->String={ ".isaver-stage-${UUID.randomUUID()}" },
     private val extractionStageNameFactory:()->String={ ".isaver-extract-${UUID.randomUUID()}" },
+    private val editStageNameFactory:()->String={ ".isaver-edit-${UUID.randomUUID()}" },
     private val transferCommandRunner:RootTransferCommandRunner=IsolatedLibsuRootTransferCommandRunner,
     private val transferTimeoutGraceMillis:Long=2_000,
     private val helperOperationTimeoutMillis:Long=3_000,
@@ -71,7 +72,8 @@ class LibsuRootFileSystem internal constructor(
         transferCommandRunner:RootTransferCommandRunner=RootTransferCommandRunner{commandRunner.run(it)},
         transferTimeoutGraceMillis:Long=2_000,
         helperOperationTimeoutMillis:Long=3_000,
-    ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis, stageNameFactory=stageNameFactory,extractionStageNameFactory=extractionStageNameFactory,transferCommandRunner=transferCommandRunner,transferTimeoutGraceMillis=transferTimeoutGraceMillis,helperOperationTimeoutMillis=helperOperationTimeoutMillis)
+        editStageNameFactory:()->String={ ".isaver-edit-${UUID.randomUUID()}" },
+    ) : this(CommandRunnerCoordinator(commandRunner), ioDispatcher, timeoutMillis, stageNameFactory=stageNameFactory,extractionStageNameFactory=extractionStageNameFactory,editStageNameFactory=editStageNameFactory,transferCommandRunner=transferCommandRunner,transferTimeoutGraceMillis=transferTimeoutGraceMillis,helperOperationTimeoutMillis=helperOperationTimeoutMillis)
 
     override suspend fun readDirectory(path: RootPath): OperationResult<DirectorySnapshot> =
         executeDirectoryListing(transferHelper.listDirectory(path.value)).flatMap { lines ->
@@ -223,6 +225,69 @@ class LibsuRootFileSystem internal constructor(
             return mapExitCode(result.exitCode, result.stderr, "无法读取来源文件", "read-file")
         }
         return RootFileReadProtocol.decode(result.stdout, output, expectedSize)
+    }
+
+    override suspend fun replaceFileAtomically(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        expectedVersion: RootFileVersion,
+        content: RootTransferSource,
+    ): OperationResult<DirectoryEntry> {
+        if (RootPathRiskPolicy.isProtected(sourceDirectory) || RootPathRiskPolicy.isProtected(source.path)) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域仅允许浏览", "Protected text-edit path")
+        }
+        val sourceName = EntryName.parse(source.name).getOrElse {
+            return failure(ErrorCode.SOURCE_UNREADABLE, "无法编辑此文件", "Invalid editor source basename")
+        }
+        if (EntryName.join(sourceDirectory, sourceName) != source.path ||
+            source.type != com.iamxpp.isaver.domain.EntryType.FILE || source.symbolicLink ||
+            !source.readable || !source.writable || source.sizeBytes != expectedVersion.sizeBytes
+        ) {
+            return failure(ErrorCode.SOURCE_UNREADABLE, "文件已被外部修改，请重新加载", "Editor source snapshot changed")
+        }
+        val preparedResult = prepareWritableDirectory(sourceDirectory)
+        if (preparedResult !is OperationResult.Success) return preparedResult as OperationResult.Failure
+        val prepared = preparedResult.value
+        val editStageName = editStageNameFactory()
+        if (!EDIT_STAGE_NAME.matches(editStageName)) {
+            return failure(ErrorCode.COMMAND_FAILED, "无法保存文件", "Invalid generated edit stage name")
+        }
+        currentCoroutineContext().ensureActive()
+        val execution = runHelperBounded(
+            transferHelper.replaceFileFromStream(
+                original = prepared.original.value,
+                canonical = prepared.canonical.value,
+                sourceName = sourceName,
+                temporaryName = editStageName,
+                parentIdentity = prepared.identity,
+                expectedVersion = expectedVersion,
+                source = content,
+                timeoutMillis = transferDeadlineMillis(content.expectedSizeBytes),
+            ),
+            transferDeadlineMillis(content.expectedSizeBytes) + transferTimeoutGraceMillis,
+        ).getOrElse {
+            return uncertainReplace("Atomic replace helper exceeded deadline or lost its result")
+        }
+        if (execution.exitCode != 0) {
+            return mapExitCode(execution.exitCode, execution.stderr, "无法保存文件", "replace-file-stdin")
+        }
+        val published = parsePublishedIdentity(execution.stdout)
+        if (published !is OperationResult.Success) {
+            return uncertainReplace("Atomic replace helper returned malformed identity")
+        }
+        val finalEntry = stat(source.path)
+        val finalIdentity = readIdentity(source.path)
+        val parentAfter = canonicalize(sourceDirectory)
+        if (finalEntry !is OperationResult.Success || finalIdentity !is OperationResult.Success ||
+            finalEntry.value.type != com.iamxpp.isaver.domain.EntryType.FILE || finalEntry.value.symbolicLink ||
+            finalEntry.value.sizeBytes != content.expectedSizeBytes ||
+            finalIdentity.value != published.value.identity ||
+            published.value.sizeBytes != content.expectedSizeBytes ||
+            parentAfter !is OperationResult.Success || parentAfter.value != prepared.canonical
+        ) {
+            return uncertainReplace("Atomic replacement could not be fully reconciled")
+        }
+        return finalEntry
     }
 
     override suspend fun readRange(
@@ -1338,6 +1403,8 @@ class LibsuRootFileSystem internal constructor(
                     "文件读取结果需要核对",
                     "Source changed during range read",
                 )
+            } else if (operation == "replace-file-stdin") {
+                failure(ErrorCode.SOURCE_UNREADABLE, "文件已被外部修改，请重新加载", "Editor source version changed")
             } else {
                 failure(
                     ErrorCode.SOURCE_UNREADABLE,
@@ -1351,6 +1418,10 @@ class LibsuRootFileSystem internal constructor(
                 "Source could not be read",
             )
             55 -> when (operation) {
+                "replace-file-stdin" -> uncertainReplace(
+                    stderr.filter { it.startsWith("replace-uncertain:") || it.startsWith("replace-check:") }
+                        .joinToString(";").ifEmpty { "Native helper reported an uncertain atomic replacement" },
+                )
                 "rename-noreplace" -> uncertainRename("Native helper reported an uncertain rename outcome")
                 "create-file-noreplace" -> uncertainCreateFile("Native helper reported an uncertain create-file outcome")
                 "move-directory-noreplace", "move-directory-cross-device-noreplace" ->
@@ -1370,6 +1441,7 @@ class LibsuRootFileSystem internal constructor(
                 )
             }
             137 -> when (operation) {
+                "replace-file-stdin" -> uncertainReplace("Atomic replacement helper was killed after timeout")
                 "rename-noreplace" -> uncertainRename("Native rename helper was killed after timeout")
                 "create-file-noreplace" -> uncertainCreateFile("Native create-file helper was killed after timeout")
                 "move-directory-noreplace", "move-directory-cross-device-noreplace" ->
@@ -1527,7 +1599,7 @@ class LibsuRootFileSystem internal constructor(
         const val EXIT_USAGE = 64
         const val MAX_ROOT_CACHE_BYTES = 256L * 1024L * 1024L
         const val LOG_TAG = "iSaverTransfer"
-        val STREAM_COPY_OPERATIONS = setOf("copy-publish", "copy-extract")
+        val STREAM_COPY_OPERATIONS = setOf("copy-publish", "copy-extract", "replace-file-stdin")
         val CONTENT_READ_FAILURE_PATTERNS = listOf(
             "Error while accessing provider",
             "FileNotFoundException",
@@ -1539,6 +1611,7 @@ class LibsuRootFileSystem internal constructor(
         val ANDROID_PATH_PATTERN = Regex("""/(?:storage|sdcard|data|mnt|system|apex|vendor|product|dev|proc)(?:/[^\s"'`|;]*)+""")
         val LONG_HEX_PATTERN = Regex("""[0-9a-fA-F]{32,}""")
         val STAGE_NAME=Regex("\\.isaver-stage-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
+        val EDIT_STAGE_NAME=Regex("\\.isaver-edit-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
     }
 }
 
@@ -1611,6 +1684,7 @@ private fun malformedCanonicalOutput() = failure(
 )
 private fun uncertain(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"文件夹可能已创建，请刷新确认",technical)
 private fun uncertainTransfer(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"保存结果不确定，请刷新确认",technical)
+private fun uncertainReplace(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"保存结果不确定，请刷新并核对文件",technical)
 private fun uncertainExtraction(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"解压结果不确定，请刷新目标目录核对",technical)
 private fun uncertainMove(technical:String)=failure(ErrorCode.OUTCOME_UNCERTAIN,"移动结果不确定，请刷新来源和目标目录核对",technical)
 private fun invalidMoveSource(technical:String="Move source was not a stable readable regular file")=failure(ErrorCode.SOURCE_UNREADABLE,"无法移动此文件",technical)

@@ -46,6 +46,39 @@ internal class RootTransferHelper(private val executable:String){
         )
         return "set -o pipefail\n$contentCommand | $publishCommand"
     }
+    fun replaceFileFromStream(
+        original: String,
+        canonical: String,
+        sourceName: EntryName,
+        temporaryName: String,
+        parentIdentity: RootFileIdentity,
+        expectedVersion: RootFileVersion,
+        source: RootTransferSource,
+        timeoutMillis: Long,
+    ): String {
+        val contentCommand = listOf(
+            "/system/bin/content", "read", "--uri", source.contentUri,
+        ).joinToString(" ") { RootCommandCodec.quote(it) }
+        val replaceCommand = timeoutCommand(
+            timeoutDuration(timeoutMillis),
+            "replace-file-stdin",
+            original,
+            canonical,
+            sourceName.value,
+            temporaryName,
+            parentIdentity.device,
+            parentIdentity.inode,
+            expectedVersion.sizeBytes,
+            expectedVersion.device,
+            expectedVersion.inode,
+            expectedVersion.modifiedSeconds,
+            expectedVersion.modifiedNanoseconds,
+            expectedVersion.changedSeconds,
+            expectedVersion.changedNanoseconds,
+            source.expectedSizeBytes,
+        )
+        return "set -o pipefail\n$contentCommand | $replaceCommand"
+    }
     fun removeStage(original:String,canonical:String,stage:TransferStage,parentId:RootFileIdentity)=command(
         "remove-stage",original,canonical,stage.name,parentId.device,parentId.inode,
         stage.identity.device,stage.identity.inode,

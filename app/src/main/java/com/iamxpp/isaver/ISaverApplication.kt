@@ -43,6 +43,10 @@ import com.iamxpp.isaver.fileops.FileCopyRepository
 import com.iamxpp.isaver.fileops.FileRenameRepository
 import com.iamxpp.isaver.fileops.FileChecksumRepository
 import com.iamxpp.isaver.tasks.OperationTaskRepository
+import com.iamxpp.isaver.texteditor.EditorContent
+import com.iamxpp.isaver.texteditor.EditorContentCache
+import com.iamxpp.isaver.texteditor.TextDraftStore
+import com.iamxpp.isaver.texteditor.TextEditorRepository
 import com.iamxpp.isaver.trash.TrashRepository
 import com.iamxpp.isaver.bookmarks.BookmarkRepository
 import com.iamxpp.isaver.virtualviews.VirtualViewRepository
@@ -174,6 +178,25 @@ class ISaverApplication : Application() {
                 recentRepository.recordExtracted(entry.path, entry.name)
             },
         )
+    }
+    internal val textDraftStore by lazy { TextDraftStore(filesDir, Dispatchers.IO) }
+    private val editorContentCache by lazy { EditorContentCache(cacheDir, Dispatchers.IO) }
+    internal val textEditorRepository by lazy {
+        TextEditorRepository(rootFileSystem, issueContent = { bytes ->
+            when (val cached = editorContentCache.write(bytes)) {
+                is OperationResult.Failure -> cached
+                is OperationResult.Success -> incomingStreamRegistry.issue(cached.value).fold(
+                    onSuccess = { source -> OperationResult.Success(EditorContent(source) {
+                        incomingStreamRegistry.revoke(source)
+                        editorContentCache.discard(cached.value)
+                    }) },
+                    onFailure = {
+                        editorContentCache.discard(cached.value)
+                        OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法准备编辑内容")
+                    },
+                )
+            }
+        })
     }
     internal val rootExportCache: RootExportCache by lazy {
         RootExportCache(

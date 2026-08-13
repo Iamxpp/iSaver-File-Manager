@@ -2,6 +2,8 @@
 
 > 文档版本：4.5
 > 更新日期：2026-08-13
+
+> 2026-08-13 M8-B 文本编辑实现同步：`TextEditorRepository` 以 1 MiB typed range 分块读取最多 2 MiB 普通文件，并要求所有块携带同一 `RootFileVersion`；`TextDocumentCodec` 严格处理 UTF-8、UTF-16 LE/BE、GB18030、BOM 与三种换行符。`TextDraftStore` 使用 SHA-256 路径哈希文件名和绑定版本的应用私有二进制草稿，不把路径或内容写入 DataStore。保存内容先进入 UUID 私有 cache，经 `IncomingStreamRegistry` 签发一次性能力，再调用 `RootFileSystem.replaceFileAtomically`。固定 native helper 绑定父目录及来源完整版本，在同目录创建 `O_EXCL|O_NOFOLLOW` 临时文件、精确读取 stdin、保留 mode/UID/GID、`fsync` 并复核；POSIX 通过 `RENAME_EXCHANGE` 保留旧对象直至验证，emulated storage 在不支持 exchange 时仅使用经过来源再校验的 rename，并重开目标、逐字节比较、复核属性和稳定 stat。结果不确定不自动重试。
 > 对应需求：iSaver PRD 4.5
 
 > 2026-08-13 M8-A 双窗口完成基线：`DualPaneViewModel` 只持久化显示、活动窗和锁定状态，两个独立 `BrowserViewModel` 分别使用默认及 `secondary.*` DataStore key 保存显示偏好与路径历史。竖屏 Compose 布局上下分割，横屏左右分割；双窗向 `BrowserScreen` 注入强制列表和紧凑页头，不写回单窗 `DisplayMode`。跨窗复制/移动只调用现有 `FileCopyRepository`/`FileMoveRepository`，目标能力、同路径和锁定状态均在提交前门禁，完成后双窗共同刷新。小米 9 已通过真实 Root 流程；MIUI Compose runner 仍因测试宿主 Activity 未切前台而超时，不计为通过。

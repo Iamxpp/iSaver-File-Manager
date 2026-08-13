@@ -134,6 +134,7 @@ fun BrowserScreen(
     onChecksumAlgorithmChange: (com.iamxpp.isaver.fileops.ChecksumAlgorithm) -> Unit = {},
     onDismissFileOpenError: () -> Unit = {},
     onDismissPreview: () -> Unit = {},
+    onEditPreview: ((DirectoryEntry) -> Unit)? = null,
     onShareEntry: ((DirectoryEntry) -> Unit)? = null,
     onShareSelection: (() -> Unit)? = null,
     onRecycleSelection: ((List<DirectoryEntry>) -> Unit)? = null,
@@ -524,6 +525,9 @@ fun BrowserScreen(
             content = state.preview,
             loading = state.previewLoading,
             error = state.previewError?.userMessage,
+            onEdit = if (state.preview is PreviewContent.Text && state.previewEntry?.writable == true &&
+                state.previewEntry?.let { !RootPathRiskPolicy.isProtected(it.path) } == true
+            ) state.previewEntry?.let { entry -> { onEditPreview?.invoke(entry) } } else null,
             onDismiss = onDismissPreview,
         )
     }
@@ -785,6 +789,7 @@ private fun PreviewDialog(
     content: PreviewContent?,
     loading: Boolean,
     error: String?,
+    onEdit: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -814,7 +819,8 @@ private fun PreviewDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        confirmButton = { if (onEdit != null) TextButton(onClick = onEdit) { Text("编辑") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
     )
 }
 

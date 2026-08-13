@@ -52,6 +52,13 @@ interface RootFileSystem {
         finalName: EntryName,
     ): OperationResult<DirectoryEntry> = unsupportedTransfer()
 
+    suspend fun replaceFileAtomically(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        expectedVersion: RootFileVersion,
+        content: RootTransferSource,
+    ): OperationResult<DirectoryEntry> = unsupportedTransfer()
+
     suspend fun moveFileNoReplace(
         source: DirectoryEntry,
         sourceDirectory: RootPath,
