@@ -110,6 +110,12 @@ class ISaverApplication : Application() {
         BrowserPreferencesRepository(browserDataStore)
     }
     internal val browserSessionStore: BrowserSessionStore by lazy { BrowserSessionRepository(browserDataStore) }
+    internal val secondaryBrowserPreferencesStore: BrowserPreferencesStore by lazy {
+        BrowserPreferencesRepository(browserDataStore, "secondary")
+    }
+    internal val secondaryBrowserSessionStore: BrowserSessionStore by lazy {
+        BrowserSessionRepository(browserDataStore, "secondary")
+    }
     internal val shareIntentParser: ShareIntentParser by lazy { ShareIntentParser(this) }
     internal val incomingFileCache: IncomingFileCache by lazy {
         IncomingFileCache(contentResolver, cacheDir, Dispatchers.IO)

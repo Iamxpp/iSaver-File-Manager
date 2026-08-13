@@ -24,33 +24,37 @@ interface BrowserSessionStore {
     suspend fun clear()
 }
 
-class BrowserSessionRepository(private val dataStore: DataStore<Preferences>) : BrowserSessionStore {
+class BrowserSessionRepository(
+    private val dataStore: DataStore<Preferences>,
+    scope: String = "",
+) : BrowserSessionStore {
+    private val keys = Keys(scope)
     override val session: Flow<BrowserSession?> = dataStore.data.map(::parse)
 
     override suspend fun save(session: BrowserSession) {
         dataStore.edit { values ->
-            values[ROOT_PATH] = encode(session.rootPath.value)
-            values[ROOT_TITLE] = encode(session.rootTitle.take(MAX_TITLE_LENGTH))
-            values[CURRENT_PATH] = encode(session.currentPath.value)
-            values[BACK_STACK] = encodePaths(session.backStack)
-            values[FORWARD_STACK] = encodePaths(session.forwardStack)
+            values[keys.rootPath] = encode(session.rootPath.value)
+            values[keys.rootTitle] = encode(session.rootTitle.take(MAX_TITLE_LENGTH))
+            values[keys.currentPath] = encode(session.currentPath.value)
+            values[keys.backStack] = encodePaths(session.backStack)
+            values[keys.forwardStack] = encodePaths(session.forwardStack)
         }
     }
 
     override suspend fun clear() {
-        dataStore.edit { values -> KEYS.forEach(values::remove) }
+        dataStore.edit { values -> keys.all.forEach(values::remove) }
     }
 
     private fun parse(values: Preferences): BrowserSession? = runCatching {
-        val root = decodePath(values[ROOT_PATH] ?: return null)
-        val title = decode(values[ROOT_TITLE] ?: return null).take(MAX_TITLE_LENGTH)
-        val current = decodePath(values[CURRENT_PATH] ?: return null)
+        val root = decodePath(values[keys.rootPath] ?: return null)
+        val title = decode(values[keys.rootTitle] ?: return null).take(MAX_TITLE_LENGTH)
+        val current = decodePath(values[keys.currentPath] ?: return null)
         BrowserSession(
             rootPath = root,
             rootTitle = title,
             currentPath = current,
-            backStack = decodePaths(values[BACK_STACK].orEmpty()),
-            forwardStack = decodePaths(values[FORWARD_STACK].orEmpty()),
+            backStack = decodePaths(values[keys.backStack].orEmpty()),
+            forwardStack = decodePaths(values[keys.forwardStack].orEmpty()),
         )
     }.getOrNull()
 
@@ -74,11 +78,15 @@ class BrowserSessionRepository(private val dataStore: DataStore<Preferences>) : 
     private companion object {
         const val MAX_HISTORY = 100
         const val MAX_TITLE_LENGTH = 200
-        val ROOT_PATH = stringPreferencesKey("session_root_path")
-        val ROOT_TITLE = stringPreferencesKey("session_root_title")
-        val CURRENT_PATH = stringPreferencesKey("session_current_path")
-        val BACK_STACK = stringPreferencesKey("session_back_stack")
-        val FORWARD_STACK = stringPreferencesKey("session_forward_stack")
-        val KEYS = listOf(ROOT_PATH, ROOT_TITLE, CURRENT_PATH, BACK_STACK, FORWARD_STACK)
+    }
+
+    private class Keys(scope: String) {
+        private val prefix = scope.trim().takeIf(String::isNotEmpty)?.let { "$it." }.orEmpty()
+        val rootPath = stringPreferencesKey("${prefix}session_root_path")
+        val rootTitle = stringPreferencesKey("${prefix}session_root_title")
+        val currentPath = stringPreferencesKey("${prefix}session_current_path")
+        val backStack = stringPreferencesKey("${prefix}session_back_stack")
+        val forwardStack = stringPreferencesKey("${prefix}session_forward_stack")
+        val all = listOf(rootPath, rootTitle, currentPath, backStack, forwardStack)
     }
 }

@@ -28,6 +28,22 @@ import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
 
 class BrowserPreferencesRepositoryTest {
+    @Test
+    fun `scoped stores keep pane presentation independent`() = runTest {
+        val dataStore = PreferenceDataStoreFactory.create(scope = backgroundScope) {
+            temporaryFolder.newFile("scoped.preferences_pb")
+        }
+        val primary = BrowserPreferencesRepository(dataStore)
+        val secondary = BrowserPreferencesRepository(dataStore, "secondary")
+
+        primary.setDisplayMode(DisplayMode.GRID)
+        secondary.setDisplayMode(DisplayMode.LIST)
+        secondary.setSort(SortSpec(SortField.SIZE, SortDirection.DESCENDING))
+
+        assertEquals(DisplayMode.GRID, primary.preferences.first().displayMode)
+        assertEquals(DisplayMode.LIST, secondary.preferences.first().displayMode)
+        assertEquals(SortSpec(SortField.SIZE, SortDirection.DESCENDING), secondary.preferences.first().sortSpec)
+    }
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 

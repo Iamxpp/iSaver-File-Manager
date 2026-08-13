@@ -84,6 +84,7 @@ fun FilesPageHeader(
     topBarTestTag: String = "files-top-bar",
     searchTestTag: String = "files-search",
     statusBarInsets: WindowInsets = WindowInsets.statusBars,
+    compact: Boolean = false,
     modifier: Modifier = Modifier,
     overflowMenuContent: @Composable BoxScope.() -> Unit = {},
 ) {
@@ -99,6 +100,7 @@ fun FilesPageHeader(
             onOverflow = onOverflow,
             saveAction = saveAction,
             testTag = topBarTestTag,
+            compact = compact,
             overflowMenuContent = overflowMenuContent,
         )
         FilesSearchField(
@@ -106,7 +108,12 @@ fun FilesPageHeader(
             onQueryChange = onQueryChange,
             modifier = Modifier
                 .testTag(searchTestTag)
-                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                .padding(
+                    start = if (compact) 8.dp else 16.dp,
+                    end = if (compact) 8.dp else 16.dp,
+                    bottom = if (compact) 4.dp else 8.dp,
+                ),
+            compact = compact,
         )
     }
 }
@@ -119,15 +126,16 @@ fun FilesTopBar(
     saveAction: FilesSaveAction? = null,
     testTag: String = "files-top-bar",
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
     overflowMenuContent: @Composable BoxScope.() -> Unit = {},
 ) {
     val actionWidth = if (saveAction?.label == null || saveAction.label.length <= 2) 48.dp else 96.dp
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(if (compact) 44.dp else 56.dp)
             .background(ISaverCard)
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = if (compact) 4.dp else 16.dp)
             .testTag(testTag),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -146,8 +154,8 @@ fun FilesTopBar(
             Text(
                 text = title,
                 color = ISaverPrimaryText,
-                fontSize = 24.sp,
-                lineHeight = 29.sp,
+                fontSize = if (compact) 17.sp else 24.sp,
+                lineHeight = if (compact) 21.sp else 29.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -238,6 +246,7 @@ fun FilesSearchField(
     query: String,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     BasicTextField(
         value = query,
@@ -246,12 +255,12 @@ fun FilesSearchField(
         textStyle = MaterialTheme.typography.titleMedium.copy(color = ISaverPrimaryText),
         modifier = modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .background(ISaverBackground, RoundedCornerShape(12.dp))
+            .height(if (compact) 40.dp else 52.dp)
+            .background(ISaverBackground, RoundedCornerShape(if (compact) 6.dp else 12.dp))
             .semantics { contentDescription = "搜索文件" },
         decorationBox = { innerTextField ->
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp),
+                modifier = Modifier.padding(horizontal = if (compact) 10.dp else 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SearchGlyph()
@@ -427,6 +436,8 @@ fun FilesOverflowMenu(
     onOpenTasks: (() -> Unit)? = null,
     onGoForward: (() -> Unit)? = null,
     onOpenDeepSearch: (() -> Unit)? = null,
+    showDisplayModes: Boolean = true,
+    onOpenDualPane: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     DropdownMenu(
@@ -464,6 +475,9 @@ fun FilesOverflowMenu(
         if (onOpenDeepSearch != null) {
             FilesMenuItem(text = "深度搜索", onClick = onOpenDeepSearch)
         }
+        if (onOpenDualPane != null) {
+            FilesMenuItem(text = "双窗口", onClick = onOpenDualPane)
+        }
         FilesMenuItem(
             text = "压缩文件",
             enabled = canCompress,
@@ -476,13 +490,15 @@ fun FilesOverflowMenu(
                 onClick = onConnectServer,
             )
         }
-        HorizontalDivider(color = ISaverDivider)
-        DisplayMode.entries.forEach { mode ->
-            FilesMenuItem(
-                text = mode.label,
-                selected = displayMode == mode,
-                onClick = { onDisplayModeChange(mode) },
-            )
+        if (showDisplayModes) {
+            HorizontalDivider(color = ISaverDivider)
+            DisplayMode.entries.forEach { mode ->
+                FilesMenuItem(
+                    text = mode.label,
+                    selected = displayMode == mode,
+                    onClick = { onDisplayModeChange(mode) },
+                )
+            }
         }
         HorizontalDivider(color = ISaverDivider)
         SortField.entries.forEach { field ->

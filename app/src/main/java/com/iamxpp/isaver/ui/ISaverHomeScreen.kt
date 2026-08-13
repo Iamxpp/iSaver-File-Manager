@@ -36,12 +36,28 @@ import com.iamxpp.isaver.archive.ArchiveFormat
 import com.iamxpp.isaver.ui.virtualviews.VirtualViewUiState
 import com.iamxpp.isaver.ui.virtualviews.VirtualReferencePickerDialog
 import com.iamxpp.isaver.virtualviews.VirtualViewNode
+import com.iamxpp.isaver.ui.dualpane.DualPaneBrowserCallbacks
+import com.iamxpp.isaver.ui.dualpane.DualPaneScreen
+import com.iamxpp.isaver.ui.dualpane.DualPaneState
+import com.iamxpp.isaver.ui.dualpane.PaneId
 
 @Composable
 fun ISaverHomeScreen(
     homeState: ISaverHomeUiState,
     locationState: LocationHomeUiState,
     browserState: BrowserUiState,
+    secondaryBrowserState: BrowserUiState? = null,
+    dualPaneState: DualPaneState? = null,
+    primaryDualPaneCallbacks: DualPaneBrowserCallbacks? = null,
+    secondaryDualPaneCallbacks: DualPaneBrowserCallbacks? = null,
+    onActivatePane: (PaneId) -> Unit = {},
+    onCloseDualPane: () -> Unit = {},
+    onSyncDualPane: () -> Unit = {},
+    onSwapDualPane: () -> Unit = {},
+    onTogglePaneLock: () -> Unit = {},
+    onCopyToOtherPane: () -> Unit = {},
+    onMoveToOtherPane: () -> Unit = {},
+    onOpenDualPane: () -> Unit = {},
     displayMode: DisplayMode,
     sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     onSelectTab: (HomeTab) -> Unit,
@@ -268,7 +284,29 @@ fun ISaverHomeScreen(
                 )
                 HomeTab.BROWSE -> Unit
             }
-            is HomeDestination.Browser -> BrowserScreen(
+            is HomeDestination.Browser -> if (
+                dualPaneState?.enabled == true &&
+                secondaryBrowserState != null &&
+                primaryDualPaneCallbacks != null &&
+                secondaryDualPaneCallbacks != null &&
+                !saveMode
+            ) {
+                DualPaneScreen(
+                    state = dualPaneState,
+                    primaryState = browserState,
+                    secondaryState = secondaryBrowserState,
+                    primaryCallbacks = primaryDualPaneCallbacks,
+                    secondaryCallbacks = secondaryDualPaneCallbacks,
+                    onActivate = onActivatePane,
+                    onClose = onCloseDualPane,
+                    onSync = onSyncDualPane,
+                    onSwap = onSwapDualPane,
+                    onToggleLock = onTogglePaneLock,
+                    onCopyToOther = onCopyToOtherPane,
+                    onMoveToOther = onMoveToOtherPane,
+                    modifier = Modifier.weight(1f),
+                )
+            } else BrowserScreen(
                 state = browserState,
                 onEnterDirectory = onEnterDirectory,
                 onBack = onBrowserBack,
@@ -342,6 +380,7 @@ fun ISaverHomeScreen(
                 onRefreshRemote = onRefreshRemote,
                 onCreateRemoteDirectory = onCreateRemoteDirectory,
                 saveAction = saveAction,
+                onOpenDualPane = if (saveMode) null else onOpenDualPane,
                 modifier = Modifier.weight(1f),
             )
             is HomeDestination.Archive -> ArchiveScreen(

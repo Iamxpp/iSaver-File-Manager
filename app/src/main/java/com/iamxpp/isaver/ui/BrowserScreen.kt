@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -173,6 +175,10 @@ fun BrowserScreen(
     onCreateRemoteDirectory: (String) -> Unit = {},
     saveAction: FilesSaveAction? = null,
     fileActionsEnabled: Boolean = true,
+    selectionOnlyLongPress: Boolean = false,
+    forceListMode: Boolean = false,
+    compactHeader: Boolean = false,
+    onOpenDualPane: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var createDialogVisible by remember { mutableStateOf(false) }
@@ -277,8 +283,17 @@ fun BrowserScreen(
                             deepSearchVisible = true
                         }
                     } else null,
+                    showDisplayModes = !forceListMode,
+                    onOpenDualPane = onOpenDualPane?.let { open ->
+                        {
+                            menuExpanded = false
+                            open()
+                        }
+                    },
                 )
             },
+            compact = compactHeader,
+            statusBarInsets = if (compactHeader) WindowInsets(0, 0, 0, 0) else WindowInsets.statusBars,
         )
         if (RootPathRiskPolicy.isProtected(state.currentPath)) {
             Text(
@@ -363,6 +378,8 @@ fun BrowserScreen(
                     } else {
                         actionEntry = entry
                     }
+                } else if (selectionOnlyLongPress) {
+                    onSelectEntry(entry)
                 }
             },
             modifier = Modifier.weight(1f),
@@ -589,7 +606,7 @@ fun BrowserScreen(
     }
     if (deepSearchVisible) {
         DeepSearchDialog(
-            state = state,
+            state = if (forceListMode) state.copy(displayMode = DisplayMode.LIST) else state,
             onStart = onStartDeepSearch,
             onCancel = onCancelDeepSearch,
             onOpenLocation = {

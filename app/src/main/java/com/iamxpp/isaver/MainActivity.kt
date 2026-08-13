@@ -47,6 +47,10 @@ import com.iamxpp.isaver.remote.RemoteConnectionViewModel
 import com.iamxpp.isaver.preview.RootPreviewRepository
 import com.iamxpp.isaver.ui.virtualviews.VirtualViewRepositoryStore
 import com.iamxpp.isaver.ui.virtualviews.VirtualViewViewModel
+import com.iamxpp.isaver.ui.dualpane.DualPaneBrowserCallbacks
+import com.iamxpp.isaver.ui.dualpane.DualPaneViewModel
+import com.iamxpp.isaver.ui.dualpane.PaneId
+import com.iamxpp.isaver.ui.dualpane.other
 import kotlinx.coroutines.Dispatchers
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -88,6 +92,29 @@ class MainActivity : ComponentActivity() {
             previewRepository = RootPreviewRepository(app.rootFileSystem),
         )
     }
+    private val secondaryBrowserViewModel by lazy {
+        val app = application as ISaverApplication
+        val factory = BrowserViewModelFactory(
+            app.rootFileSystem,
+            app.secondaryBrowserPreferencesStore,
+            app.archiveRepository,
+            app.recentRepository,
+            rootExportRepository = app.rootExportRepository,
+            directoryShareRepository = app.directoryShareRepository,
+            fileMoveRepository = app.fileMoveRepository,
+            fileCopyRepository = app.fileCopyRepository,
+            fileRenameRepository = app.fileRenameRepository,
+            operationTaskStore = app.operationTaskRepository,
+            trashRepository = app.trashRepository,
+            checksumFile = app.fileChecksumRepository::sha256,
+            checksumFileByAlgorithm = { entry, algorithm -> app.fileChecksumRepository.checksum(entry, algorithm) },
+            virtualViewRepository = app.virtualViewRepository,
+            browserSessionStore = app.secondaryBrowserSessionStore,
+            previewRepository = RootPreviewRepository(app.rootFileSystem),
+        )
+        ViewModelProvider(this, factory).get("secondary-browser", BrowserViewModel::class.java)
+    }
+    private val dualPaneViewModel by viewModels<DualPaneViewModel>()
     private val recentViewModel by viewModels<RecentViewModel> {
         val app = application as ISaverApplication
         RecentViewModelFactory(app.recentRepository, app.rootFileSystem)
@@ -128,6 +155,8 @@ class MainActivity : ComponentActivity() {
                     val locationState by locationHomeViewModel.state.collectAsStateWithLifecycle()
                     val virtualViewState by virtualViewViewModel.state.collectAsStateWithLifecycle()
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
+                    val secondaryBrowserState by secondaryBrowserViewModel.state.collectAsStateWithLifecycle()
+                    val dualPaneState by dualPaneViewModel.state.collectAsStateWithLifecycle()
                     val recentState by recentViewModel.state.collectAsStateWithLifecycle()
                     val archiveState by archiveViewModel.state.collectAsStateWithLifecycle()
                     val remoteConnectionState by remoteConnectionViewModel.state.collectAsStateWithLifecycle()
@@ -135,7 +164,24 @@ class MainActivity : ComponentActivity() {
                     val pickerActive = transferState != TransferUiState.Idle
                     val movePickerActive = browserState.moveSelection != null
                     val copyPickerActive = browserState.copySelection != null
-                    val fileOperationInFlight = browserState.movingFile || browserState.copyingFile || browserState.renamingFile
+                    val fileOperationInFlight = browserState.movingFile || browserState.copyingFile || browserState.renamingFile ||
+                        secondaryBrowserState.movingFile || secondaryBrowserState.copyingFile || secondaryBrowserState.renamingFile
+
+                    LaunchedEffect(dualPaneState.enabled) {
+                        if (dualPaneState.enabled) {
+                            secondaryBrowserViewModel.restoreSessionOrOpenRoot(
+                                browserState.currentPath,
+                                browserState.title,
+                                recordAccess = false,
+                            )
+                        }
+                    }
+                    LaunchedEffect(browserState.currentPath, browserState.title) {
+                        dualPaneViewModel.update(PaneId.PRIMARY, browserState.currentPath, browserState.title)
+                    }
+                    LaunchedEffect(secondaryBrowserState.currentPath, secondaryBrowserState.title) {
+                        dualPaneViewModel.update(PaneId.SECONDARY, secondaryBrowserState.currentPath, secondaryBrowserState.title)
+                    }
 
                     LaunchedEffect(pickerActive) {
                         if (pickerActive) homeViewModel.selectTab(HomeTab.VIEWS)
@@ -197,6 +243,14 @@ class MainActivity : ComponentActivity() {
                         browserViewModel.consumeArchiveOpen()
                     }
 
+                    LaunchedEffect(secondaryBrowserState.archiveToOpen) {
+                        val archive = secondaryBrowserState.archiveToOpen ?: return@LaunchedEffect
+                        val sourceTab = (destination as? HomeDestination.Browser)?.source
+                            ?: homeState.selectedTab
+                        homeViewModel.openArchive(archive.path, archive.name, sourceTab)
+                        secondaryBrowserViewModel.consumeArchiveOpen()
+                    }
+
                     LaunchedEffect(virtualViewState.verifiedReference) {
                         val verified = virtualViewState.verifiedReference ?: return@LaunchedEffect
                         when (verified.entry.type) {
@@ -230,6 +284,25 @@ class MainActivity : ComponentActivity() {
                         browserViewModel.completeExternalOpen(grant, launched)
                     }
 
+                    LaunchedEffect(secondaryBrowserState.externalFileToOpen) {
+                        val grant = secondaryBrowserState.externalFileToOpen ?: return@LaunchedEffect
+                        val launched = try {
+                            startActivity(
+                                if (secondaryBrowserState.externalOpenChooser) {
+                                    ExternalOpenIntentFactory.createChooser(grant)
+                                } else {
+                                    ExternalOpenIntentFactory.create(grant)
+                                },
+                            )
+                            true
+                        } catch (_: ActivityNotFoundException) {
+                            false
+                        } catch (_: SecurityException) {
+                            false
+                        }
+                        secondaryBrowserViewModel.completeExternalOpen(grant, launched)
+                    }
+
                     LaunchedEffect(browserState.externalFilesToShare) {
                         val grants = browserState.externalFilesToShare.takeIf { it.isNotEmpty() }
                             ?: return@LaunchedEffect
@@ -257,6 +330,10 @@ class MainActivity : ComponentActivity() {
                         val output = browserState.movedOutput ?: return@LaunchedEffect
                         homeViewModel.completeMove(browserState.currentPath, browserState.rootTitle)
                         browserViewModel.consumeMovedOutput()
+                        if (dualPaneState.enabled) {
+                            browserViewModel.retry()
+                            secondaryBrowserViewModel.retry()
+                        }
                         val message = if (browserState.moveTotalCount > 1) {
                             "已移动 ${browserState.moveCompletedCount}/${browserState.moveTotalCount} 项"
                         } else {
@@ -269,6 +346,10 @@ class MainActivity : ComponentActivity() {
                         val output = browserState.copiedOutput ?: return@LaunchedEffect
                         homeViewModel.completeCopy(browserState.currentPath, browserState.rootTitle)
                         browserViewModel.consumeCopiedOutput()
+                        if (dualPaneState.enabled) {
+                            browserViewModel.retry()
+                            secondaryBrowserViewModel.retry()
+                        }
                         val message = if (browserState.copyTotalCount > 1) {
                             "已复制 ${browserState.copyCompletedCount}/${browserState.copyTotalCount} 项"
                         } else {
@@ -287,6 +368,36 @@ class MainActivity : ComponentActivity() {
                         val output = browserState.createdFile ?: return@LaunchedEffect
                         browserViewModel.consumeCreatedFile()
                         Toast.makeText(this@MainActivity, "已新建 ${output.name}", Toast.LENGTH_SHORT).show()
+                    }
+
+                    LaunchedEffect(secondaryBrowserState.movedOutput) {
+                        val output = secondaryBrowserState.movedOutput ?: return@LaunchedEffect
+                        secondaryBrowserViewModel.consumeMovedOutput()
+                        if (dualPaneState.enabled) {
+                            browserViewModel.retry()
+                            secondaryBrowserViewModel.retry()
+                        }
+                        val message = if (secondaryBrowserState.moveTotalCount > 1) {
+                            "已移动 ${secondaryBrowserState.moveCompletedCount}/${secondaryBrowserState.moveTotalCount} 项"
+                        } else {
+                            "已移动 ${output.name}"
+                        }
+                        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                    }
+
+                    LaunchedEffect(secondaryBrowserState.copiedOutput) {
+                        val output = secondaryBrowserState.copiedOutput ?: return@LaunchedEffect
+                        secondaryBrowserViewModel.consumeCopiedOutput()
+                        if (dualPaneState.enabled) {
+                            browserViewModel.retry()
+                            secondaryBrowserViewModel.retry()
+                        }
+                        val message = if (secondaryBrowserState.copyTotalCount > 1) {
+                            "已复制 ${secondaryBrowserState.copyCompletedCount}/${secondaryBrowserState.copyTotalCount} 项"
+                        } else {
+                            "已复制 ${output.name}"
+                        }
+                        Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
                     }
 
                     LaunchedEffect(archiveState.operation) {
@@ -403,6 +514,95 @@ class MainActivity : ComponentActivity() {
                         homeState = homeState,
                         locationState = locationState,
                         browserState = browserState,
+                        secondaryBrowserState = secondaryBrowserState,
+                        dualPaneState = dualPaneState,
+                        primaryDualPaneCallbacks = DualPaneBrowserCallbacks(
+                            enterDirectory = { entry ->
+                                if (dualPaneState.lockedPane != PaneId.PRIMARY) browserViewModel.enterDirectory(entry)
+                            },
+                            back = { if (dualPaneState.lockedPane != PaneId.PRIMARY) browserViewModel.back() },
+                            forward = { if (dualPaneState.lockedPane != PaneId.PRIMARY) browserViewModel.forward() },
+                            retry = browserViewModel::retry,
+                            loadMore = browserViewModel::loadMore,
+                            query = browserViewModel::setSearchQuery,
+                            toggleSelection = browserViewModel::toggleSelection,
+                            clearSelection = browserViewModel::clearSelection,
+                            openEntry = browserViewModel::openEntry,
+                            resolveConflict = browserViewModel::resolveConflict,
+                            dismissMoveError = browserViewModel::dismissFileMoveError,
+                            dismissCopyError = browserViewModel::dismissFileCopyError,
+                            dismissOpenError = browserViewModel::dismissFileOpenError,
+                            dismissPreview = browserViewModel::dismissPreview,
+                        ),
+                        secondaryDualPaneCallbacks = DualPaneBrowserCallbacks(
+                            enterDirectory = { entry ->
+                                if (dualPaneState.lockedPane != PaneId.SECONDARY) secondaryBrowserViewModel.enterDirectory(entry)
+                            },
+                            back = { if (dualPaneState.lockedPane != PaneId.SECONDARY) secondaryBrowserViewModel.back() },
+                            forward = { if (dualPaneState.lockedPane != PaneId.SECONDARY) secondaryBrowserViewModel.forward() },
+                            retry = secondaryBrowserViewModel::retry,
+                            loadMore = secondaryBrowserViewModel::loadMore,
+                            query = secondaryBrowserViewModel::setSearchQuery,
+                            toggleSelection = secondaryBrowserViewModel::toggleSelection,
+                            clearSelection = secondaryBrowserViewModel::clearSelection,
+                            openEntry = secondaryBrowserViewModel::openEntry,
+                            resolveConflict = secondaryBrowserViewModel::resolveConflict,
+                            dismissMoveError = secondaryBrowserViewModel::dismissFileMoveError,
+                            dismissCopyError = secondaryBrowserViewModel::dismissFileCopyError,
+                            dismissOpenError = secondaryBrowserViewModel::dismissFileOpenError,
+                            dismissPreview = secondaryBrowserViewModel::dismissPreview,
+                        ),
+                        onActivatePane = dualPaneViewModel::activate,
+                        onCloseDualPane = { dualPaneViewModel.setEnabled(false) },
+                        onOpenDualPane = { dualPaneViewModel.setEnabled(true) },
+                        onSyncDualPane = {
+                            val source = if (dualPaneState.activePane == PaneId.PRIMARY) browserState else secondaryBrowserState
+                            val targetPane = dualPaneState.activePane.other()
+                            if (targetPane == PaneId.PRIMARY) {
+                                browserViewModel.openRoot(source.currentPath, source.title, recordAccess = false)
+                            } else {
+                                secondaryBrowserViewModel.openRoot(source.currentPath, source.title, recordAccess = false)
+                            }
+                            dualPaneViewModel.syncToOther()
+                        },
+                        onSwapDualPane = {
+                            val primaryPath = browserState.currentPath
+                            val primaryTitle = browserState.title
+                            browserViewModel.openRoot(
+                                secondaryBrowserState.currentPath,
+                                secondaryBrowserState.title,
+                                recordAccess = false,
+                            )
+                            secondaryBrowserViewModel.openRoot(primaryPath, primaryTitle, recordAccess = false)
+                            dualPaneViewModel.swap()
+                        },
+                        onTogglePaneLock = dualPaneViewModel::toggleLock,
+                        onCopyToOtherPane = {
+                            if (dualPaneState.activePane == PaneId.PRIMARY) {
+                                if (
+                                    secondaryBrowserState.canCreateDirectory &&
+                                    secondaryBrowserState.currentPath != browserState.currentPath &&
+                                    browserViewModel.beginCopySelection()
+                                ) browserViewModel.copyTo(secondaryBrowserState.currentPath)
+                            } else if (
+                                browserState.canCreateDirectory &&
+                                browserState.currentPath != secondaryBrowserState.currentPath &&
+                                secondaryBrowserViewModel.beginCopySelection()
+                            ) secondaryBrowserViewModel.copyTo(browserState.currentPath)
+                        },
+                        onMoveToOtherPane = {
+                            if (dualPaneState.activePane == PaneId.PRIMARY) {
+                                if (
+                                    secondaryBrowserState.canCreateDirectory &&
+                                    secondaryBrowserState.currentPath != browserState.currentPath &&
+                                    browserViewModel.beginMoveSelection()
+                                ) browserViewModel.moveTo(secondaryBrowserState.currentPath)
+                            } else if (
+                                browserState.canCreateDirectory &&
+                                browserState.currentPath != secondaryBrowserState.currentPath &&
+                                secondaryBrowserViewModel.beginMoveSelection()
+                            ) secondaryBrowserViewModel.moveTo(browserState.currentPath)
+                        },
                         displayMode = browserState.displayMode,
                         sortSpec = browserState.sortSpec,
                         onSelectTab = { tab ->

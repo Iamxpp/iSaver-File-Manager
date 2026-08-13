@@ -27,7 +27,9 @@ interface BrowserPreferencesStore {
 
 class BrowserPreferencesRepository(
     private val dataStore: DataStore<Preferences>,
+    scope: String = "",
 ) : BrowserPreferencesStore {
+    private val keys = Keys(scope)
     override val preferences: Flow<BrowserPreferences> = dataStore.data
         .catch { throwable ->
             if (throwable is IOException) {
@@ -40,34 +42,29 @@ class BrowserPreferencesRepository(
 
     override suspend fun setDisplayMode(displayMode: DisplayMode) {
         dataStore.edit { values ->
-            values[DISPLAY_MODE_KEY] = displayMode.name
+            values[keys.displayMode] = displayMode.name
         }
     }
 
     override suspend fun setSort(sortSpec: SortSpec) {
         dataStore.edit { values ->
-            values[SORT_FIELD_KEY] = sortSpec.field.name
-            values[SORT_DIRECTION_KEY] = sortSpec.direction.name
+            values[keys.sortField] = sortSpec.field.name
+            values[keys.sortDirection] = sortSpec.direction.name
         }
     }
 
-    private companion object {
-        val DISPLAY_MODE_KEY = stringPreferencesKey("display_mode")
-        val SORT_FIELD_KEY = stringPreferencesKey("sort_field")
-        val SORT_DIRECTION_KEY = stringPreferencesKey("sort_direction")
-
-        fun parsePreferences(values: Preferences): BrowserPreferences {
-            val displayMode = values[DISPLAY_MODE_KEY]
+    private fun parsePreferences(values: Preferences): BrowserPreferences {
+            val displayMode = values[keys.displayMode]
                 ?.let { stored -> DisplayMode.entries.firstOrNull { it.name == stored } }
-            val sortField = values[SORT_FIELD_KEY]
+            val sortField = values[keys.sortField]
                 ?.let { stored -> SortField.entries.firstOrNull { it.name == stored } }
-            val sortDirection = values[SORT_DIRECTION_KEY]
+            val sortDirection = values[keys.sortDirection]
                 ?.let { stored -> SortDirection.entries.firstOrNull { it.name == stored } }
 
             val containsUnknownValue =
-                values[DISPLAY_MODE_KEY] != null && displayMode == null ||
-                    values[SORT_FIELD_KEY] != null && sortField == null ||
-                    values[SORT_DIRECTION_KEY] != null && sortDirection == null
+                values[keys.displayMode] != null && displayMode == null ||
+                    values[keys.sortField] != null && sortField == null ||
+                    values[keys.sortDirection] != null && sortDirection == null
             if (containsUnknownValue) return BrowserPreferences()
 
             return BrowserPreferences(
@@ -77,6 +74,12 @@ class BrowserPreferencesRepository(
                     direction = sortDirection ?: SortDirection.ASCENDING,
                 ),
             )
-        }
+    }
+
+    private class Keys(scope: String) {
+        private val prefix = scope.trim().takeIf(String::isNotEmpty)?.let { "$it." }.orEmpty()
+        val displayMode = stringPreferencesKey("${prefix}display_mode")
+        val sortField = stringPreferencesKey("${prefix}sort_field")
+        val sortDirection = stringPreferencesKey("${prefix}sort_direction")
     }
 }

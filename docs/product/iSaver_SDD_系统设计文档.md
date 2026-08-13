@@ -4,7 +4,9 @@
 > 更新日期：2026-08-13
 > 对应需求：iSaver PRD 4.5
 
-> 2026-08-13 M7.1 完成基线：Room 8 已实现统一 `VirtualViewNode` 应用层树，明确区分 `VIRTUAL_FOLDER` 与 `REAL_REFERENCE`。虚拟节点不实现 `RootPath`，不进入 Root 写入 API；分享保存和文件操作目标能力由显式 destination 类型决定。Room 7 的 `custom_locations` 与 `bookmarks` 已原子迁移为“未分组”下的真实叶子引用，当前写入只进入 `virtual_view_nodes`。Repository 已实现父类型约束、循环检测、同父去重、引用重定位和 identity 批量更新；M8 尚未实施。
+> 2026-08-13 M8-A 双窗口完成基线：`DualPaneViewModel` 只持久化显示、活动窗和锁定状态，两个独立 `BrowserViewModel` 分别使用默认及 `secondary.*` DataStore key 保存显示偏好与路径历史。竖屏 Compose 布局上下分割，横屏左右分割；双窗向 `BrowserScreen` 注入强制列表和紧凑页头，不写回单窗 `DisplayMode`。跨窗复制/移动只调用现有 `FileCopyRepository`/`FileMoveRepository`，目标能力、同路径和锁定状态均在提交前门禁，完成后双窗共同刷新。小米 9 已通过真实 Root 流程；MIUI Compose runner 仍因测试宿主 Activity 未切前台而超时，不计为通过。
+
+> 2026-08-13 M7.1 完成基线：Room 8 已实现统一 `VirtualViewNode` 应用层树，明确区分 `VIRTUAL_FOLDER` 与 `REAL_REFERENCE`。虚拟节点不实现 `RootPath`，不进入 Root 写入 API；分享保存和文件操作目标能力由显式 destination 类型决定。Room 7 的 `custom_locations` 与 `bookmarks` 已原子迁移为“未分组”下的真实叶子引用，当前写入只进入 `virtual_view_nodes`。Repository 已实现父类型约束、循环检测、同父去重、引用重定位和 identity 批量更新。
 
 > 2026-08-13 M6/M7 完成基线：本地核心仓库均通过 typed Kotlin API 调用固定 Root helper。文件与受限目录树复制/移动、可恢复替换、递归目录合并、回收站、恢复冲突、批量重命名、搜索、预览、属性/四算法校验、文件/目录书签、跨进程路径会话和分享均已接入。`LocalArchiveEngine.createArchive` 统一创建 ZIP/TAR/TAR.GZ/7Z，解压统一写入脱敏任务；多选支持全选、反选和同类选择。全量 579 个 JVM 测试、Lint、Debug/AndroidTest 构建通过；小米 9 会话/Room/Root 书签 3/3、Root 流 7/7、归档/目录专项 4/4 通过，最终冷启动无 AndroidRuntime 崩溃。单个 Compose UI 专项在 MIUI runner 超时且无 JUnit 结果，不计为通过。M8 的竖屏双窗状态模型与双窗详细列表锁定尚未实施，远程适配器仅维护且 UI 继续隐藏。
 
@@ -837,9 +839,9 @@ adb logcat -d -t 300
 - 所有保存、移动、复制和解压目标选择器在虚拟 destination 中禁用确认，进入真实目录后重新校验。
 - 必须通过迁移、父链循环、真实文件不删除、小米 9 与 Root 回归门禁后才进入 M8。
 
-### M8：双窗口与高级本地能力（0.5.0，下一里程碑，本轮不实施）
+### M8：双窗口与高级本地能力（0.5.0，进行中）
 
-- 普通手机竖屏、横屏/平板双窗口；单窗图标/详细信息列表切换；双窗锁定详细信息列表，退出双窗恢复各窗口单窗偏好；同步和跨窗复制/移动。
+- 已完成普通手机竖屏、横屏/平板双窗口；单窗图标/详细信息列表切换；双窗锁定详细信息列表，退出双窗恢复单窗偏好；同步、交换、锁定和跨窗复制/移动。
 - 文本编辑器、Hex 只读、文件对比和权限修改。
 
 ### M9：本地发布门禁（0.5.x）
