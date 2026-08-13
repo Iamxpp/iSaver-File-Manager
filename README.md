@@ -4,18 +4,19 @@
 
 iSaver is a Root-only Android file manager for users who need direct access to the real Android filesystem. It combines common storage locations, a Root browser, recent items, and a safe share/open save flow in one app.
 
-Current public build: `0.1.2`.
+Current public build: `0.5.0`.
 
 ## Features
 
 - Root permission gate with explicit retry and exit actions.
 - Recent, locations, and Root browser tabs.
 - Built-in common Android storage locations plus virtual folders for organizing real file and directory references.
-- List/grid presentation, search, stable sorting, and folder creation.
-- Single-file `ACTION_SEND` and `content://` `ACTION_VIEW` save flow.
-- Inline save bar with long filename editing and retry after failed saves.
-- Root stream publication with identity-bound staging and no-overwrite finalization.
-- ZIP creation and safe ZIP, TAR, TAR.GZ, 7Z, and RAR browsing/extraction.
+- List/grid presentation, stable natural sorting, deep search, history, and persistent tasks.
+- Portrait/landscape dual-pane browsing with independent history and cross-pane copy/move.
+- Default open/open-with, private read-only sharing, text/image preview, text editing, Hex view, comparison, and checksums.
+- Typed Root copy, move, rename, create, recoverable replace, trash/restore, and non-recursive permission editing.
+- ZIP, TAR, TAR.GZ, and 7Z creation plus safe ZIP, TAR, TAR.GZ, 7Z, and RAR browsing/extraction.
+- Application-layer virtual-view folders for organizing real file and directory references.
 
 Remote SFTP, FTPS, and FTP code is still experimental and is not exposed as a supported public feature in this release.
 
@@ -78,7 +79,7 @@ PASS: device root transfer verification completed
 
 The primary Root test device is a Xiaomi 9 running Android 11/API 30. Xiaomi 17 issues are validated through user-provided logs when the device is not available over ADB. API 29, 33, and 35 have non-Root compatibility coverage. See [the compatibility matrix](docs/testing/android-compatibility-matrix.md) for the exact scope.
 
-Root and integration tests use dedicated paths under `/data/local/tmp/isaver-test`. Never use real application data as disposable test fixtures.
+Root and integration tests use dedicated paths under `/data/local/tmp` and isolated iSaver folders in shared storage. Never use real application data as disposable test fixtures.
 
 ## Security
 
