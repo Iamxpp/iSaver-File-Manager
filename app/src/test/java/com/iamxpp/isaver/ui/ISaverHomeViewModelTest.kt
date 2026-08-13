@@ -63,6 +63,46 @@ class ISaverHomeViewModelTest {
     }
 
     @Test
+    fun `real target remains valid while browsing its verified descendants`() {
+        val selected = HomeDestination.Browser(
+            RootPath.parse("/storage/emulated/0/Download").getOrThrow(),
+            "下载",
+            HomeTab.VIEWS,
+        )
+
+        assertEquals(
+            true,
+            canUseRealTarget(
+                selected,
+                BrowserUiState(
+                    currentPath = RootPath.parse("/storage/emulated/0/Download/nested").getOrThrow(),
+                    canCreateDirectory = true,
+                ),
+            ),
+        )
+        assertEquals(
+            false,
+            canUseRealTarget(
+                selected,
+                BrowserUiState(
+                    currentPath = RootPath.parse("/storage/emulated/0/Download-old").getOrThrow(),
+                    canCreateDirectory = true,
+                ),
+            ),
+        )
+        assertEquals(
+            false,
+            canUseRealTarget(
+                selected,
+                BrowserUiState(
+                    currentPath = RootPath.parse("/storage/emulated/0").getOrThrow(),
+                    canCreateDirectory = true,
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun `move target reuses tabs and returns to its source browser`() {
         val source = HomeDestination.Browser(
             RootPath.parse("/data/local/tmp/source").getOrThrow(),

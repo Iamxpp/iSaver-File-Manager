@@ -13,6 +13,8 @@ import com.iamxpp.isaver.transfer.TransferState
 import java.io.File
 import java.util.Base64
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -25,6 +27,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ArchiveRootInstrumentedTest {
+    @Test
+    fun sharedStorageZipExtractionUsesSafeDirectoryPublishFallback() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
+        val archiveRepository = testArchiveRepository(app)
+        assertDeviceHasRoot(app)
+        root(app, "rm -rf -- ${quote(SHARED_TARGET)}; mkdir -p -- ${quote(SHARED_TARGET)}")
+        try {
+            val incoming = File(app.cacheDir, "incoming/${UUID.randomUUID()}.tmp").apply {
+                parentFile?.mkdirs()
+            }
+            ZipOutputStream(incoming.outputStream()).use { output ->
+                output.putNextEntry(ZipEntry("docs/file.txt"))
+                output.write("shared storage".toByteArray())
+                output.closeEntry()
+            }
+            publishFixture(app, Fixture(incoming, "shared.zip"), SHARED_TARGET)
+
+            val extracted = archiveRepository.extract(
+                path("$SHARED_TARGET/shared.zip"),
+                path(SHARED_TARGET),
+            ).last()
+
+            assertTrue("Shared storage ZIP extract failed: $extracted", extracted is ArchiveState.Success)
+            assertEquals(
+                "shared storage",
+                root(app, "cat -- ${quote("$SHARED_TARGET/shared/docs/file.txt")}"),
+            )
+            assertNoArchiveStages(app, SHARED_TARGET)
+        } finally {
+            root(app, "rm -rf -- ${quote(SHARED_TARGET)}")
+        }
+    }
+
     @Test
     fun rootZipCreateInspectAndExtractLeavesNoArchiveStages() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<ISaverApplication>()
@@ -177,7 +212,11 @@ class ArchiveRootInstrumentedTest {
         )
     }
 
-    private suspend fun publishFixture(app: ISaverApplication, fixture: Fixture) {
+    private suspend fun publishFixture(
+        app: ISaverApplication,
+        fixture: Fixture,
+        target: String = TARGET,
+    ) {
         val file = fixture.file
         val cached = CachedIncomingFile(
             file,
@@ -187,7 +226,7 @@ class ArchiveRootInstrumentedTest {
         val state = app.transferRepository.transfer(
             cached,
             OutputNameDraft.fromDisplayName(fixture.outputName),
-            path(TARGET),
+            path(target),
         ).last()
         assertTrue("Fixture publish failed for ${fixture.outputName}: $state", state is TransferState.Success)
     }
@@ -198,9 +237,9 @@ class ArchiveRootInstrumentedTest {
         root(app, "rm -rf -- ${quote(TARGET)}; mkdir -p -- ${quote(TARGET)}")
     }
 
-    private suspend fun assertNoArchiveStages(app: ISaverApplication) {
+    private suspend fun assertNoArchiveStages(app: ISaverApplication, target: String = TARGET) {
         assertTrue(
-            root(app, "find ${quote(TARGET)} -maxdepth 3 -name '.isaver-*' -print").isBlank(),
+            root(app, "find ${quote(target)} -maxdepth 3 -name '.isaver-*' -print").isBlank(),
         )
     }
 
@@ -216,6 +255,7 @@ class ArchiveRootInstrumentedTest {
 
     private companion object {
         const val TARGET = "/data/local/tmp/isaver-archive-test"
+        const val SHARED_TARGET = "/storage/emulated/0/Download/iSaver-M9-archive-test"
         const val JUNRAR_TEST_RAR_BASE64 = "UmFyIRoHAM+QcwAADQAAAAAAAAB8zXQgkC0ADQAAAAQAAAAD4Tl7zCeTJEEdMwsAtIEAAGZvb1xiYXIudHh0AMAACL8IrvLDGH6f/ZLdiiN04IAjAAAAAAAAAAAAAwAAAAAnkyRBFDADAP1BAABmb2/EPXsAQAcA"
     }
 }

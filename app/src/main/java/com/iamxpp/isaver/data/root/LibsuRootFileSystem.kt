@@ -522,9 +522,7 @@ class LibsuRootFileSystem internal constructor(
                 return@withContext uncertainExtraction("Committed extraction directory could not be verified")
             }
             val identity = readIdentity(finalPath)
-            if (identity !is OperationResult.Success || identity.value != committedIdentity ||
-                identity.value != stage.stageIdentity
-            ) {
+            if (identity !is OperationResult.Success || identity.value != committedIdentity) {
                 return@withContext uncertainExtraction("Committed extraction directory identity changed")
             }
             entry

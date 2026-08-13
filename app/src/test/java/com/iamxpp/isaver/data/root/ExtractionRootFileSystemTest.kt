@@ -77,6 +77,29 @@ class ExtractionRootFileSystemTest {
     }
 
     @Test
+    fun `commit accepts a copied directory identity only when the final path matches it`() = runTest {
+        val copiedRunner = ExtractionRunner(commitIdentity = "77:88", finalIdentity = "77:88")
+        val copiedFs = fileSystem(copiedRunner)
+        val copiedStage = (copiedFs.prepareExtractionStage(path("/target")) as OperationResult.Success).value
+
+        assertTrue(
+            copiedFs.commitExtractionStage(
+                copiedStage,
+                FolderName.parse("backup").getOrThrow(),
+            ) is OperationResult.Success,
+        )
+
+        val changedRunner = ExtractionRunner(commitIdentity = "77:88", finalIdentity = "99:100")
+        val changedFs = fileSystem(changedRunner)
+        val changedStage = (changedFs.prepareExtractionStage(path("/target")) as OperationResult.Success).value
+        val changed = changedFs.commitExtractionStage(
+            changedStage,
+            FolderName.parse("backup").getOrThrow(),
+        )
+        assertEquals(ErrorCode.OUTCOME_UNCERTAIN, (changed as OperationResult.Failure).code)
+    }
+
+    @Test
     fun `cleanup uses only the identity-bound extraction stage`() = runTest {
         val runner = ExtractionRunner()
         val fileSystem = fileSystem(runner)
@@ -110,6 +133,8 @@ class ExtractionRootFileSystemTest {
     private class ExtractionRunner(
         private val commitExit: Int = 0,
         private val commitThrows: Boolean = false,
+        private val commitIdentity: String = "33:44",
+        private val finalIdentity: String = commitIdentity,
     ) : RootCommandRunner {
         val commands = mutableListOf<String>()
         private var committed = false
@@ -123,7 +148,7 @@ class ExtractionRootFileSystemTest {
                 command.contains("'commit-extract-stage'") -> {
                     if (commitThrows) error("commit result lost")
                     committed = commitExit == 0
-                    RootCommandResult(commitExit, if (committed) listOf("33:44") else emptyList(), emptyList())
+                    RootCommandResult(commitExit, if (committed) listOf(commitIdentity) else emptyList(), emptyList())
                 }
                 command.contains("'remove-extract-stage'") -> RootCommandResult(0, emptyList(), emptyList())
                 command.contains("target='/target/backup'") -> if (committed) {
@@ -136,7 +161,7 @@ class ExtractionRootFileSystemTest {
                 command.contains("target='/target'") && command.contains("emit_isaver_record") ->
                     RootCommandResult(0, listOf(record("target", "/target", "directory", "-")), emptyList())
                 command.contains("stat -c '%d:%i'") && command.contains("/target/backup") ->
-                    RootCommandResult(0, listOf("33:44"), emptyList())
+                    RootCommandResult(0, listOf(finalIdentity), emptyList())
                 command.contains("stat -c '%d:%i'") -> RootCommandResult(0, listOf("11:22"), emptyList())
                 else -> error("unexpected command: $command")
             }

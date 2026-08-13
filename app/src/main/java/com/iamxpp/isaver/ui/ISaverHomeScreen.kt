@@ -648,10 +648,13 @@ private const val VIRTUAL_OPERATION_TARGET_REASON =
     "虚拟视图文件夹只用于分组，不能作为文件操作目标。请选择一个真实文件夹。"
 
 internal fun canUseRealTarget(target: HomeDestination.Browser?, browserState: BrowserUiState): Boolean =
-    target != null && target.path == browserState.currentPath && browserState.canCreateDirectory
+    target != null && browserState.currentPath.isSameOrDescendantOf(target.path) && browserState.canCreateDirectory
 
 private fun targetDisabledReason(target: HomeDestination.Browser?, browserState: BrowserUiState): String = when {
     target == null -> VIRTUAL_OPERATION_TARGET_REASON
-    target.path != browserState.currentPath -> "正在校验目标文件夹。"
+    !browserState.currentPath.isSameOrDescendantOf(target.path) -> "正在校验目标文件夹。"
     else -> "当前目录不可写。"
 }
+
+private fun RootPath.isSameOrDescendantOf(parent: RootPath): Boolean =
+    this == parent || value.startsWith(parent.value.trimEnd('/') + "/")

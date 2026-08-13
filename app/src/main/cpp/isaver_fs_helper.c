@@ -2466,6 +2466,14 @@ static int copy_extract_stdin(int argc, char **argv) {
     return 0;
 }
 
+static int publish_directory_stage(
+    int parent_fd,
+    int stage_fd,
+    const char *stage_name,
+    const char *final_name,
+    const struct stat *stage_status
+);
+
 static int commit_extraction_stage(int argc, char **argv) {
     if (argc != 10 || !extraction_stage_name_ok(argv[4]) || !basename_ok(argv[5])) {
         return X_USAGE;
@@ -2489,36 +2497,10 @@ static int commit_extraction_stage(int argc, char **argv) {
         close(parent_fd);
         return X_STAGE_INVALID;
     }
-    long renamed = syscall(
-        SYS_renameat2,
-        parent_fd,
-        argv[4],
-        parent_fd,
-        argv[5],
-        RENAME_NOREPLACE
-    );
-    if (renamed != 0) {
-        int result = write_errno(errno);
-        close(stage_fd);
-        close(parent_fd);
-        return result;
-    }
-    struct stat committed;
-    if (fstat(stage_fd, &committed) != 0 || committed.st_dev != held.st_dev ||
-        committed.st_ino != held.st_ino) {
-        close(stage_fd);
-        close(parent_fd);
-        return X_OUTCOME_UNCERTAIN;
-    }
-    if (fsync(parent_fd) != 0 && errno != EINVAL && errno != EROFS) {
-        close(stage_fd);
-        close(parent_fd);
-        return X_OUTCOME_UNCERTAIN;
-    }
-    printf("%llu:%llu\n", (unsigned long long) committed.st_dev, (unsigned long long) committed.st_ino);
+    int result = publish_directory_stage(parent_fd, stage_fd, argv[4], argv[5], &held);
     close(stage_fd);
     close(parent_fd);
-    return 0;
+    return result;
 }
 
 static int remove_extraction_contents(int directory_fd) {
@@ -2876,8 +2858,9 @@ static int publish_directory_stage(
     );
     if (renamed != 0) {
         int rename_error = errno;
-        if ((rename_error == EINVAL || rename_error == ENOTSUP ||
-            rename_error == EOPNOTSUPP) && is_emulated_storage_fd(parent_fd)) {
+        if ((rename_error == EIO || rename_error == ENOSYS || rename_error == EINVAL ||
+            rename_error == ENOTSUP || rename_error == EOPNOTSUPP) &&
+            is_emulated_storage_fd(parent_fd)) {
             if (mkdirat(parent_fd, final_name, 0700) != 0) return write_errno(errno);
             int reservation_fd = openat(
                 parent_fd, final_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC

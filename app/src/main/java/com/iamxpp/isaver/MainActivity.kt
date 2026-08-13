@@ -37,6 +37,7 @@ import com.iamxpp.isaver.ui.ISaverHomeViewModel
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import com.iamxpp.isaver.ui.LocationHomeViewModel
+import com.iamxpp.isaver.ui.canUseRealTarget
 import com.iamxpp.isaver.ui.files.HomeTab
 import com.iamxpp.isaver.ui.theme.ISaverTheme
 import com.iamxpp.isaver.ui.archive.ArchiveBackResult
@@ -792,10 +793,8 @@ class MainActivity : ComponentActivity() {
                         onMoveHere = {
                             val move = homeState.destination as? HomeDestination.MoveTarget
                             if (
-                                move?.targetBrowser != null &&
-                                move.targetBrowser.path == browserState.currentPath &&
-                                browserState.canCreateDirectory &&
-                                browserState.currentPath != move.sourceBrowser.path
+                                canUseRealTarget(move?.targetBrowser, browserState) &&
+                                browserState.currentPath != move?.sourceBrowser?.path
                             ) {
                                 browserViewModel.moveTo(browserState.currentPath)
                             }
@@ -814,10 +813,8 @@ class MainActivity : ComponentActivity() {
                         onCopyHere = {
                             val copy = homeState.destination as? HomeDestination.CopyTarget
                             if (
-                                copy?.targetBrowser != null &&
-                                copy.targetBrowser.path == browserState.currentPath &&
-                                browserState.canCreateDirectory &&
-                                browserState.currentPath != copy.sourceBrowser.path
+                                canUseRealTarget(copy?.targetBrowser, browserState) &&
+                                browserState.currentPath != copy?.sourceBrowser?.path
                             ) {
                                 browserViewModel.copyTo(browserState.currentPath)
                             }
@@ -872,9 +869,7 @@ class MainActivity : ComponentActivity() {
                         onExtractHere = {
                             val extraction = homeState.destination as? HomeDestination.ExtractionTarget
                             if (
-                                extraction?.targetBrowser != null &&
-                                extraction.targetBrowser.path == browserState.currentPath &&
-                                browserState.canCreateDirectory
+                                canUseRealTarget(extraction?.targetBrowser, browserState)
                             ) {
                                 val target = browserState.currentPath
                                 homeViewModel.returnToArchive()
