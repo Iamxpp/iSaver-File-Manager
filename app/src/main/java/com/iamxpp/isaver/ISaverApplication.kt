@@ -54,6 +54,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -97,7 +98,7 @@ class ISaverApplication : Application() {
         LocationHomeAppResolver(locationResolver::resolve)
     }
     internal val locationHomeCustomStore: LocationHomeCustomStore by lazy {
-        CustomLocationStoreAdapter(customLocationRepository)
+        EmptyCustomLocationStore
     }
     private val browserDataStore by lazy {
         PreferenceDataStoreFactory.create(
@@ -246,6 +247,7 @@ class ISaverApplication : Application() {
             rootExportCache.cleanupOrphans(System.currentTimeMillis())
             operationTaskRepository.reconcileInterrupted()
             trashRepository.reconcilePending()
+            virtualViewRepository.cleanupEmptyLegacyMigrationFolder()
         }
     }
 
@@ -293,4 +295,11 @@ internal class CustomLocationStoreAdapter(
     ): CustomLocationResult = repository.update(id, name, path)
 
     override suspend fun remove(id: LocationId): CustomLocationResult = repository.remove(id)
+}
+
+private object EmptyCustomLocationStore : LocationHomeCustomStore {
+    override fun observeAll(): Flow<List<StorageLocation.Direct>> = flowOf(emptyList())
+    override suspend fun add(name: String, path: RootPath) = CustomLocationResult.InvalidOrder
+    override suspend fun update(id: LocationId, name: String, path: RootPath) = CustomLocationResult.InvalidOrder
+    override suspend fun remove(id: LocationId) = CustomLocationResult.NotFound
 }

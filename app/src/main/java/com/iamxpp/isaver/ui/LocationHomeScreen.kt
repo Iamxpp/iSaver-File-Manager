@@ -1,13 +1,18 @@
 package com.iamxpp.isaver.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -17,6 +22,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,10 +35,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.Canvas
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPath
@@ -48,8 +62,13 @@ import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
 import com.iamxpp.isaver.ui.theme.ISaverBackground
 import com.iamxpp.isaver.ui.theme.ISaverBlue
+import com.iamxpp.isaver.ui.theme.ISaverCard
 import com.iamxpp.isaver.ui.theme.ISaverPrimaryText
 import com.iamxpp.isaver.ui.theme.ISaverSecondaryText
+import com.iamxpp.isaver.ui.virtualviews.VirtualViewGridCell
+import com.iamxpp.isaver.ui.virtualviews.VirtualViewListRow
+import com.iamxpp.isaver.ui.virtualviews.VirtualViewUiState
+import com.iamxpp.isaver.virtualviews.VirtualViewNode
 
 @Composable
 fun LocationHomeScreen(
@@ -66,12 +85,26 @@ fun LocationHomeScreen(
     onDisplayModeChange: (DisplayMode) -> Unit = {},
     onSortChange: (SortSpec) -> Unit = {},
     saveAction: FilesSaveAction? = null,
+    virtualViewState: VirtualViewUiState? = null,
+    onOpenVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit = {},
+    onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit = { reference ->
+        if (reference.entryType == EntryType.DIRECTORY) onOpenLocation(reference.targetPath, reference.displayName)
+    },
+    onNavigateVirtual: (String?) -> Unit = {},
+    onCreateVirtualFolder: ((String) -> Unit)? = null,
+    onRenameVirtualNode: (String, String) -> Unit = { _, _ -> },
+    onMoveVirtualNode: (String, String?) -> Unit = { _, _ -> },
+    onDeleteVirtualFolder: (String, Boolean) -> Unit = { _, _ -> },
+    onDismissVirtualDelete: () -> Unit = {},
+    onRemoveVirtualReference: (String) -> Unit = {},
+    onOpenTrash: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
     var editor by remember { mutableStateOf<StorageLocation.Direct?>(null) }
     var adding by remember { mutableStateOf(false) }
     var removal by remember { mutableStateOf<StorageLocation.Direct?>(null) }
+    var managedVirtualNode by remember { mutableStateOf<VirtualViewNode?>(null) }
 
     LaunchedEffect(state.saveSuccessVersion) {
         adding = false
@@ -101,6 +134,8 @@ fun LocationHomeScreen(
             onDisplayModeChange = onDisplayModeChange,
             onSortChange = onSortChange,
             saveAction = saveAction,
+            virtualMode = virtualViewState != null,
+            onCreateVirtualFolder = onCreateVirtualFolder,
         )
         if (displayMode == DisplayMode.LIST) {
             LocationList(
@@ -110,6 +145,12 @@ fun LocationHomeScreen(
                 onEdit = { onClearAddError(); editor = it },
                 onRemove = { removal = it },
                 onRevalidate = onRevalidate,
+                virtualViewState = virtualViewState,
+                onOpenVirtualFolder = onOpenVirtualFolder,
+                onOpenVirtualReference = onOpenVirtualReference,
+                onManageVirtualNode = { managedVirtualNode = it },
+                onNavigateVirtual = onNavigateVirtual,
+                onOpenTrash = onOpenTrash,
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -120,6 +161,12 @@ fun LocationHomeScreen(
                 onEdit = { onClearAddError(); editor = it },
                 onRemove = { removal = it },
                 onRevalidate = onRevalidate,
+                virtualViewState = virtualViewState,
+                onOpenVirtualFolder = onOpenVirtualFolder,
+                onOpenVirtualReference = onOpenVirtualReference,
+                onManageVirtualNode = { managedVirtualNode = it },
+                onNavigateVirtual = onNavigateVirtual,
+                onOpenTrash = onOpenTrash,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -158,6 +205,38 @@ fun LocationHomeScreen(
             },
         )
     }
+
+    managedVirtualNode?.let { node ->
+        VirtualNodeManagementDialog(
+            node = node,
+            folders = virtualViewState?.allFolders.orEmpty(),
+            operationInProgress = virtualViewState?.operationInProgress == true,
+            onRename = { name -> onRenameVirtualNode(node.id, name); managedVirtualNode = null },
+            onMove = { folderId -> onMoveVirtualNode(node.id, folderId); managedVirtualNode = null },
+            onRemove = {
+                when (node) {
+                    is VirtualViewNode.VirtualFolder -> onDeleteVirtualFolder(node.id, false)
+                    is VirtualViewNode.RealReference -> onRemoveVirtualReference(node.id)
+                }
+                managedVirtualNode = null
+            },
+            onDismiss = { managedVirtualNode = null },
+        )
+    }
+
+    virtualViewState?.confirmDeleteFolderId?.let { folderId ->
+        AlertDialog(
+            onDismissRequest = onDismissVirtualDelete,
+            title = { Text("移除虚拟文件夹") },
+            text = { Text("只会移除这个虚拟分组及其中的引用，不会删除设备上的任何文件或文件夹。") },
+            confirmButton = {
+                TextButton(onClick = { onDeleteVirtualFolder(folderId, true) }) {
+                    Text("确认移除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismissVirtualDelete) { Text("取消") } },
+        )
+    }
 }
 
 @Composable
@@ -172,8 +251,11 @@ private fun LocationHomeHeader(
     onDisplayModeChange: (DisplayMode) -> Unit,
     onSortChange: (SortSpec) -> Unit,
     saveAction: FilesSaveAction?,
+    virtualMode: Boolean,
+    onCreateVirtualFolder: ((String) -> Unit)?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var creatingVirtualFolder by remember { mutableStateOf(false) }
 
     Column {
         FilesPageHeader(
@@ -218,8 +300,9 @@ private fun LocationHomeHeader(
                     canConnectServer = false,
                     onAddLocation = {
                         menuExpanded = false
-                        onAdd()
+                        if (virtualMode) creatingVirtualFolder = true else onAdd()
                     },
+                    addLocationLabel = if (virtualMode) "新建虚拟视图文件夹" else "添加位置",
                 )
             },
         )
@@ -238,6 +321,14 @@ private fun LocationHomeHeader(
             }
         }
     }
+    if (creatingVirtualFolder && onCreateVirtualFolder != null) {
+        VirtualFolderNameDialog(
+            title = "新建虚拟视图文件夹",
+            initialName = "",
+            onConfirm = { onCreateVirtualFolder(it); creatingVirtualFolder = false },
+            onDismiss = { creatingVirtualFolder = false },
+        )
+    }
 }
 
 @Composable
@@ -248,6 +339,12 @@ private fun LocationList(
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
     onRevalidate: (LocationId) -> Unit,
+    virtualViewState: VirtualViewUiState?,
+    onOpenVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit,
+    onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit,
+    onManageVirtualNode: (VirtualViewNode) -> Unit,
+    onNavigateVirtual: (String?) -> Unit,
+    onOpenTrash: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier) {
@@ -288,9 +385,23 @@ private fun LocationList(
                             onOpenLocation(location.path, location.displayName)
                         }
                     }
+                    item(key = "common.trash") { TrashLocationRow(onOpenTrash) }
                 }
 
                 LocationSection.CUSTOM -> {
+                    if (virtualViewState != null) {
+                        item(key = "section-custom") {
+                            VirtualSectionHeader(virtualViewState, onNavigateVirtual)
+                        }
+                        if (virtualViewState.children.isEmpty() && !virtualViewState.loading) {
+                            item(key = "virtual-empty") {
+                                Text("暂无虚拟视图文件夹", color = ISaverSecondaryText, modifier = Modifier.padding(16.dp))
+                            }
+                        }
+                        items(virtualViewState.children, key = { it.id }) { node ->
+                            VirtualViewListRow(node, onOpenVirtualFolder, onOpenVirtualReference, onManageVirtualNode)
+                        }
+                    } else {
                     item(key = "section-custom") { SectionTitle("自定义位置") }
                     items(content.custom, key = { it.location.id.value }) { item ->
                         LocationRow(item.location, item.availability.label(item.location.path), item.availability) {
@@ -317,6 +428,7 @@ private fun LocationList(
                             ) { Text("移除视图") }
                         }
                     }
+                    }
                 }
             }
         }
@@ -336,6 +448,156 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun VirtualSectionHeader(
+    state: VirtualViewUiState,
+    onNavigate: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth()) {
+        SectionTitle("虚拟视图位置")
+        if (state.breadcrumbs.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("根目录", color = ISaverBlue, modifier = Modifier.clickable { onNavigate(null) }.padding(8.dp))
+                state.breadcrumbs.forEach { folder ->
+                    Text("/", color = ISaverSecondaryText)
+                    Text(
+                        folder.displayName,
+                        color = ISaverBlue,
+                        modifier = Modifier.clickable { onNavigate(folder.id) }.padding(8.dp),
+                    )
+                }
+            }
+        }
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp, 4.dp)) }
+    }
+}
+
+@Composable
+private fun TrashLocationRow(onOpen: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ISaverCard)
+            .clickable(onClick = onOpen)
+            .semantics(mergeDescendants = true) { contentDescription = "列表项：回收站" }
+            .padding(horizontal = 16.dp)
+            .heightIn(min = 78.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Canvas(Modifier.size(width = 58.dp, height = 48.dp)) {
+            val color = ISaverSecondaryText
+            drawRoundRect(
+                color,
+                topLeft = Offset(size.width * .25f, size.height * .27f),
+                size = Size(size.width * .5f, size.height * .62f),
+                style = Stroke(2.dp.toPx()),
+            )
+            drawLine(color, Offset(size.width * .2f, size.height * .2f), Offset(size.width * .8f, size.height * .2f), 2.dp.toPx())
+            drawLine(color, Offset(size.width * .4f, size.height * .1f), Offset(size.width * .6f, size.height * .1f), 2.dp.toPx())
+        }
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text("回收站", color = ISaverPrimaryText)
+            Text("已删除项目", color = ISaverSecondaryText)
+        }
+        Text("›", color = ISaverSecondaryText)
+    }
+}
+
+@Composable
+private fun VirtualFolderNameDialog(
+    title: String,
+    initialName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("名称") },
+            )
+        },
+        confirmButton = {
+            TextButton(enabled = name.trim().isNotEmpty(), onClick = { onConfirm(name.trim()) }) { Text("确定") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun VirtualNodeManagementDialog(
+    node: VirtualViewNode,
+    folders: List<VirtualViewNode.VirtualFolder>,
+    operationInProgress: Boolean,
+    onRename: (String) -> Unit,
+    onMove: (String?) -> Unit,
+    onRemove: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var renameVisible by remember { mutableStateOf(false) }
+    var moveVisible by remember { mutableStateOf(false) }
+    if (!renameVisible && !moveVisible) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+            Surface(shape = MaterialTheme.shapes.medium, color = ISaverCard) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                    Text(node.displayName, color = ISaverPrimaryText, modifier = Modifier.padding(20.dp, 12.dp))
+                    TextButton(enabled = !operationInProgress, onClick = { renameVisible = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("编辑备注")
+                    }
+                    TextButton(enabled = !operationInProgress, onClick = { moveVisible = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("移动到")
+                    }
+                    TextButton(enabled = !operationInProgress, onClick = onRemove, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (node is VirtualViewNode.VirtualFolder) "移除虚拟文件夹" else "从虚拟视图移除", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+    if (renameVisible) {
+        VirtualFolderNameDialog("编辑备注", node.displayName, onRename, onDismiss)
+    }
+    if (moveVisible) {
+        var selected by remember { mutableStateOf<String?>(node.parentId) }
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("移动到") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    if (node is VirtualViewNode.VirtualFolder) {
+                        item {
+                            Row(Modifier.fillMaxWidth().clickable { selected = null }, verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = selected == null, onClick = { selected = null })
+                                Text("虚拟视图根目录")
+                            }
+                        }
+                    }
+                    items(folders.filter { it.id != node.id }, key = { it.id }) { folder ->
+                        Row(Modifier.fillMaxWidth().clickable { selected = folder.id }, verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = selected == folder.id, onClick = { selected = folder.id })
+                            Text(folder.displayName)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { onMove(selected) }) { Text("移动") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
 private fun LocationHomeGrid(
     state: LocationHomeUiState,
     content: SortedLocationContent,
@@ -343,6 +605,12 @@ private fun LocationHomeGrid(
     onEdit: (StorageLocation.Direct) -> Unit,
     onRemove: (StorageLocation.Direct) -> Unit,
     onRevalidate: (LocationId) -> Unit,
+    virtualViewState: VirtualViewUiState?,
+    onOpenVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit,
+    onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit,
+    onManageVirtualNode: (VirtualViewNode) -> Unit,
+    onNavigateVirtual: (String?) -> Unit,
+    onOpenTrash: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyVerticalGrid(
@@ -398,9 +666,24 @@ private fun LocationHomeGrid(
                             onRevalidate,
                         )
                     }
+                    fullSpanItem("common.trash") { TrashLocationRow(onOpenTrash) }
                 }
 
                 LocationSection.CUSTOM -> {
+                    if (virtualViewState != null) {
+                        fullSpanItem("section-custom") {
+                            VirtualSectionHeader(virtualViewState, onNavigateVirtual, Modifier.testTag("section-custom"))
+                        }
+                        if (virtualViewState.children.isEmpty() && !virtualViewState.loading) {
+                            fullSpanItem("virtual-empty") {
+                                Text("暂无虚拟视图文件夹", color = ISaverSecondaryText, modifier = Modifier.padding(16.dp))
+                            }
+                        } else {
+                            gridItems(virtualViewState.children, key = { it.id }) { node ->
+                                VirtualViewGridCell(node, onOpenVirtualFolder, onOpenVirtualReference, onManageVirtualNode)
+                            }
+                        }
+                    } else {
                     fullSpanItem("section-custom") { SectionTitle("自定义位置", Modifier.testTag("section-custom")) }
                     if (content.custom.isEmpty()) {
                         fullSpanItem("custom-empty") {
@@ -417,6 +700,7 @@ private fun LocationHomeGrid(
                             onRemove,
                             onRevalidate,
                         )
+                    }
                     }
                 }
             }

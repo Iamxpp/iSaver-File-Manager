@@ -18,6 +18,7 @@ import com.iamxpp.isaver.data.local.BrowserPreferencesStore
 import com.iamxpp.isaver.data.local.BrowserSessionStore
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.OperationResult
+import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.export.ExternalOpenIntentFactory
 import com.iamxpp.isaver.export.ExternalShareIntentFactory
 import kotlinx.coroutines.CoroutineDispatcher
@@ -43,6 +44,8 @@ import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.transfer.TransferViewModel
 import com.iamxpp.isaver.remote.RemoteConnectionViewModel
 import com.iamxpp.isaver.preview.RootPreviewRepository
+import com.iamxpp.isaver.ui.virtualviews.VirtualViewRepositoryStore
+import com.iamxpp.isaver.ui.virtualviews.VirtualViewViewModel
 import kotlinx.coroutines.Dispatchers
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -58,6 +61,10 @@ class MainActivity : ComponentActivity() {
             store = app.locationHomeCustomStore,
             fileSystem = app.rootFileSystem,
         )
+    }
+    private val virtualViewViewModel by viewModels<VirtualViewViewModel> {
+        val app = application as ISaverApplication
+        VirtualViewViewModelFactory(VirtualViewRepositoryStore(app.virtualViewRepository))
     }
     private val browserViewModel by viewModels<BrowserViewModel> {
         val app = application as ISaverApplication
@@ -118,6 +125,7 @@ class MainActivity : ComponentActivity() {
                     val transferState by transferViewModel.state.collectAsStateWithLifecycle()
                     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
                     val locationState by locationHomeViewModel.state.collectAsStateWithLifecycle()
+                    val virtualViewState by virtualViewViewModel.state.collectAsStateWithLifecycle()
                     val browserState by browserViewModel.state.collectAsStateWithLifecycle()
                     val recentState by recentViewModel.state.collectAsStateWithLifecycle()
                     val archiveState by archiveViewModel.state.collectAsStateWithLifecycle()
@@ -390,6 +398,25 @@ class MainActivity : ComponentActivity() {
                         onRetryLocations = locationHomeViewModel::refresh,
                         onClearLocationError = locationHomeViewModel::clearAddError,
                         onRevalidateCustomLocation = locationHomeViewModel::revalidateCustomLocation,
+                        virtualViewState = virtualViewState,
+                        onOpenVirtualFolder = virtualViewViewModel::openFolder,
+                        onOpenVirtualReference = { reference ->
+                            if (reference.entryType == EntryType.DIRECTORY && reference.available) {
+                                homeViewModel.openLocation(
+                                    reference.targetPath,
+                                    reference.displayName,
+                                    HomeTab.VIEWS,
+                                    recordAccess = false,
+                                )
+                            }
+                        },
+                        onNavigateVirtual = virtualViewViewModel::navigateTo,
+                        onCreateVirtualFolder = virtualViewViewModel::createFolder,
+                        onRenameVirtualNode = virtualViewViewModel::renameNode,
+                        onMoveVirtualNode = virtualViewViewModel::moveNode,
+                        onDeleteVirtualFolder = virtualViewViewModel::deleteFolder,
+                        onDismissVirtualDelete = virtualViewViewModel::dismissDeleteConfirmation,
+                        onRemoveVirtualReference = virtualViewViewModel::removeReference,
                         onEnterDirectory = { entry ->
                             !fileOperationInFlight && browserViewModel.enterDirectory(entry)
                         },
@@ -717,6 +744,17 @@ internal class LocationHomeViewModelFactory(
         require(modelClass.isAssignableFrom(LocationHomeViewModel::class.java))
         @Suppress("UNCHECKED_CAST")
         return LocationHomeViewModel(resolver, store, fileSystem, ioDispatcher) as T
+    }
+}
+
+internal class VirtualViewViewModelFactory(
+    private val store: com.iamxpp.isaver.ui.virtualviews.VirtualViewStore,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(VirtualViewViewModel::class.java))
+        @Suppress("UNCHECKED_CAST")
+        return VirtualViewViewModel(store, ioDispatcher) as T
     }
 }
 

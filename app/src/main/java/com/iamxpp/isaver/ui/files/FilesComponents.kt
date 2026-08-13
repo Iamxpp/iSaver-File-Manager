@@ -274,13 +274,14 @@ fun FileListRow(
     selected: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    accessibilityLabel: String = "列表项：$displayName",
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(if (selected) ISaverBlue.copy(alpha = .10f) else ISaverCard)
             .semantics(mergeDescendants = true) {
-                contentDescription = "列表项：$displayName"
+                contentDescription = accessibilityLabel
                 this.selected = selected
             }
             .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick),
@@ -339,13 +340,14 @@ fun FileGridCell(
     selected: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    accessibilityLabel: String = "网格项：$displayName",
 ) {
     Column(
         modifier = modifier
             .heightIn(min = 150.dp)
             .background(if (selected) ISaverBlue.copy(alpha = .10f) else ISaverCard, RoundedCornerShape(12.dp))
             .semantics(mergeDescendants = true) {
-                contentDescription = "网格项：$displayName"
+                contentDescription = accessibilityLabel
                 this.selected = selected
             }
             .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
@@ -413,6 +415,7 @@ fun FilesOverflowMenu(
     canCompress: Boolean,
     canConnectServer: Boolean,
     onAddLocation: (() -> Unit)? = null,
+    addLocationLabel: String = "添加位置",
     onOpenTasks: (() -> Unit)? = null,
     onOpenTrash: (() -> Unit)? = null,
     onGoForward: (() -> Unit)? = null,
@@ -431,7 +434,7 @@ fun FilesOverflowMenu(
     ) {
         if (onAddLocation != null) {
             FilesMenuItem(
-                text = "添加位置",
+                text = addLocationLabel,
                 onClick = onAddLocation,
                 modifier = Modifier.testTag("views-add-location-menu"),
             )

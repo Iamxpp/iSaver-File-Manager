@@ -1252,7 +1252,7 @@ private fun DeleteConfirmationDialog(
 }
 
 @Composable
-private fun TrashDialog(
+internal fun TrashDialog(
     items: List<TrashItem>,
     busy: Boolean,
     onRestore: (TrashItem) -> Unit,

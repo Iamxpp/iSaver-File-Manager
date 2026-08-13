@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsNode
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.locations.ResolvedAppLocation
 import com.iamxpp.isaver.locations.StorageLocation
@@ -34,6 +35,8 @@ import com.iamxpp.isaver.ui.files.FilesSaveAction
 import com.iamxpp.isaver.ui.files.SortDirection
 import com.iamxpp.isaver.ui.files.SortField
 import com.iamxpp.isaver.ui.files.SortSpec
+import com.iamxpp.isaver.ui.virtualviews.VirtualViewUiState
+import com.iamxpp.isaver.virtualviews.VirtualViewNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,6 +46,42 @@ import org.junit.Test
 class LocationHomeScreenTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun virtualViewSectionDistinguishesFoldersReferencesAndKeepsTrashLast() {
+        val common = direct("common.downloads", "下载", "/download", StorageLocation.Source.BUILT_IN)
+        val folder = VirtualViewNode.VirtualFolder("vf", null, "工作", 0, 1, 1)
+        val reference = VirtualViewNode.RealReference(
+            "ref", "vf", "项目资料", RootPath.parse("/work").getOrThrow(), EntryType.DIRECTORY,
+            null, true, 1, 1, 1,
+        )
+        var openedFolder: String? = null
+        var openedReference: RootPath? = null
+        var trashOpened = false
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(loading = false, commonLocations = listOf(common)),
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { path, _ -> openedReference = path },
+                onAdd = { _, _ -> }, onEdit = { _, _, _ -> }, onRemove = {}, onRetry = {},
+                virtualViewState = VirtualViewUiState(children = listOf(folder, reference), loading = false),
+                onOpenVirtualFolder = { openedFolder = it.id },
+                onOpenTrash = { trashOpened = true },
+            )
+        }
+
+        compose.onNodeWithText("虚拟视图位置").assertIsDisplayed()
+        compose.onNodeWithContentDescription("虚拟文件夹：工作").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("真实文件夹引用：项目资料").assertIsDisplayed().performClick()
+        compose.onNodeWithText("回收站").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals("vf", openedFolder)
+            assertEquals(reference.targetPath, openedReference)
+            assertTrue(trashOpened)
+        }
+        assertTextBefore("下载", "回收站")
+        assertTextBefore("回收站", "虚拟视图位置")
+    }
 
     @Test
     fun displaysViewsTitleAndLocationSections() {

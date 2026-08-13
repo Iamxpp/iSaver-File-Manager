@@ -17,6 +17,9 @@ interface VirtualViewNodeDao {
     )
     fun observeChildren(parentId: String?): Flow<List<VirtualViewNodeEntity>>
 
+    @Query("SELECT * FROM virtual_view_nodes ORDER BY createdAt, id")
+    fun observeAll(): Flow<List<VirtualViewNodeEntity>>
+
     @Query("SELECT * FROM virtual_view_nodes WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): VirtualViewNodeEntity?
 
@@ -49,4 +52,13 @@ interface VirtualViewNodeDao {
 
     @Query("DELETE FROM virtual_view_nodes WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>): Int
+
+    @Query(
+        """
+        DELETE FROM virtual_view_nodes
+        WHERE id = :id AND nodeType = 'VIRTUAL_FOLDER'
+          AND NOT EXISTS (SELECT 1 FROM virtual_view_nodes AS child WHERE child.parentId = :id)
+        """,
+    )
+    suspend fun deleteEmptyFolderById(id: String): Int
 }

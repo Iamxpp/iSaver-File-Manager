@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -16,6 +17,11 @@ class ISaverDatabaseMigrationTest {
         InstrumentationRegistry.getInstrumentation(),
         ISaverDatabase::class.java,
     )
+
+    @Before
+    fun deletePreviousTestDatabase() {
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(TEST_DATABASE)
+    }
 
     @Test
     fun migration1To2PreservesCustomLocationsAndCreatesRecentItems() {
@@ -179,6 +185,36 @@ class ISaverDatabaseMigrationTest {
         migrated.query("SELECT COUNT(*) FROM bookmarks").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals(2, cursor.getInt(0))
+        }
+    }
+
+    @Test
+    fun migration7To8KeepsVirtualViewEmptyWithoutLegacyData() {
+        val databaseName = "$TEST_DATABASE-empty-${System.nanoTime()}"
+        migrationHelper.createDatabase(databaseName, 7).apply {
+            query("SELECT COUNT(*) FROM custom_locations").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+            query("SELECT COUNT(*) FROM bookmarks").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+            close()
+        }
+
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            databaseName,
+            8,
+            true,
+            ISaverDatabase.MIGRATION_7_8,
+        )
+
+        migrated.query("SELECT id, nodeType, parentId FROM virtual_view_nodes").use { cursor ->
+            val rows = buildList {
+                while (cursor.moveToNext()) add(listOf(cursor.getString(0), cursor.getString(1), cursor.getString(2)))
+            }
+            assertEquals(rows.toString(), 0, rows.size)
         }
     }
 

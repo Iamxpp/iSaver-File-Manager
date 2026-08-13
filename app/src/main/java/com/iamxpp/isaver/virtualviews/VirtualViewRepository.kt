@@ -23,6 +23,8 @@ class VirtualViewRepository internal constructor(
     fun observeChildren(parentFolderId: String?): Flow<List<VirtualViewNode>> =
         dao.observeChildren(parentFolderId).map { rows -> rows.mapNotNull(::toModel) }
 
+    fun observeAll(): Flow<List<VirtualViewNode>> = dao.observeAll().map { rows -> rows.mapNotNull(::toModel) }
+
     suspend fun findNode(id: String): VirtualViewNode? = dao.findById(id)?.let(::toModel)
 
     suspend fun createFolder(parentFolderId: String?, name: String): VirtualViewResult = database.withTransaction {
@@ -161,6 +163,10 @@ class VirtualViewRepository internal constructor(
             VirtualViewResult.NotFound
         }
 
+    suspend fun cleanupEmptyLegacyMigrationFolder() {
+        dao.deleteEmptyFolderById(MIGRATED_UNGROUPED_ID)
+    }
+
     private suspend fun isFolder(id: String): Boolean =
         dao.findById(id)?.nodeType == VirtualViewNodeType.VIRTUAL_FOLDER.name
 
@@ -207,5 +213,6 @@ class VirtualViewRepository internal constructor(
 
     private companion object {
         const val MAX_NAME_CODE_POINTS = 120
+        const val MIGRATED_UNGROUPED_ID = "migration.virtual.ungrouped"
     }
 }

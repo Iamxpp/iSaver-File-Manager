@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import com.iamxpp.isaver.domain.DirectoryEntry
@@ -31,6 +33,8 @@ import com.iamxpp.isaver.ui.archive.ArchiveUiState
 import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.trash.RestoreConflictAction
 import com.iamxpp.isaver.archive.ArchiveFormat
+import com.iamxpp.isaver.ui.virtualviews.VirtualViewUiState
+import com.iamxpp.isaver.virtualviews.VirtualViewNode
 
 @Composable
 fun ISaverHomeScreen(
@@ -47,6 +51,16 @@ fun ISaverHomeScreen(
     onRetryLocations: () -> Unit,
     onClearLocationError: () -> Unit = {},
     onRevalidateCustomLocation: (LocationId) -> Unit = {},
+    virtualViewState: VirtualViewUiState? = null,
+    onOpenVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit = {},
+    onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit = {},
+    onNavigateVirtual: (String?) -> Unit = {},
+    onCreateVirtualFolder: ((String) -> Unit)? = null,
+    onRenameVirtualNode: (String, String) -> Unit = { _, _ -> },
+    onMoveVirtualNode: (String, String?) -> Unit = { _, _ -> },
+    onDeleteVirtualFolder: (String, Boolean) -> Unit = { _, _ -> },
+    onDismissVirtualDelete: () -> Unit = {},
+    onRemoveVirtualReference: (String) -> Unit = {},
     onEnterDirectory: (DirectoryEntry) -> Unit,
     onBrowserBack: () -> Unit,
     onBrowserForward: () -> Unit = {},
@@ -141,6 +155,7 @@ fun ISaverHomeScreen(
     onExtractHere: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var trashVisible by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val saveMode = transferState != TransferUiState.Idle
     val saveAction = if (saveMode) {
         FilesSaveAction(
@@ -206,6 +221,17 @@ fun ISaverHomeScreen(
                     onDisplayModeChange = onDisplayModeChange,
                     onSortChange = onSortChange,
                     saveAction = saveAction,
+                    virtualViewState = virtualViewState,
+                    onOpenVirtualFolder = onOpenVirtualFolder,
+                    onOpenVirtualReference = onOpenVirtualReference,
+                    onNavigateVirtual = onNavigateVirtual,
+                    onCreateVirtualFolder = onCreateVirtualFolder,
+                    onRenameVirtualNode = onRenameVirtualNode,
+                    onMoveVirtualNode = onMoveVirtualNode,
+                    onDeleteVirtualFolder = onDeleteVirtualFolder,
+                    onDismissVirtualDelete = onDismissVirtualDelete,
+                    onRemoveVirtualReference = onRemoveVirtualReference,
+                    onOpenTrash = { trashVisible = true },
                     modifier = Modifier.weight(1f),
                 )
                 HomeTab.BROWSE -> Unit
@@ -335,6 +361,17 @@ fun ISaverHomeScreen(
                     onDisplayModeChange = onDisplayModeChange,
                     onSortChange = onSortChange,
                     saveAction = extractionAction,
+                    virtualViewState = virtualViewState,
+                    onOpenVirtualFolder = onOpenVirtualFolder,
+                    onOpenVirtualReference = onOpenVirtualReference,
+                    onNavigateVirtual = onNavigateVirtual,
+                    onCreateVirtualFolder = onCreateVirtualFolder,
+                    onRenameVirtualNode = onRenameVirtualNode,
+                    onMoveVirtualNode = onMoveVirtualNode,
+                    onDeleteVirtualFolder = onDeleteVirtualFolder,
+                    onDismissVirtualDelete = onDismissVirtualDelete,
+                    onRemoveVirtualReference = onRemoveVirtualReference,
+                    onOpenTrash = { trashVisible = true },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -380,6 +417,17 @@ fun ISaverHomeScreen(
                     onDisplayModeChange = onDisplayModeChange,
                     onSortChange = onSortChange,
                     saveAction = moveAction,
+                    virtualViewState = virtualViewState,
+                    onOpenVirtualFolder = onOpenVirtualFolder,
+                    onOpenVirtualReference = onOpenVirtualReference,
+                    onNavigateVirtual = onNavigateVirtual,
+                    onCreateVirtualFolder = onCreateVirtualFolder,
+                    onRenameVirtualNode = onRenameVirtualNode,
+                    onMoveVirtualNode = onMoveVirtualNode,
+                    onDeleteVirtualFolder = onDeleteVirtualFolder,
+                    onDismissVirtualDelete = onDismissVirtualDelete,
+                    onRemoveVirtualReference = onRemoveVirtualReference,
+                    onOpenTrash = { trashVisible = true },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -425,6 +473,17 @@ fun ISaverHomeScreen(
                     onDisplayModeChange = onDisplayModeChange,
                     onSortChange = onSortChange,
                     saveAction = copyAction,
+                    virtualViewState = virtualViewState,
+                    onOpenVirtualFolder = onOpenVirtualFolder,
+                    onOpenVirtualReference = onOpenVirtualReference,
+                    onNavigateVirtual = onNavigateVirtual,
+                    onCreateVirtualFolder = onCreateVirtualFolder,
+                    onRenameVirtualNode = onRenameVirtualNode,
+                    onMoveVirtualNode = onMoveVirtualNode,
+                    onDeleteVirtualFolder = onDeleteVirtualFolder,
+                    onDismissVirtualDelete = onDismissVirtualDelete,
+                    onRemoveVirtualReference = onRemoveVirtualReference,
+                    onOpenTrash = { trashVisible = true },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -455,6 +514,17 @@ fun ISaverHomeScreen(
             selectedTab = homeState.selectedTab,
             onSelect = onSelectTab,
             modifier = Modifier.testTag("files-bottom-bar"),
+        )
+    }
+    if (trashVisible) {
+        TrashDialog(
+            items = browserState.trashItems,
+            busy = browserState.deletingEntry,
+            onRestore = onRestoreTrashItem,
+            onDelete = onDeleteTrashItemPermanently,
+            onRestoreAll = onRestoreAllTrashItems,
+            onClear = onClearTrash,
+            onDismiss = { trashVisible = false },
         )
     }
     recentState.fileInfo?.let { FileInfoDialog(entry = it, onDismiss = onDismissRecentFileInfo) }

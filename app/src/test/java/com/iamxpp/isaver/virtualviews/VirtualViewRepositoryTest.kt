@@ -95,6 +95,25 @@ class VirtualViewRepositoryTest {
         assertEquals(emptyList<VirtualViewNode>(), repository.observeChildren(null).first())
     }
 
+    @Test
+    fun `cleanup removes only the fixed empty migration folder`() = runTest {
+        val userFolder = repository.createFolder(null, "未分组").idOrThrow()
+        database.openHelper.writableDatabase.execSQL(
+            """
+            INSERT INTO virtual_view_nodes
+                (id, parentId, nodeType, displayName, targetPath, entryType, device, inode,
+                 available, sortOrder, createdAt, updatedAt)
+            VALUES
+                ('migration.virtual.ungrouped', NULL, 'VIRTUAL_FOLDER', '未分组', NULL, NULL, NULL, NULL,
+                 1, 99, 0, 0)
+            """.trimIndent(),
+        )
+
+        repository.cleanupEmptyLegacyMigrationFolder()
+
+        assertEquals(listOf(userFolder), repository.observeChildren(null).first().map { it.id })
+    }
+
     private fun VirtualViewResult.idOrThrow(): String = (this as VirtualViewResult.Success).nodeId
 
     private inline fun <reified T> assertIs(value: Any?) {

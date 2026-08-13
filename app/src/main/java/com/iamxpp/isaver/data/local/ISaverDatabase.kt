@@ -255,6 +255,16 @@ abstract class ISaverDatabase : RoomDatabase() {
                         updatedAt = MAX(virtual_view_nodes.updatedAt, excluded.updatedAt)
                     """.trimIndent(),
                 )
+                database.execSQL(
+                    """
+                    DELETE FROM virtual_view_nodes
+                    WHERE id = '$MIGRATED_UNGROUPED_ID'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM virtual_view_nodes AS child
+                          WHERE child.parentId = '$MIGRATED_UNGROUPED_ID'
+                      )
+                    """.trimIndent(),
+                )
             }
         }
 
