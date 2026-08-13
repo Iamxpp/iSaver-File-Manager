@@ -6,6 +6,8 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import com.iamxpp.isaver.data.local.BrowserPreferencesRepository
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.data.local.BrowserSessionRepository
+import com.iamxpp.isaver.data.local.BrowserSessionStore
 import com.iamxpp.isaver.data.local.ISaverDatabase
 import com.iamxpp.isaver.data.root.LibsuRootSession
 import com.iamxpp.isaver.data.root.RootSession
@@ -95,14 +97,16 @@ class ISaverApplication : Application() {
     internal val locationHomeCustomStore: LocationHomeCustomStore by lazy {
         CustomLocationStoreAdapter(customLocationRepository)
     }
-    internal val browserPreferencesStore: BrowserPreferencesStore by lazy {
-        BrowserPreferencesRepository(
-            PreferenceDataStoreFactory.create(
-                scope = applicationScope,
-                produceFile = { preferencesDataStoreFile("browser.preferences_pb") },
-            ),
+    private val browserDataStore by lazy {
+        PreferenceDataStoreFactory.create(
+            scope = applicationScope,
+            produceFile = { preferencesDataStoreFile("browser.preferences_pb") },
         )
     }
+    internal val browserPreferencesStore: BrowserPreferencesStore by lazy {
+        BrowserPreferencesRepository(browserDataStore)
+    }
+    internal val browserSessionStore: BrowserSessionStore by lazy { BrowserSessionRepository(browserDataStore) }
     internal val shareIntentParser: ShareIntentParser by lazy { ShareIntentParser(this) }
     internal val incomingFileCache: IncomingFileCache by lazy {
         IncomingFileCache(contentResolver, cacheDir, Dispatchers.IO)

@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.iamxpp.isaver.data.root.RootSession
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.data.local.BrowserSessionStore
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.export.ExternalOpenIntentFactory
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
             checksumFile = app.fileChecksumRepository::sha256,
             checksumFileByAlgorithm = { entry, algorithm -> app.fileChecksumRepository.checksum(entry, algorithm) },
             bookmarkRepository = app.bookmarkRepository,
+            browserSessionStore = app.browserSessionStore,
             previewRepository = RootPreviewRepository(app.rootFileSystem),
         )
     }
@@ -132,11 +134,21 @@ class MainActivity : ComponentActivity() {
 
                     LaunchedEffect(destination) {
                         when (destination) {
-                            is HomeDestination.Browser -> browserViewModel.openRoot(
-                                destination.path,
-                                destination.title,
-                                destination.recordAccess,
-                            )
+                            is HomeDestination.Browser -> if (
+                                destination.source == HomeTab.BROWSE && destination.path.value == "/"
+                            ) {
+                                browserViewModel.restoreSessionOrOpenRoot(
+                                    destination.path,
+                                    destination.title,
+                                    destination.recordAccess,
+                                )
+                            } else {
+                                browserViewModel.openRoot(
+                                    destination.path,
+                                    destination.title,
+                                    destination.recordAccess,
+                                )
+                            }
                             is HomeDestination.Archive -> if (
                                 archiveState.source != destination.source || archiveState.listing == null
                             ) {
@@ -575,6 +587,7 @@ internal class BrowserViewModelFactory(
     private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
     private val trashRepository: com.iamxpp.isaver.trash.TrashRepository? = null,
     private val bookmarkRepository: com.iamxpp.isaver.bookmarks.BookmarkRepository? = null,
+    private val browserSessionStore: BrowserSessionStore? = null,
     private val previewRepository: RootPreviewRepository? = null,
     private val checksumFile: suspend (com.iamxpp.isaver.domain.DirectoryEntry) -> OperationResult<String> = {
         OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.COMMAND_FAILED, "无法计算校验和")
@@ -638,6 +651,7 @@ internal class BrowserViewModelFactory(
             checksumFile = checksumFile,
             checksumFileByAlgorithm = checksumFileByAlgorithm,
             bookmarkRepository = bookmarkRepository,
+            browserSessionStore = browserSessionStore,
             previewRepository = previewRepository ?: RootPreviewRepository(fileSystem),
         ) as T
     }

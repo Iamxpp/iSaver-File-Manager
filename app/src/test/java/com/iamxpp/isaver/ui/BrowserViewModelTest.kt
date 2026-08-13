@@ -5,6 +5,8 @@ import com.iamxpp.isaver.archive.ArchiveRepository
 import com.iamxpp.isaver.archive.LocalArchiveEngine
 import com.iamxpp.isaver.data.local.BrowserPreferences
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.data.local.BrowserSession
+import com.iamxpp.isaver.data.local.BrowserSessionStore
 import com.iamxpp.isaver.bookmarks.BookmarkRepository
 import com.iamxpp.isaver.data.local.BookmarkDao
 import com.iamxpp.isaver.data.local.BookmarkEntity
@@ -928,6 +930,59 @@ class BrowserViewModelTest {
         advanceUntilIdle()
         assertFalse(vm.state.value.canGoForward)
         assertFalse(vm.forward())
+    }
+
+    @Test fun `restores persisted path and ordered navigation history`() = runTest {
+        val root = RootPath.parse("/storage/emulated/0").getOrThrow()
+        val documents = RootPath.parse("/storage/emulated/0/Documents").getOrThrow()
+        val work = RootPath.parse("/storage/emulated/0/Documents/work").getOrThrow()
+        val download = RootPath.parse("/storage/emulated/0/Download").getOrThrow()
+        val store = FakeBrowserSessionStore(
+            BrowserSession(root, "内部存储", work, listOf(root, documents), listOf(download)),
+        )
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                statBlock = { path -> OperationResult.Success(entry(path.value.substringAfterLast('/'), EntryType.DIRECTORY, path = path.value)) },
+                listBlock = { OperationResult.Success(emptyList()) },
+            ),
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            browserSessionStore = store,
+        )
+
+        vm.restoreSessionOrOpenRoot(RootPath.parse("/").getOrThrow(), "浏览")
+        advanceUntilIdle()
+
+        assertEquals(work, vm.state.value.currentPath)
+        assertEquals("内部存储", vm.state.value.rootTitle)
+        assertTrue(vm.state.value.canGoBack)
+        assertTrue(vm.state.value.canGoForward)
+        vm.back()
+        advanceUntilIdle()
+        assertEquals(documents, vm.state.value.currentPath)
+    }
+
+    @Test fun `invalid persisted directory is cleared and explicit root opens`() = runTest {
+        val persisted = RootPath.parse("/missing").getOrThrow()
+        val fallback = RootPath.parse("/").getOrThrow()
+        val store = FakeBrowserSessionStore(
+            BrowserSession(persisted, "失效", persisted, emptyList(), emptyList()),
+        )
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                statBlock = { OperationResult.Failure(ErrorCode.NOT_FOUND, "不存在") },
+                listBlock = { OperationResult.Success(emptyList()) },
+            ),
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            browserSessionStore = store,
+        )
+
+        vm.restoreSessionOrOpenRoot(fallback, "浏览")
+        advanceUntilIdle()
+
+        assertEquals(fallback, vm.state.value.currentPath)
+        assertTrue(store.cleared)
     }
 
     @Test fun `toggles current path bookmark and reopens it as a new root`() = runTest {
@@ -2447,6 +2502,14 @@ class BrowserViewModelTest {
             sortWrites += sortSpec
         }
         fun emit(value: BrowserPreferences) { preferences.value = value }
+    }
+
+    private class FakeBrowserSessionStore(initial: BrowserSession?) : BrowserSessionStore {
+        override val session = MutableStateFlow(initial)
+        val writes = mutableListOf<BrowserSession>()
+        var cleared = false
+        override suspend fun save(session: BrowserSession) { writes += session; this.session.value = session }
+        override suspend fun clear() { cleared = true; session.value = null }
     }
 
     private class FakeBookmarkDao : BookmarkDao {

@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.iamxpp.isaver.bookmarks.Bookmark
 import com.iamxpp.isaver.bookmarks.BookmarkRepository
 import com.iamxpp.isaver.data.local.BrowserPreferencesStore
+import com.iamxpp.isaver.data.local.BrowserSession
+import com.iamxpp.isaver.data.local.BrowserSessionStore
 import com.iamxpp.isaver.data.root.DirectorySnapshot
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.archive.ArchiveRepository
@@ -88,6 +90,7 @@ class BrowserViewModel(
         else OperationResult.Failure(ErrorCode.COMMAND_FAILED, "不支持此校验算法")
     },
     private val bookmarkRepository: BookmarkRepository? = null,
+    private val browserSessionStore: BrowserSessionStore? = null,
     private val localSearchRepository: LocalSearchRepository = LocalSearchRepository(rootFileSystem),
     private val previewRepository: RootPreviewRepository = RootPreviewRepository(rootFileSystem),
 ) : ViewModel() {
@@ -115,6 +118,7 @@ class BrowserViewModel(
     private var metadataJob: Job? = null
     private var deepSearchJob: Job? = null
     private var previewJob: Job? = null
+    private var sessionSaveJob: Job? = null
     private val batchRenamePlanner = BatchRenamePlanner()
     private val batchRenameExecutor = BatchRenameExecutor(renameFile)
     private var copySelectionToRestore: BrowserCopySelection? = null
@@ -122,6 +126,7 @@ class BrowserViewModel(
     private var generation = 0L
     private var visibleCount = PAGE_SIZE
     private var presentedEntries: List<DirectoryEntry> = emptyList()
+    private var sessionRestoreAttempted = false
 
     val state: StateFlow<BrowserUiState> = mutableState.asStateFlow()
 
@@ -1501,6 +1506,33 @@ class BrowserViewModel(
         load(path, recordAccess = recordAccess)
     }
 
+    fun restoreSessionOrOpenRoot(path: RootPath, title: String, recordAccess: Boolean = true) {
+        val store = browserSessionStore
+        if (sessionRestoreAttempted || store == null) {
+            openRoot(path, title, recordAccess)
+            return
+        }
+        sessionRestoreAttempted = true
+        viewModelScope.launch {
+            val session = runCatching { store.session.first() }.getOrNull()
+            val current = session?.let { withContext(ioDispatcher) { rootFileSystem.stat(it.currentPath) } }
+            if (session == null || current !is OperationResult.Success ||
+                current.value.type != EntryType.DIRECTORY || current.value.symbolicLink || !current.value.readable
+            ) {
+                if (session != null) runCatching { store.clear() }
+                openRoot(path, title, recordAccess)
+                return@launch
+            }
+            selectedRootPath = session.rootPath
+            stack.clear()
+            stack.addAll(session.backStack)
+            forwardStack.clear()
+            forwardStack.addAll(session.forwardStack)
+            mutableState.value = mutableState.value.copy(rootTitle = session.rootTitle)
+            load(session.currentPath, recordAccess = false)
+        }
+    }
+
     fun back(): BrowserBackResult {
         val previous = stack.removeLastOrNull() ?: return BrowserBackResult.RETURN_HOME
         forwardStack.addLast(mutableState.value.currentPath)
@@ -1916,6 +1948,7 @@ class BrowserViewModel(
             if (recordAccess) {
                 recordSuccessfulDirectoryAccess(path, mutableState.value.title)
             }
+            persistSession(path)
             return
         }
     }
@@ -1947,6 +1980,21 @@ class BrowserViewModel(
             } catch (_: Exception) {
                 Unit
             }
+        }
+    }
+
+    private fun persistSession(currentPath: RootPath) {
+        val store = browserSessionStore ?: return
+        val session = BrowserSession(
+            rootPath = selectedRootPath,
+            rootTitle = mutableState.value.rootTitle,
+            currentPath = currentPath,
+            backStack = stack.toList(),
+            forwardStack = forwardStack.toList(),
+        )
+        sessionSaveJob?.cancel()
+        sessionSaveJob = viewModelScope.launch(ioDispatcher) {
+            runCatching { store.save(session) }
         }
     }
 
