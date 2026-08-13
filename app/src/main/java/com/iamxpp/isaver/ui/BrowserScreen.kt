@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -82,6 +83,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.layout.ContentScale
 import com.iamxpp.isaver.trash.TrashItemState
 import java.text.DateFormat
@@ -95,6 +98,8 @@ fun BrowserScreen(
     onBack: () -> Unit,
     onForward: () -> Unit = {},
     onToggleCurrentBookmark: () -> Unit = {},
+    onToggleEntryBookmark: (DirectoryEntry) -> Unit = {},
+    onUpdateBookmark: (com.iamxpp.isaver.bookmarks.Bookmark, String, String?, String?) -> Unit = { _, _, _, _ -> },
     onOpenBookmark: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit = {},
     onStartDeepSearch: (LocalSearchCriteria) -> Unit = {},
     onCancelDeepSearch: () -> Unit = {},
@@ -416,6 +421,7 @@ fun BrowserScreen(
             compressVisible = onCompress != null,
             deleteVisible = onRecycleEntry != null || onDeleteEntryPermanently != null,
             deleteEnabled = !state.deletingEntry,
+            bookmarked = state.bookmarks.any { it.path == entry.path },
             onShare = {
                 actionEntry = null
                 onShareEntry?.invoke(entry)
@@ -443,6 +449,11 @@ fun BrowserScreen(
             onDelete = {
                 actionEntry = null
                 deleteEntry = entry
+            },
+            onToggleBookmark = {
+                actionEntry = null
+                onToggleEntryBookmark(entry)
+                onClearSelection()
             },
             onInfo = {
                 actionEntry = null
@@ -583,6 +594,7 @@ fun BrowserScreen(
     if (bookmarksVisible) {
         BookmarkDialog(
             bookmarks = state.bookmarks,
+            onUpdate = onUpdateBookmark,
             onOpen = {
                 bookmarksVisible = false
                 onOpenBookmark(it)
@@ -836,6 +848,7 @@ private fun FileActionsSheet(
     compressVisible: Boolean,
     deleteVisible: Boolean,
     deleteEnabled: Boolean,
+    bookmarked: Boolean,
     onOpenWith: () -> Unit,
     onShare: () -> Unit,
     onCompress: () -> Unit,
@@ -843,6 +856,7 @@ private fun FileActionsSheet(
     onCopy: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onToggleBookmark: () -> Unit,
     onInfo: () -> Unit,
     onClearSelection: () -> Unit,
     onDismiss: () -> Unit,
@@ -923,6 +937,11 @@ private fun FileActionsSheet(
                     onClick = onDelete,
                 )
             }
+            FileActionRow(
+                title = if (bookmarked) "取消收藏" else "收藏",
+                description = if (bookmarked) "从书签中移除此项目" else "添加到书签",
+                onClick = onToggleBookmark,
+            )
             FileActionRow(
                 title = "属性",
                 description = "查看详细信息和校验和",
@@ -1189,6 +1208,13 @@ private fun OperationTaskDialog(
     )
 }
 
+private fun bookmarkColor(key: String?): Color = when (key) {
+    "GREEN" -> Color(0xFF2E8B57)
+    "RED" -> Color(0xFFD24A4A)
+    "YELLOW" -> Color(0xFFD39A20)
+    else -> ISaverBlue
+}
+
 private fun formatTaskBytes(bytes: Long): String = when {
     bytes >= 1024L * 1024L * 1024L -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
     bytes >= 1024L * 1024L -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
@@ -1325,8 +1351,10 @@ private fun BatchDeleteConfirmationDialog(
 private fun BookmarkDialog(
     bookmarks: List<com.iamxpp.isaver.bookmarks.Bookmark>,
     onOpen: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit,
+    onUpdate: (com.iamxpp.isaver.bookmarks.Bookmark, String, String?, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var editing by remember { mutableStateOf<com.iamxpp.isaver.bookmarks.Bookmark?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("书签") },
@@ -1335,12 +1363,29 @@ private fun BookmarkDialog(
                 Text("暂无书签")
             } else {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    items(bookmarks, key = { it.path.value }) { bookmark ->
+                    items(bookmarks.sortedWith(compareBy({ it.groupName.orEmpty() }, { it.displayName })), key = { it.path.value }) { bookmark ->
                         ListItem(
-                            headlineContent = { Text(bookmark.displayName) },
-                            supportingContent = {
-                                Text(bookmark.path.value, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            leadingContent = {
+                                Box(
+                                    Modifier.size(14.dp).background(bookmarkColor(bookmark.colorKey), CircleShape),
+                                )
                             },
+                            headlineContent = {
+                                Text(bookmark.displayName, color = if (bookmark.available) ISaverPrimaryText else ISaverSecondaryText)
+                            },
+                            supportingContent = {
+                                Text(
+                                    listOfNotNull(
+                                        bookmark.groupName,
+                                        if (bookmark.type == EntryType.FILE) "文件" else "文件夹",
+                                        if (!bookmark.available) "不可用" else null,
+                                        bookmark.path.value,
+                                    ).joinToString(" · "),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            trailingContent = { TextButton(onClick = { editing = bookmark }) { Text("编辑") } },
                             modifier = Modifier.clickable { onOpen(bookmark) },
                         )
                     }
@@ -1348,6 +1393,59 @@ private fun BookmarkDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+    editing?.let { bookmark ->
+        BookmarkEditDialog(
+            bookmark = bookmark,
+            onConfirm = { name, color, group ->
+                editing = null
+                onUpdate(bookmark, name, color, group)
+            },
+            onDismiss = { editing = null },
+        )
+    }
+}
+
+@Composable
+private fun BookmarkEditDialog(
+    bookmark: com.iamxpp.isaver.bookmarks.Bookmark,
+    onConfirm: (String, String?, String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember(bookmark.path) { mutableStateOf(bookmark.displayName) }
+    var group by remember(bookmark.path) { mutableStateOf(bookmark.groupName.orEmpty()) }
+    var color by remember(bookmark.path) { mutableStateOf(bookmark.colorKey) }
+    val colors = listOf<String?>(null, "BLUE", "GREEN", "RED", "YELLOW")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑书签") },
+        text = {
+            Column {
+                TextField(value = name, onValueChange = { name = it }, label = { Text("名称") })
+                TextField(
+                    value = group,
+                    onValueChange = { group = it },
+                    label = { Text("分组") },
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    colors.forEach { option ->
+                        TextButton(onClick = { color = option }) {
+                            val label = when (option) {
+                                "BLUE" -> "蓝"
+                                "GREEN" -> "绿"
+                                "RED" -> "红"
+                                "YELLOW" -> "黄"
+                                else -> "默认"
+                            }
+                            Text(if (color == option) "$label ✓" else label)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(name, color, group) }, enabled = name.isNotBlank()) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 

@@ -2,6 +2,8 @@ package com.iamxpp.isaver.bookmarks
 
 import com.iamxpp.isaver.data.local.BookmarkDao
 import com.iamxpp.isaver.data.local.BookmarkEntity
+import com.iamxpp.isaver.domain.EntryType
+import com.iamxpp.isaver.domain.RootEntryIdentity
 import com.iamxpp.isaver.domain.RootPath
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +36,43 @@ class BookmarkRepositoryTest {
         assertEquals(listOf(downloads), repository.bookmarks.first().map { it.path })
     }
 
+    @Test fun `stores file type identity and availability`() = runTest {
+        val dao = FakeBookmarkDao()
+        val repository = BookmarkRepository(dao) { 40L }
+        val file = root("/data/local/tmp/report.txt")
+
+        repository.add(
+            path = file,
+            displayName = "报告",
+            type = EntryType.FILE,
+            identity = RootEntryIdentity(8L, 99L),
+        )
+        repository.setAvailability(file, false)
+
+        val bookmark = repository.bookmarks.first().single()
+        assertEquals(EntryType.FILE, bookmark.type)
+        assertEquals(RootEntryIdentity(8L, 99L), bookmark.identity)
+        assertEquals(false, bookmark.available)
+    }
+
+    @Test fun `updates details and relocates a bookmark without losing custom name`() = runTest {
+        val repository = BookmarkRepository(FakeBookmarkDao()) { 50L }
+        val original = root("/data/local/tmp/report.txt")
+        val target = root("/storage/emulated/0/Documents/report.txt")
+        repository.add(original, "report.txt", EntryType.FILE, RootEntryIdentity(1L, 2L))
+        var bookmark = repository.bookmarks.first().single()
+        repository.updateDetails(bookmark, "季度报告", "GREEN", "工作")
+        bookmark = repository.bookmarks.first().single()
+        repository.relocate(bookmark, target, "report.txt", RootEntryIdentity(3L, 4L))
+
+        val moved = repository.bookmarks.first().single()
+        assertEquals(target, moved.path)
+        assertEquals("季度报告", moved.displayName)
+        assertEquals("GREEN", moved.colorKey)
+        assertEquals("工作", moved.groupName)
+        assertEquals(RootEntryIdentity(3L, 4L), moved.identity)
+    }
+
     private class FakeBookmarkDao : BookmarkDao {
         private val rows = linkedMapOf<String, BookmarkEntity>()
         private val flow = MutableStateFlow<List<BookmarkEntity>>(emptyList())
@@ -47,6 +86,32 @@ class BookmarkRepositoryTest {
 
         override suspend fun delete(entity: BookmarkEntity) {
             rows.remove(entity.absolutePath)
+            emit()
+        }
+
+        override suspend fun setAvailability(absolutePath: String, available: Boolean) {
+            rows[absolutePath]?.let { rows[absolutePath] = it.copy(available = available) }
+            emit()
+        }
+
+        override suspend fun relocate(
+            oldPath: String,
+            newPath: String,
+            displayName: String,
+            entryType: String,
+            device: Long?,
+            inode: Long?,
+        ) {
+            rows.remove(oldPath)?.let {
+                rows[newPath] = it.copy(
+                    absolutePath = newPath,
+                    displayName = displayName,
+                    entryType = entryType,
+                    device = device,
+                    inode = inode,
+                    available = true,
+                )
+            }
             emit()
         }
 

@@ -961,6 +961,56 @@ class BrowserViewModelTest {
         assertTrue(vm.state.value.bookmarks.isEmpty())
     }
 
+    @Test fun `file bookmark stores identity and opens the current file`() = runTest {
+        val repository = BookmarkRepository(FakeBookmarkDao()) { 123L }
+        val file = entry("report.bin", EntryType.FILE, path = "/data/local/tmp/report.bin")
+        val opened = mutableListOf<DirectoryEntry>()
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                statBlock = { OperationResult.Success(file) },
+                identityBlock = { OperationResult.Success(RootEntryIdentity(8L, 99L)) },
+                listBlock = { OperationResult.Success(emptyList()) },
+            ),
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            bookmarkRepository = repository,
+            exportFile = { opened += it; OperationResult.Failure(ErrorCode.COMMAND_FAILED, "opened") },
+        )
+
+        vm.toggleEntryBookmark(file)
+        advanceUntilIdle()
+        val bookmark = vm.state.value.bookmarks.single()
+        assertEquals(EntryType.FILE, bookmark.type)
+        assertEquals(RootEntryIdentity(8L, 99L), bookmark.identity)
+
+        vm.openBookmark(bookmark)
+        advanceUntilIdle()
+        assertEquals(listOf(file), opened)
+        assertTrue(vm.state.value.bookmarks.single().available)
+    }
+
+    @Test fun `changed bookmark identity is marked unavailable`() = runTest {
+        val repository = BookmarkRepository(FakeBookmarkDao()) { 123L }
+        val file = entry("report.txt", EntryType.FILE, path = "/data/local/tmp/report.txt")
+        val vm = BrowserViewModel(
+            FakeFileSystem(
+                statBlock = { OperationResult.Success(file) },
+                identityBlock = { OperationResult.Success(RootEntryIdentity(8L, 100L)) },
+                listBlock = { OperationResult.Success(emptyList()) },
+            ),
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+            bookmarkRepository = repository,
+        )
+        repository.add(file.path, file.name, EntryType.FILE, RootEntryIdentity(8L, 99L))
+        advanceUntilIdle()
+
+        vm.openBookmark(vm.state.value.bookmarks.single())
+        advanceUntilIdle()
+
+        assertFalse(vm.state.value.bookmarks.single().available)
+    }
+
     @Test fun `back at an opened location root requests the locations home`() = runTest {
         val vm = BrowserViewModel(FakeFileSystem { OperationResult.Success(emptyList()) }, StandardTestDispatcher(testScheduler), defaultPreferences())
         advanceUntilIdle()
@@ -2412,6 +2462,32 @@ class BrowserViewModelTest {
 
         override suspend fun delete(entity: BookmarkEntity) {
             rows.remove(entity.absolutePath)
+            emit()
+        }
+
+        override suspend fun setAvailability(absolutePath: String, available: Boolean) {
+            rows[absolutePath]?.let { rows[absolutePath] = it.copy(available = available) }
+            emit()
+        }
+
+        override suspend fun relocate(
+            oldPath: String,
+            newPath: String,
+            displayName: String,
+            entryType: String,
+            device: Long?,
+            inode: Long?,
+        ) {
+            rows.remove(oldPath)?.let {
+                rows[newPath] = it.copy(
+                    absolutePath = newPath,
+                    displayName = displayName,
+                    entryType = entryType,
+                    device = device,
+                    inode = inode,
+                    available = true,
+                )
+            }
             emit()
         }
 

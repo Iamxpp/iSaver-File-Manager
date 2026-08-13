@@ -384,6 +384,8 @@ class MainActivity : ComponentActivity() {
                         onBrowserBack = ::handleBrowserBack,
                         onBrowserForward = { browserViewModel.forward() },
                         onToggleCurrentBookmark = browserViewModel::toggleCurrentBookmark,
+                        onToggleEntryBookmark = browserViewModel::toggleEntryBookmark,
+                        onUpdateBookmark = browserViewModel::updateBookmark,
                         onOpenBookmark = browserViewModel::openBookmark,
                         onStartDeepSearch = browserViewModel::startDeepSearch,
                         onCancelDeepSearch = browserViewModel::cancelDeepSearch,

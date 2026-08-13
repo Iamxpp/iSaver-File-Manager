@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CustomLocationEntity::class, RecentItemEntity::class, OperationTaskEntity::class,
         TrashItemEntity::class, BookmarkEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class ISaverDatabase : RoomDatabase() {
@@ -122,6 +122,17 @@ abstract class ISaverDatabase : RoomDatabase() {
                     )
                     """.trimIndent(),
                 )
+            }
+        }
+
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `entryType` TEXT NOT NULL DEFAULT 'DIRECTORY'")
+                database.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `device` INTEGER")
+                database.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `inode` INTEGER")
+                database.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `available` INTEGER NOT NULL DEFAULT 1")
+                database.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `colorKey` TEXT")
+                database.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `groupName` TEXT")
             }
         }
     }

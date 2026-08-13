@@ -101,6 +101,17 @@ class ISaverDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration6To7AddsFileBookmarkMetadata() {
+        migrationHelper.createDatabase(TEST_DATABASE, 6).close()
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            TEST_DATABASE, 7, true, ISaverDatabase.MIGRATION_6_7,
+        )
+        migrated.query("SELECT entryType, device, inode, available, colorKey, groupName FROM bookmarks").use { cursor ->
+            assertEquals(6, cursor.columnCount)
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "isaver-migration-test"
     }

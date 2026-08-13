@@ -198,6 +198,24 @@ class BrowserScreenTest {
     }
 
     @Test
+    fun longPressFileTogglesBookmarkFromActionSheet() {
+        val file = entry("report.pdf", EntryType.FILE)
+        var toggled: DirectoryEntry? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onToggleEntryBookmark = { toggled = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
+        compose.onNodeWithText("收藏").assertIsDisplayed().performClick()
+
+        compose.runOnIdle { assertEquals(file, toggled) }
+    }
+
+    @Test
     fun longPressFileForwardsExplicitOpenWith() {
         val file = entry("report.pdf", EntryType.FILE)
         var opened: DirectoryEntry? = null

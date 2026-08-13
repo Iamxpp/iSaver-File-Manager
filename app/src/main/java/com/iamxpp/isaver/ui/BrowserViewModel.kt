@@ -626,6 +626,7 @@ class BrowserViewModel(
                                 ) {
                                     is OperationResult.Success -> {
                                         completed += kept.value
+                                        relocateBookmark(entry, kept.value)
                                         mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                                         recordSuccessfulFileAccess(kept.value)
                                         updateRunningTask(taskId, completed.size, completed.knownBytes())
@@ -681,6 +682,7 @@ class BrowserViewModel(
                         }
                         is OperationResult.Success -> {
                             completed += result.value
+                            relocateBookmark(entry, result.value)
                             mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                             recordSuccessfulFileAccess(result.value)
                             updateRunningTask(taskId, completed.size, completed.knownBytes())
@@ -1008,6 +1010,7 @@ class BrowserViewModel(
                         fileRenameError = BrowserOperationError(result.code, result.userMessage),
                     )
                     is OperationResult.Success -> {
+                        relocateBookmark(entry, result.value)
                         mutableState.value = mutableState.value.copy(
                             selectedEntries = emptySet(),
                             renamingFile = false,
@@ -1075,6 +1078,11 @@ class BrowserViewModel(
                         batchRenameError = BrowserOperationError(result.code, result.userMessage),
                     )
                     is OperationResult.Success -> {
+                        result.value.renamed.forEach { output ->
+                            plan.items.firstOrNull { it.targetName.value == output.name }?.let { item ->
+                                relocateBookmark(item.source, output)
+                            }
+                        }
                         mutableState.value = mutableState.value.copy(
                             selectedEntries = emptySet(),
                             renamingFile = false,
@@ -1512,15 +1520,68 @@ class BrowserViewModel(
         val current = mutableState.value
         viewModelScope.launch {
             current.bookmarks.firstOrNull { it.path == current.currentPath }?.let { repository.remove(it) }
-                ?: repository.add(
-                    current.currentPath,
-                    if (current.currentPath == selectedRootPath) current.rootTitle else current.title,
-                )
+                ?: run {
+                    val identity = withContext(ioDispatcher) { rootFileSystem.identity(current.currentPath) }
+                    repository.add(
+                        current.currentPath,
+                        if (current.currentPath == selectedRootPath) current.rootTitle else current.title,
+                        EntryType.DIRECTORY,
+                        (identity as? OperationResult.Success)?.value,
+                    )
+                }
+        }
+    }
+
+    fun toggleEntryBookmark(entry: DirectoryEntry) {
+        val repository = bookmarkRepository ?: return
+        val existing = mutableState.value.bookmarks.firstOrNull { it.path == entry.path }
+        viewModelScope.launch {
+            if (existing != null) {
+                repository.remove(existing)
+            } else {
+                val identity = withContext(ioDispatcher) { rootFileSystem.identity(entry.path) }
+                repository.add(entry.path, entry.name, entry.type, (identity as? OperationResult.Success)?.value)
+            }
+        }
+    }
+
+    fun updateBookmark(bookmark: Bookmark, displayName: String, colorKey: String?, groupName: String?) {
+        bookmarkRepository?.let { repository ->
+            viewModelScope.launch { repository.updateDetails(bookmark, displayName, colorKey, groupName) }
         }
     }
 
     fun openBookmark(bookmark: Bookmark) {
-        openRoot(bookmark.path, bookmark.displayName)
+        val repository = bookmarkRepository ?: return
+        viewModelScope.launch {
+            val entry = withContext(ioDispatcher) { rootFileSystem.stat(bookmark.path) }
+            val identity = if (entry is OperationResult.Success) {
+                withContext(ioDispatcher) { rootFileSystem.identity(bookmark.path) }
+            } else null
+            val valid = entry is OperationResult.Success && entry.value.type == bookmark.type &&
+                (bookmark.identity == null || identity is OperationResult.Success && identity.value == bookmark.identity)
+            if (!valid) {
+                repository.setAvailability(bookmark.path, false)
+                return@launch
+            }
+            if (!bookmark.available) repository.setAvailability(bookmark.path, true)
+            when (bookmark.type) {
+                EntryType.DIRECTORY -> openRoot(bookmark.path, bookmark.displayName)
+                EntryType.FILE, EntryType.OTHER -> openEntry((entry as OperationResult.Success).value)
+            }
+        }
+    }
+
+    private suspend fun relocateBookmark(source: DirectoryEntry, output: DirectoryEntry) {
+        val repository = bookmarkRepository ?: return
+        val bookmark = mutableState.value.bookmarks.firstOrNull { it.path == source.path } ?: return
+        val identity = withContext(ioDispatcher) { rootFileSystem.identity(output.path) }
+        repository.relocate(
+            bookmark,
+            output.path,
+            output.name,
+            (identity as? OperationResult.Success)?.value,
+        )
     }
 
     fun retry() = load(mutableState.value.currentPath)
