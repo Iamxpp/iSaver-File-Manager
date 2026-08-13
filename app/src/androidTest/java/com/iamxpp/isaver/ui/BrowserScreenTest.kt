@@ -47,26 +47,17 @@ import org.junit.Rule
 import org.junit.Test
 
 class BrowserScreenTest {
-    @Test fun bookmarkAndForwardMenuActionsAreWired() {
-        val bookmark = Bookmark(
-            path = RootPath.parse("/data/local/tmp/work").getOrThrow(),
-            displayName = "工作目录",
-            createdAt = 10L,
-        )
+    @Test fun virtualViewAndForwardMenuActionsAreWired() {
         var forwarded = false
-        var toggled = false
-        var opened: Bookmark? = null
+        var addedCurrent = false
         compose.setContent {
             BrowserScreen(
                 state = state().copy(
                     canGoForward = true,
-                    currentPathBookmarked = true,
-                    bookmarks = listOf(bookmark),
                 ),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
                 onForward = { forwarded = true },
-                onToggleCurrentBookmark = { toggled = true },
-                onOpenBookmark = { opened = it },
+                onAddCurrentToVirtualView = { addedCurrent = true },
             )
         }
 
@@ -75,13 +66,8 @@ class BrowserScreenTest {
         assertTrue(forwarded)
 
         compose.onNodeWithTag("files-top-bar-overflow").performClick()
-        compose.onNodeWithText("取消收藏当前路径").performClick()
-        assertTrue(toggled)
-
-        compose.onNodeWithTag("files-top-bar-overflow").performClick()
-        compose.onNodeWithText("书签").performClick()
-        compose.onNodeWithText("工作目录").assertIsDisplayed().performClick()
-        assertEquals(bookmark, opened)
+        compose.onNodeWithText("添加当前路径到虚拟视图位置").performClick()
+        assertTrue(addedCurrent)
     }
 
     @Test fun conflictDialogForwardsSingleAndTaskWideDecisions() {
@@ -219,21 +205,21 @@ class BrowserScreenTest {
     }
 
     @Test
-    fun longPressFileTogglesBookmarkFromActionSheet() {
+    fun longPressFileAddsToVirtualViewFromActionSheet() {
         val file = entry("report.pdf", EntryType.FILE)
-        var toggled: DirectoryEntry? = null
+        var added: DirectoryEntry? = null
         compose.setContent {
             BrowserScreen(
                 state = state(entries = listOf(file)),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
-                onToggleEntryBookmark = { toggled = it },
+                onAddEntryToVirtualView = { added = it },
             )
         }
 
         compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
-        compose.onNodeWithText("收藏").assertIsDisplayed().performClick()
+        compose.onNodeWithText("添加到虚拟视图位置").assertIsDisplayed().performClick()
 
-        compose.runOnIdle { assertEquals(file, toggled) }
+        compose.runOnIdle { assertEquals(file, added) }
     }
 
     @Test

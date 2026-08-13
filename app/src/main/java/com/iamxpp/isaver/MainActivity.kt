@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
     }
     private val virtualViewViewModel by viewModels<VirtualViewViewModel> {
         val app = application as ISaverApplication
-        VirtualViewViewModelFactory(VirtualViewRepositoryStore(app.virtualViewRepository))
+        VirtualViewViewModelFactory(VirtualViewRepositoryStore(app.virtualViewRepository), app.rootFileSystem)
     }
     private val browserViewModel by viewModels<BrowserViewModel> {
         val app = application as ISaverApplication
@@ -417,15 +417,26 @@ class MainActivity : ComponentActivity() {
                         onDeleteVirtualFolder = virtualViewViewModel::deleteFolder,
                         onDismissVirtualDelete = virtualViewViewModel::dismissDeleteConfirmation,
                         onRemoveVirtualReference = virtualViewViewModel::removeReference,
+                        onAddCurrentToVirtualView = {
+                            virtualViewViewModel.beginAddReference(
+                                browserState.currentPath,
+                                browserState.title,
+                                EntryType.DIRECTORY,
+                            )
+                        },
+                        onAddEntryToVirtualView = { entry ->
+                            virtualViewViewModel.beginAddReference(entry.path, entry.name, entry.type)
+                        },
+                        onOpenVirtualPickerFolder = virtualViewViewModel::openPickerFolder,
+                        onCreateVirtualPickerFolder = virtualViewViewModel::createPickerFolder,
+                        onConfirmAddVirtualReference = virtualViewViewModel::confirmAddReference,
+                        onDismissAddVirtualReference = virtualViewViewModel::dismissAddReference,
+                        onClearVirtualMessage = virtualViewViewModel::clearMessage,
                         onEnterDirectory = { entry ->
                             !fileOperationInFlight && browserViewModel.enterDirectory(entry)
                         },
                         onBrowserBack = ::handleBrowserBack,
                         onBrowserForward = { browserViewModel.forward() },
-                        onToggleCurrentBookmark = browserViewModel::toggleCurrentBookmark,
-                        onToggleEntryBookmark = browserViewModel::toggleEntryBookmark,
-                        onUpdateBookmark = browserViewModel::updateBookmark,
-                        onOpenBookmark = browserViewModel::openBookmark,
                         onStartDeepSearch = browserViewModel::startDeepSearch,
                         onCancelDeepSearch = browserViewModel::cancelDeepSearch,
                         onClearDeepSearch = browserViewModel::clearDeepSearch,
@@ -749,12 +760,13 @@ internal class LocationHomeViewModelFactory(
 
 internal class VirtualViewViewModelFactory(
     private val store: com.iamxpp.isaver.ui.virtualviews.VirtualViewStore,
+    private val rootFileSystem: RootFileSystem? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(VirtualViewViewModel::class.java))
         @Suppress("UNCHECKED_CAST")
-        return VirtualViewViewModel(store, ioDispatcher) as T
+        return VirtualViewViewModel(store, rootFileSystem, ioDispatcher) as T
     }
 }
 

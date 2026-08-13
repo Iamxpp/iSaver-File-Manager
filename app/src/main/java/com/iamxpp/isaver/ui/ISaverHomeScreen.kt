@@ -34,6 +34,7 @@ import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.trash.RestoreConflictAction
 import com.iamxpp.isaver.archive.ArchiveFormat
 import com.iamxpp.isaver.ui.virtualviews.VirtualViewUiState
+import com.iamxpp.isaver.ui.virtualviews.VirtualReferencePickerDialog
 import com.iamxpp.isaver.virtualviews.VirtualViewNode
 
 @Composable
@@ -61,13 +62,16 @@ fun ISaverHomeScreen(
     onDeleteVirtualFolder: (String, Boolean) -> Unit = { _, _ -> },
     onDismissVirtualDelete: () -> Unit = {},
     onRemoveVirtualReference: (String) -> Unit = {},
+    onAddCurrentToVirtualView: () -> Unit = {},
+    onAddEntryToVirtualView: (DirectoryEntry) -> Unit = {},
+    onOpenVirtualPickerFolder: (String?) -> Unit = {},
+    onCreateVirtualPickerFolder: (String) -> Unit = {},
+    onConfirmAddVirtualReference: (String) -> Unit = {},
+    onDismissAddVirtualReference: () -> Unit = {},
+    onClearVirtualMessage: () -> Unit = {},
     onEnterDirectory: (DirectoryEntry) -> Unit,
     onBrowserBack: () -> Unit,
     onBrowserForward: () -> Unit = {},
-    onToggleCurrentBookmark: () -> Unit = {},
-    onToggleEntryBookmark: (DirectoryEntry) -> Unit = {},
-    onUpdateBookmark: (com.iamxpp.isaver.bookmarks.Bookmark, String, String?, String?) -> Unit = { _, _, _, _ -> },
-    onOpenBookmark: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit = {},
     onStartDeepSearch: (LocalSearchCriteria) -> Unit = {},
     onCancelDeepSearch: () -> Unit = {},
     onClearDeepSearch: () -> Unit = {},
@@ -241,10 +245,8 @@ fun ISaverHomeScreen(
                 onEnterDirectory = onEnterDirectory,
                 onBack = onBrowserBack,
                 onForward = onBrowserForward,
-                onToggleCurrentBookmark = onToggleCurrentBookmark,
-                onToggleEntryBookmark = onToggleEntryBookmark,
-                onUpdateBookmark = onUpdateBookmark,
-                onOpenBookmark = onOpenBookmark,
+                onAddCurrentToVirtualView = onAddCurrentToVirtualView,
+                onAddEntryToVirtualView = onAddEntryToVirtualView,
                 onStartDeepSearch = onStartDeepSearch,
                 onCancelDeepSearch = onCancelDeepSearch,
                 onClearDeepSearch = onClearDeepSearch,
@@ -526,6 +528,28 @@ fun ISaverHomeScreen(
             onClear = onClearTrash,
             onDismiss = { trashVisible = false },
         )
+    }
+    virtualViewState?.let { virtualState ->
+        if (virtualState.pendingReference != null) {
+            VirtualReferencePickerDialog(
+                state = virtualState,
+                onOpenFolder = onOpenVirtualPickerFolder,
+                onCreateFolder = onCreateVirtualPickerFolder,
+                onConfirm = onConfirmAddVirtualReference,
+                onDismiss = onDismissAddVirtualReference,
+            )
+        }
+        virtualState.message?.let { message ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = onClearVirtualMessage,
+                text = { androidx.compose.material3.Text(message) },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = onClearVirtualMessage) {
+                        androidx.compose.material3.Text("关闭")
+                    }
+                },
+            )
+        }
     }
     recentState.fileInfo?.let { FileInfoDialog(entry = it, onDismiss = onDismissRecentFileInfo) }
 }

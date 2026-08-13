@@ -417,11 +417,7 @@ fun FilesOverflowMenu(
     onAddLocation: (() -> Unit)? = null,
     addLocationLabel: String = "添加位置",
     onOpenTasks: (() -> Unit)? = null,
-    onOpenTrash: (() -> Unit)? = null,
     onGoForward: (() -> Unit)? = null,
-    onToggleBookmark: (() -> Unit)? = null,
-    currentPathBookmarked: Boolean = false,
-    onOpenBookmarks: (() -> Unit)? = null,
     onOpenDeepSearch: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -454,20 +450,8 @@ fun FilesOverflowMenu(
         if (onOpenTasks != null) {
             FilesMenuItem(text = "任务中心", onClick = onOpenTasks)
         }
-        if (onOpenTrash != null) {
-            FilesMenuItem(text = "回收站", onClick = onOpenTrash)
-        }
         if (onGoForward != null) {
             FilesMenuItem(text = "前进", onClick = onGoForward)
-        }
-        if (onToggleBookmark != null) {
-            FilesMenuItem(
-                text = if (currentPathBookmarked) "取消收藏当前路径" else "收藏当前路径",
-                onClick = onToggleBookmark,
-            )
-        }
-        if (onOpenBookmarks != null) {
-            FilesMenuItem(text = "书签", onClick = onOpenBookmarks)
         }
         if (onOpenDeepSearch != null) {
             FilesMenuItem(text = "深度搜索", onClick = onOpenDeepSearch)

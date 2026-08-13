@@ -103,10 +103,8 @@ fun BrowserScreen(
     onEnterDirectory: (DirectoryEntry) -> Unit,
     onBack: () -> Unit,
     onForward: () -> Unit = {},
-    onToggleCurrentBookmark: () -> Unit = {},
-    onToggleEntryBookmark: (DirectoryEntry) -> Unit = {},
-    onUpdateBookmark: (com.iamxpp.isaver.bookmarks.Bookmark, String, String?, String?) -> Unit = { _, _, _, _ -> },
-    onOpenBookmark: (com.iamxpp.isaver.bookmarks.Bookmark) -> Unit = {},
+    onAddCurrentToVirtualView: (() -> Unit)? = null,
+    onAddEntryToVirtualView: ((DirectoryEntry) -> Unit)? = null,
     onStartDeepSearch: (LocalSearchCriteria) -> Unit = {},
     onCancelDeepSearch: () -> Unit = {},
     onClearDeepSearch: () -> Unit = {},
@@ -184,8 +182,6 @@ fun BrowserScreen(
     var renameDialogEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var batchRenameDialogVisible by remember { mutableStateOf(false) }
     var taskCenterVisible by remember { mutableStateOf(false) }
-    var trashVisible by remember { mutableStateOf(false) }
-    var bookmarksVisible by remember { mutableStateOf(false) }
     var deepSearchVisible by remember { mutableStateOf(false) }
     var deleteEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var batchDeleteVisible by remember { mutableStateOf(false) }
@@ -257,13 +253,16 @@ fun BrowserScreen(
                         state.selectedEntries.isNotEmpty() &&
                         !state.compressing,
                     canConnectServer = onConnectServer != null,
+                    onAddLocation = onAddCurrentToVirtualView?.let { add ->
+                        {
+                            menuExpanded = false
+                            add()
+                        }
+                    },
+                    addLocationLabel = "添加当前路径到虚拟视图位置",
                     onOpenTasks = {
                         menuExpanded = false
                         taskCenterVisible = true
-                    },
-                    onOpenTrash = {
-                        menuExpanded = false
-                        trashVisible = true
                     },
                     onGoForward = if (state.canGoForward) {
                         {
@@ -271,15 +270,6 @@ fun BrowserScreen(
                             onForward()
                         }
                     } else null,
-                    onToggleBookmark = {
-                        menuExpanded = false
-                        onToggleCurrentBookmark()
-                    },
-                    currentPathBookmarked = state.currentPathBookmarked,
-                    onOpenBookmarks = {
-                        menuExpanded = false
-                        bookmarksVisible = true
-                    },
                     onOpenDeepSearch = if (fileActionsEnabled && saveAction == null) {
                         {
                             menuExpanded = false
@@ -430,7 +420,6 @@ fun BrowserScreen(
             compressVisible = onCompress != null,
             deleteVisible = onRecycleEntry != null || onDeleteEntryPermanently != null,
             deleteEnabled = !state.deletingEntry,
-            bookmarked = state.bookmarks.any { it.path == entry.path },
             onShare = {
                 actionEntry = null
                 onShareEntry?.invoke(entry)
@@ -461,9 +450,9 @@ fun BrowserScreen(
                 actionEntry = null
                 deleteEntry = entry
             },
-            onToggleBookmark = {
+            onAddToVirtualView = {
                 actionEntry = null
-                onToggleEntryBookmark(entry)
+                onAddEntryToVirtualView?.invoke(entry)
                 onClearSelection()
             },
             onInfo = {
@@ -589,28 +578,6 @@ fun BrowserScreen(
             onResume = onResumeTask,
             onCancel = onCancelTask,
             onDismiss = { taskCenterVisible = false },
-        )
-    }
-    if (trashVisible) {
-        TrashDialog(
-            items = state.trashItems,
-            busy = state.deletingEntry,
-            onRestore = onRestoreTrashItem,
-            onDelete = onDeleteTrashItemPermanently,
-            onRestoreAll = onRestoreAllTrashItems,
-            onClear = onClearTrash,
-            onDismiss = { trashVisible = false },
-        )
-    }
-    if (bookmarksVisible) {
-        BookmarkDialog(
-            bookmarks = state.bookmarks,
-            onUpdate = onUpdateBookmark,
-            onOpen = {
-                bookmarksVisible = false
-                onOpenBookmark(it)
-            },
-            onDismiss = { bookmarksVisible = false },
         )
     }
     if (deepSearchVisible) {
@@ -858,7 +825,6 @@ private fun FileActionsDialog(
     compressVisible: Boolean,
     deleteVisible: Boolean,
     deleteEnabled: Boolean,
-    bookmarked: Boolean,
     onOpenWith: () -> Unit,
     onShare: () -> Unit,
     onCompress: () -> Unit,
@@ -866,7 +832,7 @@ private fun FileActionsDialog(
     onCopy: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
-    onToggleBookmark: () -> Unit,
+    onAddToVirtualView: () -> Unit,
     onInfo: () -> Unit,
     onSelect: () -> Unit,
     onDismiss: () -> Unit,
@@ -878,7 +844,7 @@ private fun FileActionsDialog(
         if (copyVisible) add(FileAction("复制到", copyEnabled, onCopy))
         if (renameVisible) add(FileAction("重命名", renameEnabled, onRename))
         if (compressVisible) add(FileAction("压缩", true, onCompress))
-        add(FileAction(if (bookmarked) "取消收藏" else "收藏", true, onToggleBookmark))
+        add(FileAction("添加到虚拟视图位置", true, onAddToVirtualView, fullWidth = true))
         add(FileAction("属性", true, onInfo))
         add(FileAction("多选", true, onSelect))
         if (deleteVisible) add(FileAction("删除", deleteEnabled, onDelete, destructive = true))
@@ -918,7 +884,7 @@ private fun FileActionsDialog(
                         .testTag("file-actions-list"),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    actions.chunked(2).forEach { rowActions ->
+                    actionRows(actions).forEach { rowActions ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -926,7 +892,7 @@ private fun FileActionsDialog(
                             rowActions.forEach { action ->
                                 FileActionButton(action, Modifier.weight(1f))
                             }
-                            if (rowActions.size == 1) Spacer(Modifier.weight(1f))
+                            if (rowActions.size == 1 && !rowActions.single().fullWidth) Spacer(Modifier.weight(1f))
                         }
                     }
                 }
@@ -940,7 +906,22 @@ private data class FileAction(
     val enabled: Boolean,
     val onClick: () -> Unit,
     val destructive: Boolean = false,
+    val fullWidth: Boolean = false,
 )
+
+private fun actionRows(actions: List<FileAction>): List<List<FileAction>> = buildList {
+    val pending = mutableListOf<FileAction>()
+    actions.forEach { action ->
+        if (action.fullWidth) {
+            if (pending.isNotEmpty()) add(pending.toList().also { pending.clear() })
+            add(listOf(action))
+        } else {
+            pending += action
+            if (pending.size == 2) add(pending.toList().also { pending.clear() })
+        }
+    }
+    if (pending.isNotEmpty()) add(pending.toList())
+}
 
 @Composable
 private fun FileActionButton(
