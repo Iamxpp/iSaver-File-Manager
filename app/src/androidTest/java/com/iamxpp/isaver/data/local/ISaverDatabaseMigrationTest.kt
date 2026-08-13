@@ -112,6 +112,76 @@ class ISaverDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration7To8UnifiesCustomLocationsAndBookmarks() {
+        migrationHelper.createDatabase(TEST_DATABASE, 7).apply {
+            execSQL(
+                """
+                INSERT INTO custom_locations
+                    (id, displayName, absolutePath, sortOrder, createdAt, updatedAt)
+                VALUES
+                    ('custom.docs', '旧自定义名', '/storage/emulated/0/Documents', 0, 10, 20),
+                    ('custom.download', '下载', '/storage/emulated/0/Download', 1, 11, 12)
+                """.trimIndent(),
+            )
+            execSQL(
+                """
+                INSERT INTO bookmarks
+                    (absolutePath, displayName, createdAt, entryType, device, inode, available, colorKey, groupName)
+                VALUES
+                    ('/storage/emulated/0/Documents', '工作文档', 30, 'DIRECTORY', 8, 81, 1, 'GREEN', NULL),
+                    ('/data/local/tmp/report.txt', '报告', 40, 'FILE', 8, 82, 0, 'RED', '工作')
+                """.trimIndent(),
+            )
+            close()
+        }
+
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            8,
+            true,
+            ISaverDatabase.MIGRATION_7_8,
+        )
+
+        migrated.query(
+            """
+            SELECT nodeType, displayName, parentId, targetPath, entryType, device, inode, available
+            FROM virtual_view_nodes
+            ORDER BY nodeType DESC, displayName
+            """.trimIndent(),
+        ).use { cursor ->
+            val rows = buildList {
+                while (cursor.moveToNext()) {
+                    add((0 until cursor.columnCount).map { index -> cursor.getString(index) })
+                }
+            }
+            assertEquals(5, rows.size)
+            assertTrue(rows.any { it[0] == "VIRTUAL_FOLDER" && it[1] == "未分组" && it[2] == null })
+            assertTrue(rows.any { it[0] == "VIRTUAL_FOLDER" && it[1] == "工作" && it[2] == null })
+            assertTrue(rows.any {
+                it[0] == "REAL_REFERENCE" && it[1] == "工作文档" &&
+                    it[3] == "/storage/emulated/0/Documents" && it[4] == "DIRECTORY" &&
+                    it[5] == "8" && it[6] == "81" && it[7] == "1"
+            })
+            assertTrue(rows.any {
+                it[0] == "REAL_REFERENCE" && it[1] == "报告" &&
+                    it[3] == "/data/local/tmp/report.txt" && it[4] == "FILE" && it[7] == "0"
+            })
+            assertTrue(rows.any {
+                it[0] == "REAL_REFERENCE" && it[1] == "下载" &&
+                    it[3] == "/storage/emulated/0/Download" && it[4] == "DIRECTORY"
+            })
+        }
+        migrated.query("SELECT COUNT(*) FROM custom_locations").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(2, cursor.getInt(0))
+        }
+        migrated.query("SELECT COUNT(*) FROM bookmarks").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(2, cursor.getInt(0))
+        }
+    }
+
     private companion object {
         const val TEST_DATABASE = "isaver-migration-test"
     }

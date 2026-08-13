@@ -45,6 +45,7 @@ import com.iamxpp.isaver.fileops.FileChecksumRepository
 import com.iamxpp.isaver.tasks.OperationTaskRepository
 import com.iamxpp.isaver.trash.TrashRepository
 import com.iamxpp.isaver.bookmarks.BookmarkRepository
+import com.iamxpp.isaver.virtualviews.VirtualViewRepository
 import com.iamxpp.isaver.remote.KeystoreCredentialStore
 import com.iamxpp.isaver.remote.RemoteFileSystemFactory
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
@@ -72,6 +73,7 @@ class ISaverApplication : Application() {
                 ISaverDatabase.MIGRATION_4_5,
                 ISaverDatabase.MIGRATION_5_6,
                 ISaverDatabase.MIGRATION_6_7,
+                ISaverDatabase.MIGRATION_7_8,
             )
             .build()
     }
@@ -208,6 +210,7 @@ class ISaverApplication : Application() {
     }
     internal val fileChecksumRepository: FileChecksumRepository by lazy { FileChecksumRepository(rootFileSystem) }
     internal val bookmarkRepository: BookmarkRepository by lazy { BookmarkRepository(database.bookmarkDao()) }
+    internal val virtualViewRepository: VirtualViewRepository by lazy { VirtualViewRepository(database) }
     internal val operationTaskRepository: OperationTaskRepository by lazy {
         OperationTaskRepository(database.operationTaskDao())
     }
