@@ -304,7 +304,13 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(pickerActive, destination, browserState.currentPath) {
                         if (pickerActive) {
                             when (destination) {
-                                is HomeDestination.Browser -> transferViewModel.selectTarget(browserState.currentPath)
+                                is HomeDestination.Browser -> {
+                                    if (destination.path == browserState.currentPath) {
+                                        transferViewModel.selectTarget(browserState.currentPath)
+                                    } else {
+                                        transferViewModel.clearTarget()
+                                    }
+                                }
                                 is HomeDestination.Tab,
                                 is HomeDestination.Archive,
                                 is HomeDestination.ExtractionTarget,
@@ -505,6 +511,7 @@ class MainActivity : ComponentActivity() {
                             val move = homeState.destination as? HomeDestination.MoveTarget
                             if (
                                 move?.targetBrowser != null &&
+                                move.targetBrowser.path == browserState.currentPath &&
                                 browserState.canCreateDirectory &&
                                 browserState.currentPath != move.sourceBrowser.path
                             ) {
@@ -526,6 +533,7 @@ class MainActivity : ComponentActivity() {
                             val copy = homeState.destination as? HomeDestination.CopyTarget
                             if (
                                 copy?.targetBrowser != null &&
+                                copy.targetBrowser.path == browserState.currentPath &&
                                 browserState.canCreateDirectory &&
                                 browserState.currentPath != copy.sourceBrowser.path
                             ) {
@@ -581,7 +589,11 @@ class MainActivity : ComponentActivity() {
                         onDismissArchiveOperation = archiveViewModel::dismissOperation,
                         onExtractHere = {
                             val extraction = homeState.destination as? HomeDestination.ExtractionTarget
-                            if (extraction?.targetBrowser != null && browserState.canCreateDirectory) {
+                            if (
+                                extraction?.targetBrowser != null &&
+                                extraction.targetBrowser.path == browserState.currentPath &&
+                                browserState.canCreateDirectory
+                            ) {
                                 val target = browserState.currentPath
                                 homeViewModel.returnToArchive()
                                 archiveViewModel.extractTo(target)

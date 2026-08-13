@@ -153,6 +153,49 @@ class LocationHomeScreenTest {
     }
 
     @Test
+    fun virtualTargetModeShowsReasonAndRejectsRealFileReference() {
+        val fileReference = VirtualViewNode.RealReference(
+            "ref",
+            "vf",
+            "报告",
+            RootPath.parse("/work/report.txt").getOrThrow(),
+            EntryType.FILE,
+            null,
+            true,
+            0,
+            1,
+            1,
+        )
+        var opened = false
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(loading = false),
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { _, _ -> },
+                onAdd = { _, _ -> },
+                onEdit = { _, _, _ -> },
+                onRemove = {},
+                onRetry = {},
+                saveAction = FilesSaveAction(
+                    enabled = false,
+                    onSave = {},
+                    label = "复制到这里",
+                    disabledReason = "虚拟视图文件夹只用于分组，不能作为文件操作目标。请选择一个真实文件夹。",
+                ),
+                virtualViewState = VirtualViewUiState(children = listOf(fileReference), loading = false),
+                onOpenVirtualReference = { opened = true },
+            )
+        }
+
+        compose.onNodeWithText(
+            "虚拟视图文件夹只用于分组，不能作为文件操作目标。请选择一个真实文件夹。",
+        ).assertIsDisplayed()
+        compose.onNodeWithContentDescription("真实文件引用：报告").performScrollTo().performClick()
+        compose.onNodeWithText("文件不能作为保存位置。").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(false, opened) }
+    }
+
+    @Test
     fun gridUsesTheSameCompactHeader() {
         compose.setContent {
             LocationHomeScreen(

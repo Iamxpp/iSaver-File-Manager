@@ -48,6 +48,27 @@ class FilesComponentsTest {
         compose.onNodeWithText("存储").assertDoesNotExist()
     }
 
+    @Test
+    fun disabledPrimaryActionExposesItsReasonToAccessibility() {
+        compose.setContent {
+            FilesTopBar(
+                title = "目标",
+                onOverflow = {},
+                saveAction = FilesSaveAction(
+                    label = "移动到这里",
+                    enabled = false,
+                    disabledReason = "虚拟视图文件夹不能作为目标。",
+                    onSave = {},
+                ),
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-save").assertIsNotEnabled()
+        compose.onNodeWithContentDescription(
+            "移动到这里，不可用：虚拟视图文件夹不能作为目标。",
+        ).assertIsDisplayed()
+    }
+
     @get:Rule
     val compose = createComposeRule()
 

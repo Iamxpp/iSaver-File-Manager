@@ -241,6 +241,80 @@ class ISaverHomeScreenTest {
         assertTrue(saveBar.height < tabs.height * 1.5f)
     }
 
+    @Test
+    fun saveStaysDisabledWhileDestinationBrowserStillShowsPreviousDirectory() {
+        val selected = RootPath.parse("/data/local/tmp/selected").getOrThrow()
+        val previous = RootPath.parse("/data/local/tmp/previous").getOrThrow()
+        compose.setContent {
+            ISaverHomeScreen(
+                homeState = ISaverHomeUiState(
+                    selectedTab = HomeTab.VIEWS,
+                    destination = HomeDestination.Browser(selected, "目标", HomeTab.VIEWS),
+                ),
+                locationState = LocationHomeUiState(loading = false),
+                browserState = BrowserUiState(
+                    currentPath = previous,
+                    rootTitle = "旧目标",
+                    canCreateDirectory = true,
+                ),
+                displayMode = DisplayMode.LIST,
+                transferState = choosing(canSave = true, targetDirectory = previous),
+                onSelectTab = {},
+                onOpenLocation = { _, _ -> },
+                onAddCustomLocation = { _, _ -> },
+                onEditCustomLocation = { _, _, _ -> },
+                onRemoveCustomLocation = {},
+                onRetryLocations = {},
+                onEnterDirectory = {},
+                onBrowserBack = {},
+                onRetryBrowser = {},
+                onLoadMore = {},
+            )
+        }
+
+        compose.onNodeWithTag("files-top-bar-save").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("存储，不可用：正在校验目标文件夹。").assertIsDisplayed()
+    }
+
+    @Test
+    fun copyTargetOpenedFromViewsRendersRealBrowserAndEnablesTargetAction() {
+        val source = RootPath.parse("/data/local/tmp/source").getOrThrow()
+        val target = RootPath.parse("/data/local/tmp/target").getOrThrow()
+        compose.setContent {
+            ISaverHomeScreen(
+                homeState = ISaverHomeUiState(
+                    selectedTab = HomeTab.VIEWS,
+                    destination = HomeDestination.CopyTarget(
+                        sourceBrowser = HomeDestination.Browser(source, "来源", HomeTab.BROWSE),
+                        targetBrowser = HomeDestination.Browser(target, "目标", HomeTab.VIEWS),
+                    ),
+                ),
+                locationState = LocationHomeUiState(loading = false),
+                browserState = BrowserUiState(
+                    currentPath = target,
+                    rootTitle = "目标",
+                    title = "target",
+                    canCreateDirectory = true,
+                ),
+                displayMode = DisplayMode.LIST,
+                onSelectTab = {},
+                onOpenLocation = { _, _ -> },
+                onAddCustomLocation = { _, _ -> },
+                onEditCustomLocation = { _, _, _ -> },
+                onRemoveCustomLocation = {},
+                onRetryLocations = {},
+                onEnterDirectory = {},
+                onBrowserBack = {},
+                onRetryBrowser = {},
+                onLoadMore = {},
+            )
+        }
+
+        compose.onNodeWithText("target").assertIsDisplayed()
+        compose.onNodeWithText("虚拟视图位置").assertDoesNotExist()
+        compose.onNodeWithText("复制到这里").assertIsEnabled()
+    }
+
     private fun choosing(
         canSave: Boolean,
         targetDirectory: RootPath?,

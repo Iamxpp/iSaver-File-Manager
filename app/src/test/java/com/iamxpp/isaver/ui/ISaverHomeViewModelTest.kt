@@ -45,6 +45,24 @@ class ISaverHomeViewModelTest {
     }
 
     @Test
+    fun `real target stays disabled until browser finishes loading the selected path`() {
+        val selected = HomeDestination.Browser(
+            RootPath.parse("/data/local/tmp/selected").getOrThrow(),
+            "目标",
+            HomeTab.VIEWS,
+        )
+        val staleBrowser = BrowserUiState(
+            currentPath = RootPath.parse("/data/local/tmp/previous").getOrThrow(),
+            canCreateDirectory = true,
+        )
+        val verifiedBrowser = staleBrowser.copy(currentPath = selected.path)
+
+        assertEquals(false, canUseRealTarget(selected, staleBrowser))
+        assertEquals(true, canUseRealTarget(selected, verifiedBrowser))
+        assertEquals(false, canUseRealTarget(null, verifiedBrowser))
+    }
+
+    @Test
     fun `move target reuses tabs and returns to its source browser`() {
         val source = HomeDestination.Browser(
             RootPath.parse("/data/local/tmp/source").getOrThrow(),

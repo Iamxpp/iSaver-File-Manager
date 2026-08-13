@@ -70,6 +70,7 @@ data class FilesSaveAction(
     val enabled: Boolean,
     val onSave: () -> Unit,
     val label: String = "存储",
+    val disabledReason: String? = null,
 )
 
 @Composable
@@ -171,7 +172,14 @@ fun FilesTopBar(
                     modifier = Modifier
                         .width(actionWidth)
                         .height(48.dp)
-                        .testTag("files-top-bar-save"),
+                        .testTag("files-top-bar-save")
+                        .semantics {
+                            contentDescription = if (!saveAction.enabled && saveAction.disabledReason != null) {
+                                "${saveAction.label}，不可用：${saveAction.disabledReason}"
+                            } else {
+                                saveAction.label
+                            }
+                        },
                 ) {
                     Text(
                         text = saveAction.label,

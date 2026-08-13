@@ -108,10 +108,31 @@ fun LocationHomeScreen(
     var adding by remember { mutableStateOf(false) }
     var removal by remember { mutableStateOf<StorageLocation.Direct?>(null) }
     var managedVirtualNode by remember { mutableStateOf<VirtualViewNode?>(null) }
+    var virtualTargetError by remember { mutableStateOf<String?>(null) }
+
+    val openVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit = { folder ->
+        virtualTargetError = null
+        onOpenVirtualFolder(folder)
+    }
+    val openVirtualReference: (VirtualViewNode.RealReference) -> Unit = { reference ->
+        if (saveAction != null && reference.entryType != EntryType.DIRECTORY) {
+            virtualTargetError = "文件不能作为保存位置。"
+        } else {
+            virtualTargetError = null
+            onOpenVirtualReference(reference)
+        }
+    }
+    val navigateVirtual: (String?) -> Unit = { folderId ->
+        virtualTargetError = null
+        onNavigateVirtual(folderId)
+    }
 
     LaunchedEffect(state.saveSuccessVersion) {
         adding = false
         editor = null
+    }
+    LaunchedEffect(saveAction != null) {
+        if (saveAction == null) virtualTargetError = null
     }
 
     val content = sortLocationContent(
@@ -140,6 +161,19 @@ fun LocationHomeScreen(
             virtualMode = virtualViewState != null,
             onCreateVirtualFolder = onCreateVirtualFolder,
         )
+        val targetHint = virtualTargetError ?: saveAction?.disabledReason?.takeIf {
+            !saveAction.enabled && virtualViewState != null
+        }
+        if (targetHint != null) {
+            Text(
+                text = targetHint,
+                color = ISaverSecondaryText,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .semantics { contentDescription = "目标不可用：$targetHint" },
+            )
+        }
         if (displayMode == DisplayMode.LIST) {
             LocationList(
                 state = state,
@@ -149,10 +183,10 @@ fun LocationHomeScreen(
                 onRemove = { removal = it },
                 onRevalidate = onRevalidate,
                 virtualViewState = virtualViewState,
-                onOpenVirtualFolder = onOpenVirtualFolder,
-                onOpenVirtualReference = onOpenVirtualReference,
+                onOpenVirtualFolder = openVirtualFolder,
+                onOpenVirtualReference = openVirtualReference,
                 onManageVirtualNode = { managedVirtualNode = it },
-                onNavigateVirtual = onNavigateVirtual,
+                onNavigateVirtual = navigateVirtual,
                 onOpenTrash = onOpenTrash,
                 modifier = Modifier.weight(1f),
             )
@@ -165,10 +199,10 @@ fun LocationHomeScreen(
                 onRemove = { removal = it },
                 onRevalidate = onRevalidate,
                 virtualViewState = virtualViewState,
-                onOpenVirtualFolder = onOpenVirtualFolder,
-                onOpenVirtualReference = onOpenVirtualReference,
+                onOpenVirtualFolder = openVirtualFolder,
+                onOpenVirtualReference = openVirtualReference,
                 onManageVirtualNode = { managedVirtualNode = it },
-                onNavigateVirtual = onNavigateVirtual,
+                onNavigateVirtual = navigateVirtual,
                 onOpenTrash = onOpenTrash,
                 modifier = Modifier.weight(1f),
             )
@@ -217,7 +251,7 @@ fun LocationHomeScreen(
             onRename = { name -> onRenameVirtualNode(node.id, name); managedVirtualNode = null },
             onMove = { folderId -> onMoveVirtualNode(node.id, folderId); managedVirtualNode = null },
             onOpen = {
-                if (node is VirtualViewNode.RealReference) onOpenVirtualReference(node)
+                if (node is VirtualViewNode.RealReference) openVirtualReference(node)
                 managedVirtualNode = null
             },
             onRetry = {

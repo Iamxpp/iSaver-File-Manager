@@ -166,42 +166,63 @@ fun ISaverHomeScreen(
     var trashVisible by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val saveMode = transferState != TransferUiState.Idle
     val saveAction = if (saveMode) {
+        val choosing = transferState as? TransferUiState.Choosing
+        val browserDestination = homeState.destination as? HomeDestination.Browser
+        val targetReady = browserDestination != null &&
+            browserDestination.path == browserState.currentPath &&
+            choosing?.targetDirectory == browserState.currentPath
         FilesSaveAction(
-            enabled = (transferState as? TransferUiState.Choosing)?.canSave == true &&
-                homeState.destination is HomeDestination.Browser,
+            enabled = choosing?.canSave == true && targetReady,
             onSave = onSave,
+            disabledReason = when {
+                browserDestination == null -> VIRTUAL_SAVE_TARGET_REASON
+                !targetReady -> "正在校验目标文件夹。"
+                else -> choosing.targetMessage
+            },
         )
     } else {
         null
     }
     val extractionDestination = homeState.destination as? HomeDestination.ExtractionTarget
     val extractionAction = extractionDestination?.let {
+        val targetReady = canUseRealTarget(it.targetBrowser, browserState)
         FilesSaveAction(
-            enabled = it.targetBrowser != null && browserState.canCreateDirectory,
+            enabled = targetReady,
             onSave = onExtractHere,
             label = "解压到此处",
+            disabledReason = targetDisabledReason(it.targetBrowser, browserState),
         )
     }
     val moveDestination = homeState.destination as? HomeDestination.MoveTarget
     val moveAction = moveDestination?.let {
+        val targetReady = canUseRealTarget(it.targetBrowser, browserState)
         FilesSaveAction(
-            enabled = it.targetBrowser != null &&
-                browserState.canCreateDirectory &&
+            enabled = targetReady &&
                 browserState.currentPath != it.sourceBrowser.path &&
                 !browserState.movingFile,
             onSave = onMoveHere,
             label = if (browserState.movingFile) "正在移动" else "移动到这里",
+            disabledReason = when {
+                !targetReady -> targetDisabledReason(it.targetBrowser, browserState)
+                browserState.currentPath == it.sourceBrowser.path -> "不能移动到来源文件夹。"
+                else -> "当前目录不可写。"
+            },
         )
     }
     val copyDestination = homeState.destination as? HomeDestination.CopyTarget
     val copyAction = copyDestination?.let {
+        val targetReady = canUseRealTarget(it.targetBrowser, browserState)
         FilesSaveAction(
-            enabled = it.targetBrowser != null &&
-                browserState.canCreateDirectory &&
+            enabled = targetReady &&
                 browserState.currentPath != it.sourceBrowser.path &&
                 !browserState.copyingFile,
             onSave = onCopyHere,
             label = if (browserState.copyingFile) "正在复制" else "复制到这里",
+            disabledReason = when {
+                !targetReady -> targetDisabledReason(it.targetBrowser, browserState)
+                browserState.currentPath == it.sourceBrowser.path -> "不能复制到来源文件夹。"
+                else -> "当前目录不可写。"
+            },
         )
     }
 
@@ -335,9 +356,7 @@ fun ISaverHomeScreen(
                 onDismissOperation = onDismissArchiveOperation,
                 modifier = Modifier.weight(1f),
             )
-            is HomeDestination.ExtractionTarget -> if (
-                homeState.selectedTab == HomeTab.BROWSE && extractionDestination?.targetBrowser != null
-            ) {
+            is HomeDestination.ExtractionTarget -> if (extractionDestination?.targetBrowser != null) {
                 BrowserScreen(
                     state = browserState,
                     onEnterDirectory = onEnterDirectory,
@@ -390,9 +409,7 @@ fun ISaverHomeScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
-            is HomeDestination.MoveTarget -> if (
-                homeState.selectedTab == HomeTab.BROWSE && moveDestination?.targetBrowser != null
-            ) {
+            is HomeDestination.MoveTarget -> if (moveDestination?.targetBrowser != null) {
                 BrowserScreen(
                     state = browserState,
                     onEnterDirectory = onEnterDirectory,
@@ -449,9 +466,7 @@ fun ISaverHomeScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
-            is HomeDestination.CopyTarget -> if (
-                homeState.selectedTab == HomeTab.BROWSE && copyDestination?.targetBrowser != null
-            ) {
+            is HomeDestination.CopyTarget -> if (copyDestination?.targetBrowser != null) {
                 BrowserScreen(
                     state = browserState,
                     onEnterDirectory = onEnterDirectory,
@@ -575,3 +590,17 @@ fun ISaverHomeScreen(
 
 private fun LocationHomeUiState.visibleLocationCount(): Int =
     appGroups.sumOf { it.children.size } + commonLocations.size + customLocations.size
+
+private const val VIRTUAL_SAVE_TARGET_REASON =
+    "虚拟视图文件夹只用于分组，不能保存文件。请选择一个真实文件夹。"
+private const val VIRTUAL_OPERATION_TARGET_REASON =
+    "虚拟视图文件夹只用于分组，不能作为文件操作目标。请选择一个真实文件夹。"
+
+internal fun canUseRealTarget(target: HomeDestination.Browser?, browserState: BrowserUiState): Boolean =
+    target != null && target.path == browserState.currentPath && browserState.canCreateDirectory
+
+private fun targetDisabledReason(target: HomeDestination.Browser?, browserState: BrowserUiState): String = when {
+    target == null -> VIRTUAL_OPERATION_TARGET_REASON
+    target.path != browserState.currentPath -> "正在校验目标文件夹。"
+    else -> "当前目录不可写。"
+}
