@@ -10,7 +10,7 @@ iSaver 是一款仅面向 Root 设备的 Android 文件管理器，适合需要�
 
 - Root 权限门禁，支持明确的重试和退出操作。
 - 最近项目、位置、Root 浏览器三个主入口。
-- 内置通用 Android 存储位置，并支持用户自定义绝对路径。
+- 内置通用 Android 存储位置，并支持用虚拟文件夹组织真实文件/目录引用。
 - 列表/网格视图、搜索、稳定排序和新建文件夹。
 - 单文件 `ACTION_SEND` 和 `content://` `ACTION_VIEW` 保存流程。
 - 底部内联保存栏，支持长文件名放大编辑，保存失败后可改名重试。
@@ -18,6 +18,13 @@ iSaver 是一款仅面向 Root 设备的 Android 文件管理器，适合需要�
 - ZIP 创建，以及 ZIP、TAR、TAR.GZ、7Z、RAR 的安全浏览和解压。
 
 远程 SFTP、FTPS、FTP 相关代码仍处于实验阶段，本版本不会作为公开支持功能展示。
+
+## 产品文档
+
+- [需求说明书](docs/product/iSaver_PRD_需求说明书.md)
+- [系统设计文档](docs/product/iSaver_SDD_系统设计文档.md)
+- [现代 Root 文件管理器完整产品与技术规格](docs/product/iSaver_现代Root文件管理器完整产品与技术规格.md)
+- [M7.1 虚拟视图位置统一改造与验收](docs/product/iSaver_M7.1_虚拟视图位置统一改造需求与技术落地.md)
 
 ## 要求
 
