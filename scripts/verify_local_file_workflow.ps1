@@ -5,7 +5,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$fixtureRoot = "/data/local/tmp/isaver-test/ui-flow"
+$fixtureRoot = "/storage/emulated/0/Download/iSaver-M9-ui-flow"
 $remoteDump = "/data/local/tmp/isaver-ui-flow.xml"
 $zipBase64 = "UEsDBBQAAAAIAOwO81zh8cyyEgAAAAoAAAANAAAAZG9jcy9maWxlLnR4dCrNVEgsSs7ILEsFAAAA//8DAFBLAQIUABQAAAAIAOwO81zh8cyyEgAAAAoAAAANAAAAAAAAAAAAAAAAAAAAAABkb2NzL2ZpbGUudHh0UEsFBgAAAAABAAEAOwAAAD0AAAAAAA=="
 $localDump = Join-Path ([System.IO.Path]::GetTempPath()) "isaver-ui-flow-$PID.xml"
@@ -197,28 +197,24 @@ try {
     }
 
     Find-DescriptionNode -Description "页面标题：视图" | Out-Null
-    Click-Text -Text "浏览"
-    Find-DescriptionNode -Description "页面标题：/" | Out-Null
-    foreach ($segment in @("data", "local", "tmp", "isaver-test", "ui-flow")) {
-        Open-Directory -Name $segment
-    }
+    Click-Text -Text "下载"
+    Open-Directory -Name "iSaver-M9-ui-flow"
 
     Click-Text -Text "note.txt"
-    Find-TextNode -Text "文件信息" | Out-Null
+    Find-TextNode -Text "note" | Out-Null
+    Find-TextNode -Text "编辑" | Out-Null
     Click-Text -Text "关闭"
     Click-Text -Text "sample.zip"
     Find-TextNode -Text "ZIP" | Out-Null
     Find-TextNode -Text "docs" | Out-Null
     Click-Description -Description "更多操作"
     Click-Text -Text "解压"
-    Find-TextNode -Text "解压到此处" | Out-Null
+    Find-DescriptionNode -Description "目标不可用：虚拟视图文件夹只用于分组，不能作为文件操作目标。请选择一个真实文件夹。" | Out-Null
 
-    Click-Text -Text "浏览"
-    Find-DescriptionNode -Description "页面标题：/" | Out-Null
-    foreach ($segment in @("data", "local", "tmp", "isaver-test", "ui-flow")) {
-        Open-Directory -Name $segment
-    }
-    Click-Text -Text "解压到此处"
+    Click-Text -Text "下载"
+    Open-Directory -Name "iSaver-M9-ui-flow"
+    Find-DescriptionNode -Description "解压到此处" | Out-Null
+    Click-Description -Description "解压到此处"
     Find-TextNode -Text "docs" -TimeoutSeconds 30 | Out-Null
     Open-Directory -Name "docs"
     Find-TextNode -Text "file.txt" | Out-Null

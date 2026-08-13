@@ -48,7 +48,7 @@ function Assert-Instrumentation {
     param([string]$ClassName)
     Invoke-Adb -Arguments @("logcat", "-c") | Out-Null
     $output = Invoke-Adb -Arguments @(
-        "shell", "am", "instrument", "-w", "-r",
+        "shell", "timeout", "180s", "am", "instrument", "-w", "-r",
         "-e", "class", $ClassName,
         "com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner"
     )
@@ -100,9 +100,26 @@ try {
 
     $groups = @(
         "com.iamxpp.isaver.archive.ArchiveRootInstrumentedTest",
-        "com.iamxpp.isaver.transfer.RootStreamTransferInstrumentedTest",
-        "com.iamxpp.isaver.transfer.IncomingStreamProviderInstrumentedTest",
+        "com.iamxpp.isaver.bookmarks.RootBookmarkInstrumentedTest",
+        "com.iamxpp.isaver.data.local.BrowserSessionInstrumentedTest",
+        "com.iamxpp.isaver.data.local.ISaverDatabaseMigrationTest",
+        "com.iamxpp.isaver.export.ExternalFileProviderInstrumentedTest",
+        "com.iamxpp.isaver.export.RootFileOpenInstrumentedTest",
+        "com.iamxpp.isaver.export.RootFileShareInstrumentedTest",
+        "com.iamxpp.isaver.fileops.RootChecksumInstrumentedTest",
+        "com.iamxpp.isaver.fileops.RootDirectoryCopyMoveInstrumentedTest",
+        "com.iamxpp.isaver.fileops.RootFileCopyInstrumentedTest",
+        "com.iamxpp.isaver.fileops.RootFileCreateInstrumentedTest",
+        "com.iamxpp.isaver.fileops.RootFileMoveInstrumentedTest",
+        "com.iamxpp.isaver.fileops.RootFilePermissionInstrumentedTest",
+        "com.iamxpp.isaver.filetools.RootFileToolsInstrumentedTest",
         "com.iamxpp.isaver.LauncherIconInstrumentedTest",
+        "com.iamxpp.isaver.release.LocalStabilityInstrumentedTest",
+        "com.iamxpp.isaver.search.LocalSearchInstrumentedTest",
+        "com.iamxpp.isaver.share.ShareIntentResolutionTest",
+        "com.iamxpp.isaver.texteditor.RootTextEditorInstrumentedTest",
+        "com.iamxpp.isaver.transfer.IncomingStreamProviderInstrumentedTest",
+        "com.iamxpp.isaver.transfer.RootStreamTransferInstrumentedTest",
         "com.iamxpp.isaver.ui.theme.ThemeConfigurationInstrumentedTest",
         "com.iamxpp.isaver.MainActivitySmokeTest"
     )
@@ -110,13 +127,14 @@ try {
         Assert-Instrumentation -ClassName $group
     }
 
-    & (Join-Path $PSScriptRoot "verify_local_file_workflow.ps1") -Serial $Serial
+    & pwsh -NoProfile -File (Join-Path $PSScriptRoot "verify_local_file_workflow.ps1") -Serial $Serial
     if ($LASTEXITCODE -ne 0) {
         throw "Local file workflow gate failed with exit $LASTEXITCODE"
     }
 
     if (-not $SkipPerformance) {
-        & (Join-Path $PSScriptRoot "benchmark_root_listing.ps1") -Serial $Serial -AppApk $appApk -TestApk $testApk
+        & pwsh -NoProfile -File (Join-Path $PSScriptRoot "benchmark_root_listing.ps1") `
+            -Serial $Serial -AppApk $appApk -TestApk $testApk
         if ($LASTEXITCODE -ne 0) {
             throw "Root listing performance gate failed with exit $LASTEXITCODE"
         }

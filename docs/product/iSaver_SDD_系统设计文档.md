@@ -1,7 +1,9 @@
 # iSaver 系统设计文档（SDD）
 
-> 文档版本：4.6
+> 文档版本：4.7
 > 更新日期：2026-08-14
+
+> 2026-08-14 M9 本地发布门禁实现同步：发布脚本串行执行 648 个 JVM 测试、Lint、四 ABI native/Debug/AndroidTest 构建、23 组小米 9 instrumentation、共享存储可见工作流与 Root 性能测试，并对每组 instrumentation 设置 180 秒上限。10,000 项读取、512 MiB Hex/SHA-256、共享存储解压和 1000 项分页均通过；自然名称排序键改为每条目预计算一次后，首屏 P95 从 554.28 ms 降至 219.19 ms。API 29/33/35 本轮 Emulator 兼容回归通过。写任务固定 `NEVER_REPLAY`，进程死亡转 `NEEDS_REVIEW`，不确定提交不重放；完整风险矩阵见 `docs/audits/2026-08-14-m9-local-release-audit.md`。远程常量保持关闭。
 
 > 2026-08-14 M8-D 权限修改实现同步：`FilePermissionRepository` 只接收 `FilePermissions` typed 九位 rwx 模型，UI 使用九个复选框和 600/644/700/755 预设，不传入命令或自由八进制文本。`RootFileSystem.changeMode` 在 helper 调度前复核直接父项、类型、符号链接、完整 `RootFileMetadata` 和保护路径；固定 `chmod-bound` 通过已绑定 original/canonical 父目录 FD、来源 device/inode/type 和旧 mode 打开目标 FD，以 `fchmod` 修改后同时从 FD 和路径复核 mode、UID/GID、identity 与类型。helper 调度后的等待和事后复核不可取消，超时、退出 55/137、协议异常或复核失败返回 `OUTCOME_UNCERTAIN` 且不自动重放。首版只提供单项非递归修改，拒绝特殊权限位、R3/R4 路径、symlink 和特殊项目；私有应用路径或放宽 group/other 写权限需要二次确认。全量 645 个 JVM 测试、Lint、四 ABI native、Debug/AndroidTest 构建及小米 9 Root 1/1、竖屏 UI 验收通过，M8 完成。
 
@@ -14,7 +16,7 @@
 
 > 2026-08-13 M7.1 完成基线：Room 8 已实现统一 `VirtualViewNode` 应用层树，明确区分 `VIRTUAL_FOLDER` 与 `REAL_REFERENCE`。虚拟节点不实现 `RootPath`，不进入 Root 写入 API；分享保存和文件操作目标能力由显式 destination 类型决定。Room 7 的 `custom_locations` 与 `bookmarks` 已原子迁移为“未分组”下的真实叶子引用，当前写入只进入 `virtual_view_nodes`。Repository 已实现父类型约束、循环检测、同父去重、引用重定位和 identity 批量更新。
 
-> 2026-08-13 M6/M7 完成基线：本地核心仓库均通过 typed Kotlin API 调用固定 Root helper。文件与受限目录树复制/移动、可恢复替换、递归目录合并、回收站、恢复冲突、批量重命名、搜索、预览、属性/四算法校验、文件/目录书签、跨进程路径会话和分享均已接入。`LocalArchiveEngine.createArchive` 统一创建 ZIP/TAR/TAR.GZ/7Z，解压统一写入脱敏任务；多选支持全选、反选和同类选择。全量 579 个 JVM 测试、Lint、Debug/AndroidTest 构建通过；小米 9 会话/Room/Root 书签 3/3、Root 流 7/7、归档/目录专项 4/4 通过，最终冷启动无 AndroidRuntime 崩溃。单个 Compose UI 专项在 MIUI runner 超时且无 JUnit 结果，不计为通过。M8 的竖屏双窗状态模型与双窗详细列表锁定尚未实施，远程适配器仅维护且 UI 继续隐藏。
+> 2026-08-13 M6/M7 完成基线：本地核心仓库均通过 typed Kotlin API 调用固定 Root helper。文件与受限目录树复制/移动、可恢复替换、递归目录合并、回收站、恢复冲突、批量重命名、搜索、预览、属性/四算法校验、文件/目录书签、跨进程路径会话和分享均已接入。`LocalArchiveEngine.createArchive` 统一创建 ZIP/TAR/TAR.GZ/7Z，解压统一写入脱敏任务；多选支持全选、反选和同类选择。全量 579 个 JVM 测试、Lint、Debug/AndroidTest 构建通过；小米 9 会话/Room/Root 书签 3/3、Root 流 7/7、归档/目录专项 4/4 通过，最终冷启动无 AndroidRuntime 崩溃。单个 Compose UI 专项在 MIUI runner 超时且无 JUnit 结果，不计为通过。该段记录当时 M8 尚未实施的状态；M8 与 M9 后续均已完成，远程适配器仍仅维护且 UI 继续隐藏。
 
 > 2026-08-13 M7 预览、目录分享与冲突同步：新增 `RootPreviewRepository`，仅对纯文本和常见图片使用 typed `readRange`，最大文本 512 KiB、图片 16 MiB，所有块必须匹配同一 `RootFileVersion`；UI 只接收内存中的只读预览模型，不接触 Root 路径。新增目录分享协调层：先由 `ArchiveRepository` 在 app-private incoming cache 生成 ZIP，再由 `RootExportRepository` 复制到 export cache 并签发一次性只读 `content://` grant，授权签发后清理归档中间文件。`TrashRepository.restore` 增加取消、保留两者和显式改名恢复，只有成功移动后才删除 journal。`DirectoryMergeRepository` 通过 typed 目录读取和现有无覆盖复制/移动原语递归处理同名目录，拒绝 symlink/特殊文件，移动完成后仅删除已验证空源目录。
 
@@ -850,11 +852,11 @@ adb logcat -d -t 300
 - 已完成普通手机竖屏、横屏/平板双窗口；单窗图标/详细信息列表切换；双窗锁定详细信息列表，退出双窗恢复单窗偏好；同步、交换、锁定和跨窗复制/移动。
 - 文本编辑器、Hex 只读、文件对比和单项非递归权限修改已完成；不提供递归 chmod 或 owner/group 修改。
 
-### M9：本地发布门禁（0.5.x，进行中）
+### M9：本地发布门禁（0.5.x，已完成）
 
-- 完成本地功能、Root 风险矩阵、任务恢复、大文件和大目录稳定性验收。
-- 完成小米 9 Root 真机全流程与 Android 兼容矩阵回归。
-- 验证发布包保持 `ReleaseFeatures.remoteServers = false` 且不存在远程入口。
+- Root 风险、任务恢复、10,000 项目录和 512 MiB 文件稳定性已进入发布门禁并通过。
+- 小米 9 Root 全流程与 API 29/33/35 非 Root 兼容回归已在 2026-08-14 通过。
+- 发布包保持 `ReleaseFeatures.remoteServers = false`，JVM 与 Emulator UI 均验证不存在远程入口。
 
 ### M10：远程服务器（0.6.0+，本地门禁通过后）
 

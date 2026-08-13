@@ -50,6 +50,22 @@ class FileEntrySorterTest {
     }
 
     @Test
+    fun `natural display name sorting preserves zero padded equality and unicode case folding`() {
+        val entries = listOf(
+            entry("item001", EntryType.FILE),
+            entry("文件10", EntryType.FILE),
+            entry("ITEM1", EntryType.FILE),
+            entry("文件2", EntryType.FILE),
+            entry("item0002", EntryType.FILE),
+        )
+
+        assertNames(
+            listOf("item001", "ITEM1", "item0002", "文件2", "文件10"),
+            FileEntrySorter.sort(entries, SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING)),
+        )
+    }
+
+    @Test
     fun `type sorting uses file extension and is stable for equal kinds`() {
         val entries = listOf(
             entry("second.txt", EntryType.FILE),
