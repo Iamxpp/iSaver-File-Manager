@@ -11,6 +11,20 @@ internal class RootTransferHelper(private val executable:String){
     fun readFileRange(path: String, offset: Long, count: Long) =
         command("read-file-range", path, offset, count)
     fun fileMetadata(path: String) = command("file-metadata", path)
+    fun changeModeBound(
+        original: String,
+        canonical: String,
+        name: EntryName,
+        parentIdentity: RootFileIdentity,
+        sourceIdentity: RootFileIdentity,
+        expectedMode: Int,
+        mode: Int,
+    ) = command(
+        "chmod-bound", original, canonical, name.value,
+        parentIdentity.device, parentIdentity.inode,
+        sourceIdentity.device, sourceIdentity.inode,
+        expectedMode, mode,
+    )
     fun createFileNoReplace(
         original: String,
         canonical: String,

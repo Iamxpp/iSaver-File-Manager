@@ -28,6 +28,8 @@ import com.iamxpp.isaver.fileops.BatchRenamePlanner
 import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.fileops.ChecksumAlgorithm
 import com.iamxpp.isaver.fileops.FileChecksumRepository
+import com.iamxpp.isaver.fileops.FilePermissionRepository
+import com.iamxpp.isaver.fileops.FilePermissions
 import com.iamxpp.isaver.search.LocalSearchCriteria
 import com.iamxpp.isaver.search.LocalSearchProgress
 import com.iamxpp.isaver.search.LocalSearchRepository
@@ -118,6 +120,9 @@ class BrowserViewModel(
     private var renameFileJob: Job? = null
     private var checksumJob: Job? = null
     private var metadataJob: Job? = null
+    private var permissionJob: Job? = null
+    private var refreshAfterFileInfo = false
+    private val permissionRepository = FilePermissionRepository(rootFileSystem)
     private var deepSearchJob: Job? = null
     private var previewJob: Job? = null
     private var sessionSaveJob: Job? = null
@@ -258,13 +263,20 @@ class BrowserViewModel(
         entry.readable && !entry.symbolicLink && entry.type != EntryType.OTHER
 
     fun dismissFileInfo() {
+        if (mutableState.value.permissionRunning) return
         checksumJob?.cancel()
         metadataJob?.cancel()
+        permissionJob?.cancel()
         mutableState.value = mutableState.value.copy(
             fileInfo = null, fileMetadata = null, fileMetadataLoading = false, fileMetadataError = null,
+            permissionRunning = false, permissionError = null, permissionConfirmation = null,
             checksumRunning = false, checksumValue = null, checksumError = null,
             checksumAlgorithm = ChecksumAlgorithm.SHA256,
         )
+        if (refreshAfterFileInfo) {
+            refreshAfterFileInfo = false
+            load(mutableState.value.currentPath, recordAccess = false)
+        }
     }
 
     fun showFileInfo(entry: DirectoryEntry) {
@@ -272,6 +284,7 @@ class BrowserViewModel(
         metadataJob?.cancel()
         mutableState.value = mutableState.value.copy(
             fileInfo = entry, fileMetadata = null, fileMetadataLoading = true, fileMetadataError = null,
+            permissionRunning = false, permissionError = null, permissionConfirmation = null,
             checksumRunning = false, checksumValue = null, checksumError = null,
             checksumAlgorithm = ChecksumAlgorithm.SHA256,
         )
@@ -305,6 +318,52 @@ class BrowserViewModel(
                 )
             }
         }
+    }
+
+    fun changePermissions(permissions: FilePermissions, confirmed: Boolean = false) {
+        val state = mutableState.value
+        val entry = state.fileInfo ?: return
+        val metadata = state.fileMetadata ?: return
+        if (state.permissionRunning) return
+        if (com.iamxpp.isaver.fileops.PermissionRiskPolicy.requiresConfirmation(entry.path, permissions) && !confirmed) {
+            mutableState.value = state.copy(permissionConfirmation = permissions, permissionError = null)
+            return
+        }
+        mutableState.value = state.copy(
+            permissionRunning = true,
+            permissionError = null,
+            permissionConfirmation = null,
+        )
+        permissionJob = viewModelScope.launch {
+            val result = withContext(ioDispatcher) {
+                permissionRepository.change(entry, state.currentPath, metadata, permissions, confirmed)
+            }
+            if (mutableState.value.fileInfo?.path != entry.path) return@launch
+            mutableState.value = when (result) {
+                is OperationResult.Success -> {
+                    refreshAfterFileInfo = true
+                    mutableState.value.copy(
+                        fileMetadata = result.value,
+                        permissionRunning = false,
+                        permissionError = null,
+                        permissionConfirmation = null,
+                    )
+                }
+                is OperationResult.Failure -> mutableState.value.copy(
+                    permissionRunning = false,
+                    permissionError = BrowserOperationError(result.code, result.userMessage),
+                    permissionConfirmation = null,
+                )
+            }
+        }
+    }
+
+    fun confirmPermissionChange() {
+        mutableState.value.permissionConfirmation?.let { changePermissions(it, confirmed = true) }
+    }
+
+    fun dismissPermissionConfirmation() {
+        mutableState.value = mutableState.value.copy(permissionConfirmation = null)
     }
 
     private fun changedMetadataState() = mutableState.value.copy(

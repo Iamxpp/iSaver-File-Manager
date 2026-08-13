@@ -761,6 +761,9 @@ class MainActivity : ComponentActivity() {
                         onShowFileInfo = browserViewModel::showFileInfo,
                         onCalculateChecksum = browserViewModel::calculateSelectedChecksum,
                         onChecksumAlgorithmChange = browserViewModel::setChecksumAlgorithm,
+                        onChangePermissions = browserViewModel::changePermissions,
+                        onConfirmPermissionChange = browserViewModel::confirmPermissionChange,
+                        onDismissPermissionConfirmation = browserViewModel::dismissPermissionConfirmation,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onDismissPreview = browserViewModel::dismissPreview,
                         onEditPreview = { entry ->

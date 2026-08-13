@@ -1,7 +1,9 @@
 # iSaver 系统设计文档（SDD）
 
-> 文档版本：4.5
-> 更新日期：2026-08-13
+> 文档版本：4.6
+> 更新日期：2026-08-14
+
+> 2026-08-14 M8-D 权限修改实现同步：`FilePermissionRepository` 只接收 `FilePermissions` typed 九位 rwx 模型，UI 使用九个复选框和 600/644/700/755 预设，不传入命令或自由八进制文本。`RootFileSystem.changeMode` 在 helper 调度前复核直接父项、类型、符号链接、完整 `RootFileMetadata` 和保护路径；固定 `chmod-bound` 通过已绑定 original/canonical 父目录 FD、来源 device/inode/type 和旧 mode 打开目标 FD，以 `fchmod` 修改后同时从 FD 和路径复核 mode、UID/GID、identity 与类型。helper 调度后的等待和事后复核不可取消，超时、退出 55/137、协议异常或复核失败返回 `OUTCOME_UNCERTAIN` 且不自动重放。首版只提供单项非递归修改，拒绝特殊权限位、R3/R4 路径、symlink 和特殊项目；私有应用路径或放宽 group/other 写权限需要二次确认。全量 645 个 JVM 测试、Lint、四 ABI native、Debug/AndroidTest 构建及小米 9 Root 1/1、竖屏 UI 验收通过，M8 完成。
 
 > 2026-08-13 M8-C 文件工具实现同步：新增独立 `filetools` 模块。`HexViewerRepository` 每页只调用一次 typed `readRange`，默认 4 KiB、16 字节一行，首次读取建立完整 `RootFileVersion`，分页时严格匹配 size/device/inode/mtime/ctime；空文件使用零长度版本探测，偏移按页向下对齐。`FileComparisonRepository` 先对两侧做零长度版本探测，再以 1 MiB 分块流式比较，相同大小时返回首个不同字节和最多 16 字节上下文，任何块长度或版本变化返回 `OUTCOME_UNCERTAIN`；摘要比较复用 `FileChecksumRepository` 四算法。`FileToolsViewModel` 只保存结构化页与结论，全屏 Compose 不持有 Root 接口；单窗长按进入 Hex，单窗/双窗恰好两项选择进入比较。小米 9 隔离 Root 专项和竖屏 UI 已验收。
 
@@ -843,12 +845,12 @@ adb logcat -d -t 300
 - 所有保存、移动、复制和解压目标选择器在虚拟 destination 中禁用确认，进入真实目录后重新校验。
 - 必须通过迁移、父链循环、真实文件不删除、小米 9 与 Root 回归门禁后才进入 M8。
 
-### M8：双窗口与高级本地能力（0.5.0，进行中）
+### M8：双窗口与高级本地能力（0.5.0，已完成）
 
 - 已完成普通手机竖屏、横屏/平板双窗口；单窗图标/详细信息列表切换；双窗锁定详细信息列表，退出双窗恢复单窗偏好；同步、交换、锁定和跨窗复制/移动。
-- 文本编辑器、Hex 只读和文件对比已完成；权限修改待完成。
+- 文本编辑器、Hex 只读、文件对比和单项非递归权限修改已完成；不提供递归 chmod 或 owner/group 修改。
 
-### M9：本地发布门禁（0.5.x）
+### M9：本地发布门禁（0.5.x，进行中）
 
 - 完成本地功能、Root 风险矩阵、任务恢复、大文件和大目录稳定性验收。
 - 完成小米 9 Root 真机全流程与 Android 兼容矩阵回归。

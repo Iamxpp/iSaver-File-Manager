@@ -856,6 +856,76 @@ static int file_metadata(int argc, char **argv) {
     return write_stdout(output, (size_t) length);
 }
 
+static int open_parent(
+    const char *original,
+    const char *canonical,
+    unsigned long long expected_device,
+    unsigned long long expected_inode
+);
+
+static int chmod_bound(int argc, char **argv) {
+    if (argc != 11 || !basename_ok(argv[4])) return X_USAGE;
+    unsigned long long parent_device, parent_inode, source_device, source_inode;
+    unsigned long long expected_mode, requested_mode;
+    if (!parse_identity(argv, 5, &parent_device, &parent_inode) ||
+        !parse_identity(argv, 7, &source_device, &source_inode) ||
+        !parse_u64(argv[9], &expected_mode) || !parse_u64(argv[10], &requested_mode) ||
+        expected_mode > 0777ULL || requested_mode > 0777ULL) return X_USAGE;
+    int parent_fd = open_parent(argv[2], argv[3], parent_device, parent_inode);
+    if (parent_fd < 0) return -parent_fd;
+    struct stat selected;
+    if (retry_fstatat(parent_fd, argv[4], &selected, AT_SYMLINK_NOFOLLOW) != 0 ||
+        (!S_ISREG(selected.st_mode) && !S_ISDIR(selected.st_mode)) ||
+        !identity_matches(&selected, source_device, source_inode) ||
+        (selected.st_mode & 07777) != (mode_t) expected_mode) {
+        close(parent_fd);
+        return X_SOURCE_CHANGED;
+    }
+    int flags = O_RDONLY | O_NOFOLLOW | O_CLOEXEC;
+    if (S_ISDIR(selected.st_mode)) flags |= O_DIRECTORY;
+    int source_fd;
+    do { source_fd = openat(parent_fd, argv[4], flags); }
+    while (source_fd < 0 && errno == EINTR);
+    if (source_fd < 0) {
+        int result = write_errno(errno);
+        close(parent_fd);
+        return result;
+    }
+    struct stat held;
+    if (retry_fstat(source_fd, &held) != 0 ||
+        !identity_matches(&held, source_device, source_inode) ||
+        (held.st_mode & S_IFMT) != (selected.st_mode & S_IFMT) ||
+        (held.st_mode & 07777) != (mode_t) expected_mode) {
+        close(source_fd); close(parent_fd); return X_SOURCE_CHANGED;
+    }
+    if (fchmod(source_fd, (mode_t) requested_mode) != 0) {
+        int result = write_errno(errno);
+        close(source_fd); close(parent_fd); return result;
+    }
+    struct stat changed;
+    struct stat at_path;
+    if (retry_fstat(source_fd, &changed) != 0 ||
+        retry_fstatat(parent_fd, argv[4], &at_path, AT_SYMLINK_NOFOLLOW) != 0 ||
+        !identity_matches(&changed, source_device, source_inode) ||
+        !identity_matches(&at_path, source_device, source_inode) ||
+        (changed.st_mode & 07777) != (mode_t) requested_mode ||
+        (at_path.st_mode & 07777) != (mode_t) requested_mode ||
+        changed.st_uid != selected.st_uid || changed.st_gid != selected.st_gid ||
+        (changed.st_mode & S_IFMT) != (selected.st_mode & S_IFMT)) {
+        close(source_fd); close(parent_fd); return X_OUTCOME_UNCERTAIN;
+    }
+    char output[192];
+    int length = snprintf(
+        output, sizeof(output), "ISAVER_META_V1\t%u\t%llu\t%llu\t%llu\t%llu\n",
+        (unsigned int) (changed.st_mode & 07777),
+        (unsigned long long) changed.st_uid, (unsigned long long) changed.st_gid,
+        (unsigned long long) changed.st_dev, (unsigned long long) changed.st_ino
+    );
+    close(source_fd); close(parent_fd);
+    if (length < 0 || (size_t) length >= sizeof(output)) return X_OUTCOME_UNCERTAIN;
+    return write_stdout(output, (size_t) length);
+}
+
 static int regular_file_version_matches(
     const struct stat *current,
     const struct stat *initial
@@ -3181,6 +3251,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "read-file-stdout") == 0) return read_file_stdout(argc, argv);
     if (strcmp(argv[1], "read-file-range") == 0) return read_file_range(argc, argv);
     if (strcmp(argv[1], "file-metadata") == 0) return file_metadata(argc, argv);
+    if (strcmp(argv[1], "chmod-bound") == 0) return chmod_bound(argc, argv);
     if (strcmp(argv[1], "prepare-stage") == 0) return prepare_stage(argc, argv);
     if (strcmp(argv[1], "copy-publish-stdin") == 0) return copy_publish_stdin(argc, argv);
     if (strcmp(argv[1], "replace-file-stdin") == 0) return replace_file_stdin(argc, argv);

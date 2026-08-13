@@ -46,6 +46,13 @@ interface RootFileSystem {
 
     suspend fun metadata(source: RootPath): OperationResult<RootFileMetadata> = unsupportedTransfer()
 
+    suspend fun changeMode(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        expectedMetadata: RootFileMetadata,
+        mode: Int,
+    ): OperationResult<RootFileMetadata> = unsupportedTransfer()
+
     suspend fun transferFromStream(
         source: RootTransferSource,
         targetDirectory: RootPath,

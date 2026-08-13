@@ -25,6 +25,7 @@ import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.BatchRenameMode
 import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.fileops.ChecksumAlgorithm
+import com.iamxpp.isaver.fileops.FilePermissions
 import com.iamxpp.isaver.tasks.OperationTask
 import com.iamxpp.isaver.tasks.OperationTaskState
 import com.iamxpp.isaver.tasks.OperationTaskStore
@@ -2018,6 +2019,64 @@ class BrowserViewModelTest {
         assertEquals("文件已变化，请刷新核对", changedVm.state.value.fileMetadataError)
     }
 
+    @Test fun `permission change updates metadata and closing info refreshes directory`() = runTest {
+        val parent = RootPath.parse("/data/local/tmp/permissions").getOrThrow()
+        val file = entry("value.txt", EntryType.FILE, path = "${parent.value}/value.txt")
+        val initial = RootFileMetadata(0x1A4, 0, 0, 12, 34)
+        val changed = initial.copy(mode = 0x180)
+        val calls = mutableListOf<Int>()
+        val fs = FakeFileSystem(
+            metadataBlock = { OperationResult.Success(if (calls.isEmpty()) initial else changed) },
+            identityBlock = { OperationResult.Success(RootEntryIdentity(12, 34)) },
+            changeModeBlock = { _, _, _, mode -> calls += mode; OperationResult.Success(changed) },
+        ) { OperationResult.Success(listOf(file)) }
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openRoot(parent, "权限测试")
+        advanceUntilIdle()
+        vm.showFileInfo(file)
+        advanceUntilIdle()
+
+        vm.changePermissions(FilePermissions.fromMode(0x180))
+        advanceUntilIdle()
+
+        assertEquals(listOf(0x180), calls)
+        assertEquals(changed, vm.state.value.fileMetadata)
+        val readsBeforeDismiss = fs.readDirectories.size
+        vm.dismissFileInfo()
+        advanceUntilIdle()
+        assertTrue(fs.readDirectories.size > readsBeforeDismiss)
+    }
+
+    @Test fun `risky permission waits for explicit confirmation`() = runTest {
+        val parent = RootPath.parse("/data/local/tmp/permissions").getOrThrow()
+        val file = entry("value.txt", EntryType.FILE, path = "${parent.value}/value.txt")
+        val metadata = RootFileMetadata(0x1A4, 0, 0, 12, 34)
+        var dispatches = 0
+        val fs = FakeFileSystem(
+            metadataBlock = { OperationResult.Success(metadata) },
+            identityBlock = { OperationResult.Success(RootEntryIdentity(12, 34)) },
+            changeModeBlock = { _, _, _, mode ->
+                dispatches++
+                OperationResult.Success(metadata.copy(mode = mode))
+            },
+        ) { OperationResult.Success(listOf(file)) }
+        val vm = BrowserViewModel(fs, StandardTestDispatcher(testScheduler), defaultPreferences())
+        vm.openRoot(parent, "权限测试")
+        advanceUntilIdle()
+        vm.showFileInfo(file)
+        advanceUntilIdle()
+
+        val risky = FilePermissions.fromMode(0x1B6)
+        vm.changePermissions(risky)
+        assertEquals(risky, vm.state.value.permissionConfirmation)
+        assertEquals(0, dispatches)
+
+        vm.confirmPermissionChange()
+        advanceUntilIdle()
+        assertEquals(1, dispatches)
+        assertEquals(0x1B6, vm.state.value.fileMetadata?.mode)
+    }
+
     @Test fun `deep search reports results progress and persistent task`() = runTest {
         val root = RootPath.parse(BrowserViewModel.INITIAL_PATH).getOrThrow()
         val result = entry("report.txt", EntryType.FILE, path = "${root.value}/report.txt")
@@ -2463,6 +2522,8 @@ class BrowserViewModelTest {
         val copyToOutputBlock: suspend (RootPath, OutputStream) -> OperationResult<Long> = { _, _ ->
             OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法读取文件")
         },
+        val changeModeBlock: suspend (DirectoryEntry, RootPath, RootFileMetadata, Int) -> OperationResult<RootFileMetadata> =
+            { _, _, _, _ -> OperationResult.Failure(ErrorCode.COMMAND_FAILED, "无法修改权限") },
         val listBlock: suspend (RootPath) -> OperationResult<List<DirectoryEntry>>,
     ) : RootFileSystem {
         val listed = mutableListOf<String>()
@@ -2490,6 +2551,12 @@ class BrowserViewModelTest {
         override suspend fun identity(path: RootPath): OperationResult<RootEntryIdentity> = identityBlock(path)
         override suspend fun copyToOutput(source: RootPath, output: OutputStream): OperationResult<Long> =
             copyToOutputBlock(source, output)
+        override suspend fun changeMode(
+            source: DirectoryEntry,
+            sourceDirectory: RootPath,
+            expectedMetadata: RootFileMetadata,
+            mode: Int,
+        ): OperationResult<RootFileMetadata> = changeModeBlock(source, sourceDirectory, expectedMetadata, mode)
         override suspend fun createDirectory(parent: RootPath, name: FolderName): OperationResult<DirectoryEntry> = createBlock(parent, name)
         override suspend fun createFileNoReplace(parent: RootPath, name: EntryName): OperationResult<DirectoryEntry> =
             createFileBlock(parent, name)

@@ -323,6 +323,74 @@ class LibsuRootFileSystem internal constructor(
         return RootFileMetadataProtocol.parse(result.stdout)
     }
 
+    override suspend fun changeMode(
+        source: DirectoryEntry,
+        sourceDirectory: RootPath,
+        expectedMetadata: RootFileMetadata,
+        mode: Int,
+    ): OperationResult<RootFileMetadata> {
+        if (RootPathRiskPolicy.isProtected(sourceDirectory) || RootPathRiskPolicy.isProtected(source.path)) {
+            return failure(ErrorCode.NOT_WRITABLE, "系统保护区域禁止修改权限", "Protected chmod path")
+        }
+        val sourceName = EntryName.parse(source.name).getOrElse {
+            return failure(ErrorCode.SOURCE_UNREADABLE, "无法修改此项目的权限", "Invalid chmod source basename")
+        }
+        if (mode !in 0..0x1FF || expectedMetadata.mode !in 0..0x1FF ||
+            source.path != EntryName.join(sourceDirectory, sourceName) || source.symbolicLink ||
+            source.type == com.iamxpp.isaver.domain.EntryType.OTHER
+        ) {
+            return failure(ErrorCode.SOURCE_UNREADABLE, "无法修改此项目的权限", "Invalid chmod source snapshot")
+        }
+        val preparedResult = prepareReadableDirectory(sourceDirectory)
+        if (preparedResult !is OperationResult.Success) return preparedResult as OperationResult.Failure
+        val prepared = preparedResult.value
+        val currentEntry = stat(source.path)
+        val currentMetadata = metadata(source.path)
+        if (currentEntry !is OperationResult.Success || currentMetadata !is OperationResult.Success ||
+            currentEntry.value.type != source.type || currentEntry.value.symbolicLink ||
+            currentMetadata.value != expectedMetadata
+        ) {
+            return failure(ErrorCode.SOURCE_UNREADABLE, "项目已变化，请重新打开属性", "Chmod source changed before dispatch")
+        }
+        currentCoroutineContext().ensureActive()
+        return withContext(NonCancellable) {
+            val execution = runHelperBounded(
+                transferHelper.changeModeBound(
+                    original = prepared.original.value,
+                    canonical = prepared.canonical.value,
+                    name = sourceName,
+                    parentIdentity = prepared.identity,
+                    sourceIdentity = RootFileIdentity(expectedMetadata.device, expectedMetadata.inode),
+                    expectedMode = expectedMetadata.mode,
+                    mode = mode,
+                ),
+                helperOperationTimeoutMillis,
+            ).getOrElse {
+                return@withContext uncertainPermission("Chmod helper exceeded its bounded deadline or lost its result")
+            }
+            if (execution.exitCode != 0) {
+                return@withContext mapExitCode(execution.exitCode, execution.stderr, "无法修改权限", "chmod-bound")
+            }
+            val helperMetadata = RootFileMetadataProtocol.parse(execution.stdout)
+            if (helperMetadata !is OperationResult.Success) {
+                return@withContext uncertainPermission("Chmod helper returned malformed metadata")
+            }
+            val finalEntry = stat(source.path)
+            val finalMetadata = metadata(source.path)
+            val parentAfter = canonicalize(sourceDirectory)
+            if (finalEntry !is OperationResult.Success || finalMetadata !is OperationResult.Success ||
+                finalEntry.value.type != source.type || finalEntry.value.symbolicLink ||
+                helperMetadata.value.mode != mode || helperMetadata.value != finalMetadata.value ||
+                helperMetadata.value.uid != expectedMetadata.uid || helperMetadata.value.gid != expectedMetadata.gid ||
+                helperMetadata.value.device != expectedMetadata.device || helperMetadata.value.inode != expectedMetadata.inode ||
+                parentAfter !is OperationResult.Success || parentAfter.value != prepared.canonical
+            ) {
+                return@withContext uncertainPermission("Changed permissions could not be fully reconciled")
+            }
+            helperMetadata
+        }
+    }
+
     override suspend fun prepareExtractionStage(parent: RootPath): OperationResult<ExtractionStage> {
         val prepared = prepareWritableDirectory(parent)
         if (prepared !is OperationResult.Success) return prepared as OperationResult.Failure
@@ -1291,6 +1359,8 @@ class LibsuRootFileSystem internal constructor(
 
     private fun invalidDeleteSource() = failure(ErrorCode.SOURCE_UNREADABLE, "无法删除此项目", "Invalid delete source")
     private fun uncertainDelete(reason: String) = failure(ErrorCode.OUTCOME_UNCERTAIN, "删除结果不确定，请刷新目录核对", reason)
+    private fun uncertainPermission(reason: String) =
+        failure(ErrorCode.OUTCOME_UNCERTAIN, "权限修改结果不确定，请刷新属性核对", reason)
 
     private suspend fun prepareWritableDirectory(original:RootPath):OperationResult<PreparedTransferDirectory> =
         prepareDirectory(original, requireWritable = true)
@@ -1397,7 +1467,9 @@ class LibsuRootFileSystem internal constructor(
                 if (operation == "prepare-stage") "目标目录临时文件受系统限制，请换个文件夹再试" else failureMessage,
                 "Stage directory did not pass safety checks",
             )
-            54 -> if (operation == "read-file-range") {
+            54 -> if (operation == "chmod-bound") {
+                failure(ErrorCode.SOURCE_UNREADABLE, "项目已变化，请重新打开属性", "Chmod source identity or mode changed")
+            } else if (operation == "read-file-range") {
                 failure(
                     ErrorCode.OUTCOME_UNCERTAIN,
                     "文件读取结果需要核对",
@@ -1418,6 +1490,7 @@ class LibsuRootFileSystem internal constructor(
                 "Source could not be read",
             )
             55 -> when (operation) {
+                "chmod-bound" -> uncertainPermission("Native helper reported an uncertain chmod outcome")
                 "replace-file-stdin" -> uncertainReplace(
                     stderr.filter { it.startsWith("replace-uncertain:") || it.startsWith("replace-check:") }
                         .joinToString(";").ifEmpty { "Native helper reported an uncertain atomic replacement" },
@@ -1441,6 +1514,7 @@ class LibsuRootFileSystem internal constructor(
                 )
             }
             137 -> when (operation) {
+                "chmod-bound" -> uncertainPermission("Native chmod helper was killed after timeout")
                 "replace-file-stdin" -> uncertainReplace("Atomic replacement helper was killed after timeout")
                 "rename-noreplace" -> uncertainRename("Native rename helper was killed after timeout")
                 "create-file-noreplace" -> uncertainCreateFile("Native create-file helper was killed after timeout")

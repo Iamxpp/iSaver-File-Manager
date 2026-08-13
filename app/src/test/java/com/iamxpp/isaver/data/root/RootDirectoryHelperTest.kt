@@ -1,6 +1,7 @@
 package com.iamxpp.isaver.data.root
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,5 +27,24 @@ class RootDirectoryHelperTest {
             .exceptionOrNull()
 
         assertTrue(failure is IllegalArgumentException)
+    }
+
+    @Test
+    fun `change mode emits a fixed helper command with numeric mode`() {
+        val command = helper.changeModeBound(
+            original = "/data/local/tmp",
+            canonical = "/data/local/tmp",
+            name = com.iamxpp.isaver.domain.EntryName.parse("a';\n.txt").getOrThrow(),
+            parentIdentity = RootFileIdentity(1, 2),
+            sourceIdentity = RootFileIdentity(3, 4),
+            expectedMode = 0x1A4,
+            mode = 0x1ED,
+        )
+
+        assertTrue(command.contains("'chmod-bound'"))
+        assertTrue(command.contains("'a'\\'';\n.txt'"))
+        assertTrue(command.endsWith("'420' '493'"))
+        assertFalse(command.contains("chmod 777"))
+        assertFalse(command.contains("sh -c"))
     }
 }
