@@ -1,7 +1,9 @@
 # iSaver 系统设计文档（SDD）
 
-> 文档版本：4.7
+> 文档版本：4.8
 > 更新日期：2026-08-14
+
+> 2026-08-14 性能与模块化实现同步：远程协议、凭据、安全策略、ViewModel 与测试整体迁入独立 `:remote` Android library，远程 basename 使用模块内 `RemoteEntryName`，避免反向依赖 `:app` 领域层。当前 `:app` 不声明 `implementation(project(":remote"))`，也不再携带 Commons Net/JSch、远程 Application 单例、Activity 状态收集或 Browser 对话框。Release 启用 R8 `proguard-android-optimize.txt` 与资源收缩，仅抑制归档依赖可选的 `StaticLoggerBinder` 告警；`verify_apk_size.ps1` 限制 APK 不超过 8 MiB，并从最终 DEX 拒绝 `org.apache.commons.net`、`com.jcraft.jsch` 和 `com.iamxpp.isaver.remote`。本轮 unsigned Release 为 3,798,909 bytes，Debug 从 34,713,852 降至 33,669,702 bytes。95 个套件、650 个 JVM 测试及小米 9 完整发布门禁通过；当前 200 项冷/热、缓存和 1000 项首批可见 P95 分别为 104.73、98.40、13.30 和 211.19 ms。
 
 > 2026-08-14 M9 本地发布门禁实现同步：发布脚本串行执行 648 个 JVM 测试、Lint、四 ABI native/Debug/AndroidTest 构建、23 组小米 9 instrumentation、共享存储可见工作流与 Root 性能测试，并对每组 instrumentation 设置 180 秒上限。10,000 项读取、512 MiB Hex/SHA-256、共享存储解压和 1000 项分页均通过；自然名称排序键改为每条目预计算一次后，首屏 P95 从 554.28 ms 降至 219.19 ms。API 29/33/35 本轮 Emulator 兼容回归通过。写任务固定 `NEVER_REPLAY`，进程死亡转 `NEEDS_REVIEW`，不确定提交不重放；完整风险矩阵见 `docs/audits/2026-08-14-m9-local-release-audit.md`。远程常量保持关闭。
 
@@ -621,7 +623,7 @@ ISaverApp
 
 ## 11. 远程文件系统设计（本地文件管理完成后的后续阶段）
 
-当前版本使用 `ReleaseFeatures.remoteServers = false` 作为固定发布门禁。`FilesOverflowMenu` 在门禁关闭时不生成“连接服务器”语义节点，用户无法进入远程配置、目录或传输 UI。现有适配器和安全策略代码保留并继续接受单元测试，但不得据此宣称远程功能已发布，也不得为其新增产品能力。
+当前版本以 Gradle 模块边界作为固定发布门禁：`:remote` 保留适配器、安全策略和单元测试，但 `:app` 不依赖它，因此本地 APK 不包含协议实现、第三方 FTP/SFTP 库、连接状态或远程 UI。`verify_apk_size.ps1` 对最终 DEX 再次检查该边界。不得据此宣称远程功能已发布，也不得为其新增产品能力。
 
 远程里程碑只有在默认打开、对外分享、复制/移动/重命名、删除/回收站、多选、搜索、任务中心、双窗、本地 Root 风险矩阵和 Android 兼容回归全部通过后才能启动。启动时必须单独修订 PRD/SDD、开启新的安全验收，并保持远程协议与本地文件操作仓库的边界。
 
@@ -856,7 +858,7 @@ adb logcat -d -t 300
 
 - Root 风险、任务恢复、10,000 项目录和 512 MiB 文件稳定性已进入发布门禁并通过。
 - 小米 9 Root 全流程与 API 29/33/35 非 Root 兼容回归已在 2026-08-14 通过。
-- 发布包保持 `ReleaseFeatures.remoteServers = false`，JVM 与 Emulator UI 均验证不存在远程入口。
+- 发布包保持 `:app` 不依赖 `:remote`，最终 DEX 与 UI 均验证不存在远程实现或入口。
 
 ### M10：远程服务器（0.6.0+，本地门禁通过后）
 

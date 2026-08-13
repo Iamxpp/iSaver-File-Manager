@@ -1,10 +1,12 @@
 # iSaver 需求说明书（PRD）
 
-> 文档版本：4.7
+> 文档版本：4.8
 > 更新日期：2026-08-14
 > 产品定位：面向 Root Android 设备的现代完整文件管理器
 
-> 2026-08-14 M9 本地发布门禁完成基线：648 个 JVM 测试、Lint、四 ABI native、Debug/AndroidTest 构建、23 组小米 9 串行 instrumentation、共享存储可见工作流及 Root 性能门禁全部通过；10,000 项目录读取 794 ms，512 MiB Hex 尾页和 SHA-256 对照通过，1000 项首批可见 P95 为 219.19 ms。API 29/33/35 本轮重新完成安装、非 Root 阻断、重建、Compose UI 与退出验收。Root 风险、`NEVER_REPLAY`/`NEEDS_REVIEW`、取消和结果不确定策略已审计，发布包保持 `ReleaseFeatures.remoteServers = false` 且无远程入口。M8、M9 均完成；远程开发仍等待独立 M10 授权。
+> 2026-08-14 性能与模块化整理：冻结的 SFTP/FTPS/FTP 实现及 7 组测试迁入独立 `:remote` Android library，当前 `:app` 不依赖该模块，也不再创建远程 ViewModel、凭据仓库或不可达远程对话框。FTP/SFTP 依赖不进入本地 APK；M10 启动时需单独修订规格并显式接回 UI、依赖与安全验收。Release 已启用 R8 与资源收缩，并以 8 MiB 体积上限及最终 DEX 禁止远程包作为发布门禁；本轮 unsigned Release 为 3,798,909 bytes，Debug 从 34,713,852 降至 33,669,702 bytes。95 个套件、650 个 JVM 测试、Lint、三类构建和小米 9 完整发布门禁通过；当前 200 项冷/热 P95 为 104.73/98.40 ms、缓存 P95 13.30 ms、1000 项首批可见 P95 211.19 ms。
+
+> 2026-08-14 M9 本地发布门禁完成基线：648 个 JVM 测试、Lint、四 ABI native、Debug/AndroidTest 构建、23 组小米 9 串行 instrumentation、共享存储可见工作流及 Root 性能门禁全部通过；10,000 项目录读取 794 ms，512 MiB Hex 尾页和 SHA-256 对照通过，1000 项首批可见 P95 为 219.19 ms。API 29/33/35 本轮重新完成安装、非 Root 阻断、重建、Compose UI 与退出验收。Root 风险、`NEVER_REPLAY`/`NEEDS_REVIEW`、取消和结果不确定策略已审计；该里程碑后的模块化整理已改为 `:app` 与 `:remote` 物理隔离。M8、M9 均完成；远程开发仍等待独立 M10 授权。
 
 > 2026-08-14 M8-D 权限修改完成基线：属性页支持单个普通文件或目录的非递归 rwx 修改，提供所有者/用户组/其他九个复选框和 600/644/700/755 预设，不接受任意八进制命令。提交绑定父目录 original/canonical identity、来源 device/inode/type 和旧 mode，native 仅通过固定 `chmod-bound` 与 `fchmod` 修改并复核 mode、UID/GID、identity 和类型；保护路径、符号链接、特殊项目、特殊权限位及陈旧属性均阻断，`/data/user`、`/data/data`、group-write 和 other-write 需要二次确认，结果不确定不重放。全量 645 个 JVM 测试、Lint、Debug/AndroidTest 构建通过；小米 9 Root 专项 1/1 通过，竖屏属性、九复选框、四预设和风险确认窗无底部遮挡。M8 已完成；M9 后续已按本文最新基线完成。
 
@@ -621,7 +623,7 @@ iSaver 同时保留原有“文件另存助手”能力：第三方应用可通�
 
 - 本地功能、Root 风险矩阵、任务恢复、大文件/大目录稳定性已验收；完整证据见 `docs/audits/2026-08-14-m9-local-release-audit.md`。
 - 小米 9 Root 真机全流程与 API 29/33/35 Android 兼容矩阵已在 2026-08-14 重跑通过。
-- `ReleaseFeatures.remoteServers = false`，发布 UI 无远程入口；M10 不自动启动。
+- 本地 `:app` 与独立 `:remote` 模块无依赖关系，发布 APK 的 DEX 门禁验证不存在 FTP/SFTP/remote 包；M10 不自动启动。
 
 ### M10：远程服务器（0.6.0+，本地门禁通过后）
 

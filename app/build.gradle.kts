@@ -22,6 +22,16 @@ android {
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     ndkVersion = "27.2.12479018"
     buildFeatures { compose = true }
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
     sourceSets { getByName("androidTest").assets.srcDir("$projectDir/schemas") }
     packaging { jniLibs.useLegacyPackaging = true }
     compileOptions {

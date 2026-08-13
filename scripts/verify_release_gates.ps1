@@ -81,7 +81,15 @@ try {
     try {
         Invoke-Checked -FilePath ".\gradlew.bat" -Arguments @("testDebugUnitTest") | Out-Null
         Invoke-Checked -FilePath ".\gradlew.bat" -Arguments @("lintDebug") | Out-Null
-        Invoke-Checked -FilePath ".\gradlew.bat" -Arguments @("assembleDebug", "assembleDebugAndroidTest") | Out-Null
+        Invoke-Checked -FilePath ".\gradlew.bat" -Arguments @(
+            ":app:assembleDebug",
+            ":app:assembleDebugAndroidTest",
+            ":app:assembleRelease"
+        ) | Out-Null
+        & pwsh -NoProfile -File (Join-Path $PSScriptRoot "verify_apk_size.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            throw "APK size and dependency gate failed with exit $LASTEXITCODE"
+        }
     }
     finally {
         Pop-Location

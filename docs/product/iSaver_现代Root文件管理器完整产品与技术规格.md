@@ -1,10 +1,12 @@
 # iSaver 现代 Root 文件管理器完整产品与技术规格
 
-> 文档版本：1.7
+> 文档版本：1.8
 > 更新日期：2026-08-14
 > 产品方向：MT 级文件操作效率 + 现代 Files 风格界面 + 更严格的 Root 安全
 > 当前状态：M8、M9 本地能力与发布门禁已完成；远程能力仍冻结
 > 关联文档：`iSaver_PRD_需求说明书.md`、`iSaver_SDD_系统设计文档.md`、`iSaver_M7.1_虚拟视图位置统一改造需求与技术落地.md`
+
+> 2026-08-14 性能与代码整合基线：冻结的远程实现及测试已从本地 `:app` 拆到独立 `:remote` 模块，FTP/SFTP 库、连接状态和不可达对话框不再进入本地 APK。Release 启用 R8 与资源收缩，并新增 8 MiB 及最终 DEX 远程包排除门禁；unsigned Release 为 3,798,909 bytes，Debug 从 34,713,852 降至 33,669,702 bytes。Root typed API 与文件事务实现未搬迁，降低本轮安全回归范围。95 个套件、650 个 JVM 测试及小米 9 完整发布门禁通过；当前 200 项冷/热、缓存和 1000 项首批可见 P95 分别为 104.73、98.40、13.30 和 211.19 ms。
 
 > 2026-08-14 M9 完成基线：本地 0.5.x 已通过 648 个 JVM 测试、Lint、四 ABI 构建、23 组小米 9 instrumentation、共享存储可见工作流、10,000 项目录、512 MiB 文件及性能门禁；1000 项首批可见 P95 219.19 ms。API 29/33/35 本轮兼容矩阵通过。Root 风险和 `NEVER_REPLAY`/`NEEDS_REVIEW` 策略已形成发布审计；远程入口保持关闭，M10 需独立启动。
 
@@ -690,7 +692,7 @@ Room 新增建议表：
 - Root 风险矩阵、任务恢复、取消与结果不确定策略完成审计。
 - 小米 9 Root 全流程、共享存储可见工作流、10,000 项目录和 512 MiB 文件稳定性通过。
 - API 29、33、35 安装、非 Root 门禁、生命周期和 Compose UI 兼容回归通过。
-- 发布包保持 `ReleaseFeatures.remoteServers = false`；完整证据见 `docs/audits/2026-08-14-m9-local-release-audit.md`。
+- 发布包保持 `:app` 与 `:remote` 无依赖，最终 DEX 不含 FTP/SFTP/remote 包；完整证据见 `docs/audits/2026-08-14-m9-local-release-audit.md`。
 
 ### 0.6.0：远程文件管理
 
