@@ -105,6 +105,7 @@ fun BrowserScreen(
     onForward: () -> Unit = {},
     onAddCurrentToVirtualView: (() -> Unit)? = null,
     onAddEntryToVirtualView: ((DirectoryEntry) -> Unit)? = null,
+    onRebindVirtualReference: ((DirectoryEntry) -> Unit)? = null,
     onStartDeepSearch: (LocalSearchCriteria) -> Unit = {},
     onCancelDeepSearch: () -> Unit = {},
     onClearDeepSearch: () -> Unit = {},
@@ -454,6 +455,12 @@ fun BrowserScreen(
                 actionEntry = null
                 onAddEntryToVirtualView?.invoke(entry)
                 onClearSelection()
+            },
+            onRebindReference = onRebindVirtualReference?.let { rebind ->
+                {
+                    actionEntry = null
+                    rebind(entry)
+                }
             },
             onInfo = {
                 actionEntry = null
@@ -833,6 +840,7 @@ private fun FileActionsDialog(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onAddToVirtualView: () -> Unit,
+    onRebindReference: (() -> Unit)?,
     onInfo: () -> Unit,
     onSelect: () -> Unit,
     onDismiss: () -> Unit,
@@ -845,6 +853,9 @@ private fun FileActionsDialog(
         if (renameVisible) add(FileAction("重命名", renameEnabled, onRename))
         if (compressVisible) add(FileAction("压缩", true, onCompress))
         add(FileAction("添加到虚拟视图位置", true, onAddToVirtualView, fullWidth = true))
+        if (onRebindReference != null) {
+            add(FileAction("重新绑定到此项目", true, onRebindReference, fullWidth = true))
+        }
         add(FileAction("属性", true, onInfo))
         add(FileAction("多选", true, onSelect))
         if (deleteVisible) add(FileAction("删除", deleteEnabled, onDelete, destructive = true))

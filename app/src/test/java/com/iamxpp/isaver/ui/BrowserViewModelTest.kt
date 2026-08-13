@@ -1484,14 +1484,17 @@ class BrowserViewModelTest {
         val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
         val output = entry("report.txt", EntryType.FILE, path = "${targetDirectory.value}/report.txt")
         val requests = mutableListOf<Triple<DirectoryEntry, RootPath, RootPath>>()
+        val oldIdentity = RootEntryIdentity(8, 9)
+        val relocated = mutableListOf<Pair<RootEntryIdentity, DirectoryEntry>>()
         val vm = BrowserViewModel(
-            FakeFileSystem { OperationResult.Success(emptyList()) },
+            FakeFileSystem(identityBlock = { OperationResult.Success(oldIdentity) }) { OperationResult.Success(emptyList()) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
             moveFile = { entry, sourceParent, targetParent, _ ->
                 requests += Triple(entry, sourceParent, targetParent)
                 OperationResult.Success(output)
             },
+            relocateVirtualReferences = { identity, entry -> relocated += identity to entry },
         )
         vm.openRoot(sourceDirectory, "来源")
         advanceUntilIdle()
@@ -1508,6 +1511,7 @@ class BrowserViewModelTest {
         assertNull(vm.state.value.moveSelection)
         assertEquals(output, vm.state.value.movedOutput)
         assertTrue(vm.state.value.selectedEntries.isEmpty())
+        assertEquals(listOf(oldIdentity to output), relocated)
     }
 
     @Test fun `move to source directory stays in picker and never dispatches`() = runTest {
@@ -1660,8 +1664,10 @@ class BrowserViewModelTest {
         val source = entry("report.txt", EntryType.FILE, path = "${sourceDirectory.value}/report.txt")
         val output = entry("renamed.txt", EntryType.FILE, path = "${sourceDirectory.value}/renamed.txt")
         val names = mutableListOf<String>()
+        val oldIdentity = RootEntryIdentity(8, 9)
+        val relocated = mutableListOf<Pair<RootEntryIdentity, DirectoryEntry>>()
         val vm = BrowserViewModel(
-            FakeFileSystem { OperationResult.Success(emptyList()) },
+            FakeFileSystem(identityBlock = { OperationResult.Success(oldIdentity) }) { OperationResult.Success(emptyList()) },
             StandardTestDispatcher(testScheduler),
             defaultPreferences(),
             renameFile = { selected, _, name ->
@@ -1669,6 +1675,7 @@ class BrowserViewModelTest {
                 names += name
                 OperationResult.Success(output)
             },
+            relocateVirtualReferences = { identity, entry -> relocated += identity to entry },
         )
         vm.openRoot(sourceDirectory, "来源")
         advanceUntilIdle()
@@ -1680,6 +1687,7 @@ class BrowserViewModelTest {
         assertFalse(vm.state.value.renamingFile)
         assertEquals(output, vm.state.value.renamedOutput)
         assertNull(vm.state.value.fileRenameError)
+        assertEquals(listOf(oldIdentity to output), relocated)
     }
 
     @Test fun `rename failure remains visible and does not claim output`() = runTest {

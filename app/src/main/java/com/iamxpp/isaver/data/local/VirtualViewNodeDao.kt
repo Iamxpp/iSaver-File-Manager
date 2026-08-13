@@ -50,6 +50,54 @@ interface VirtualViewNodeDao {
     @Query("UPDATE virtual_view_nodes SET available = :available, updatedAt = :updatedAt WHERE id = :id AND nodeType = 'REAL_REFERENCE'")
     suspend fun setAvailability(id: String, available: Boolean, updatedAt: Long): Int
 
+    @Query(
+        """
+        UPDATE virtual_view_nodes
+        SET targetPath = :targetPath, entryType = :entryType, device = :newDevice, inode = :newInode,
+            available = 1, updatedAt = :updatedAt
+        WHERE nodeType = 'REAL_REFERENCE' AND device = :oldDevice AND inode = :oldInode
+        """,
+    )
+    suspend fun relocateByIdentity(
+        oldDevice: Long,
+        oldInode: Long,
+        targetPath: String,
+        entryType: String,
+        newDevice: Long,
+        newInode: Long,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        """
+        UPDATE virtual_view_nodes SET available = :available, updatedAt = :updatedAt
+        WHERE nodeType = 'REAL_REFERENCE' AND device = :device AND inode = :inode
+        """,
+    )
+    suspend fun setAvailabilityByIdentity(
+        device: Long,
+        inode: Long,
+        available: Boolean,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        """
+        UPDATE virtual_view_nodes
+        SET targetPath = :targetPath, entryType = :entryType, device = :device, inode = :inode,
+            available = 1, updatedAt = :updatedAt
+        WHERE id = :id AND nodeType = 'REAL_REFERENCE'
+        """,
+    )
+    suspend fun rebindReference(
+        id: String,
+        targetPath: String,
+        entryType: String,
+        device: Long,
+        inode: Long,
+        updatedAt: Long,
+    ): Int
+
     @Query("DELETE FROM virtual_view_nodes WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>): Int
 

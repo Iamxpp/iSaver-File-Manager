@@ -38,6 +38,13 @@ interface VirtualViewStore {
         identity: RootEntryIdentity?,
         displayName: String,
     ): VirtualViewResult
+    suspend fun setReferenceAvailability(nodeId: String, available: Boolean): VirtualViewResult
+    suspend fun rebindReference(
+        nodeId: String,
+        path: RootPath,
+        type: EntryType,
+        identity: RootEntryIdentity,
+    ): VirtualViewResult
 }
 
 class VirtualViewRepositoryStore(private val repository: VirtualViewRepository) : VirtualViewStore {
@@ -56,9 +63,19 @@ class VirtualViewRepositoryStore(private val repository: VirtualViewRepository) 
         identity: RootEntryIdentity?,
         displayName: String,
     ) = repository.addReference(targetFolderId, path, type, identity, displayName)
+    override suspend fun setReferenceAvailability(nodeId: String, available: Boolean) =
+        repository.setReferenceAvailability(nodeId, available)
+    override suspend fun rebindReference(
+        nodeId: String,
+        path: RootPath,
+        type: EntryType,
+        identity: RootEntryIdentity,
+    ) = repository.rebindReference(nodeId, path, type, identity)
 }
 
 data class PendingVirtualReference(val path: RootPath, val displayName: String, val entryType: EntryType)
+data class PendingReferenceRebind(val nodeId: String, val entryType: EntryType, val previousPath: RootPath)
+data class VerifiedVirtualReference(val nodeId: String, val displayName: String, val entry: com.iamxpp.isaver.domain.DirectoryEntry)
 
 data class VirtualViewUiState(
     val currentFolderId: String? = null,
@@ -72,6 +89,8 @@ data class VirtualViewUiState(
     val pendingReference: PendingVirtualReference? = null,
     val pickerFolderId: String? = null,
     val message: String? = null,
+    val verifiedReference: VerifiedVirtualReference? = null,
+    val pendingRebind: PendingReferenceRebind? = null,
 )
 
 class VirtualViewViewModel(
@@ -134,6 +153,103 @@ class VirtualViewViewModel(
     fun moveNode(nodeId: String, targetFolderId: String?) = mutate { store.moveNode(nodeId, targetFolderId) }
 
     fun removeReference(nodeId: String) = mutate { store.removeReference(nodeId) }
+
+    fun openReference(reference: VirtualViewNode.RealReference) {
+        val fileSystem = rootFileSystem ?: return
+        if (state.value.operationInProgress) return
+        mutableState.value = state.value.copy(operationInProgress = true, error = null, verifiedReference = null)
+        viewModelScope.launch {
+            val verified = withContext(ioDispatcher) { verifyReference(reference, fileSystem) }
+            mutableState.value = when (verified) {
+                is ReferenceVerification.Valid -> {
+                    val valid = verified
+                    if (!reference.available) store.setReferenceAvailability(reference.id, true)
+                    if (reference.identity == null || reference.targetPath != valid.path) {
+                        store.rebindReference(reference.id, valid.path, reference.entryType, valid.identity)
+                    }
+                    state.value.copy(
+                        operationInProgress = false,
+                        verifiedReference = VerifiedVirtualReference(
+                            reference.id,
+                            reference.displayName,
+                            valid.entry.copy(path = valid.path),
+                        ),
+                    )
+                }
+                ReferenceVerification.Invalid -> {
+                    store.setReferenceAvailability(reference.id, false)
+                    state.value.copy(
+                        operationInProgress = false,
+                        error = "原项目已移动、删除或被替换。",
+                    )
+                }
+            }
+        }
+    }
+
+    fun consumeVerifiedReference() {
+        mutableState.value = state.value.copy(verifiedReference = null)
+    }
+
+    fun beginRebind(reference: VirtualViewNode.RealReference) {
+        mutableState.value = state.value.copy(
+            pendingRebind = PendingReferenceRebind(reference.id, reference.entryType, reference.targetPath),
+            error = null,
+            message = null,
+        )
+    }
+
+    fun cancelRebind() {
+        mutableState.value = state.value.copy(pendingRebind = null)
+    }
+
+    fun confirmRebind(entry: com.iamxpp.isaver.domain.DirectoryEntry) {
+        val pending = state.value.pendingRebind ?: return
+        val fileSystem = rootFileSystem ?: return
+        if (entry.type != pending.entryType) {
+            mutableState.value = state.value.copy(error = "重新定位项目类型必须与原引用一致。")
+            return
+        }
+        if (state.value.operationInProgress) return
+        mutableState.value = state.value.copy(operationInProgress = true, error = null)
+        viewModelScope.launch {
+            val candidate = VirtualViewNode.RealReference(
+                id = pending.nodeId,
+                parentId = "rebind",
+                displayName = entry.name,
+                targetPath = entry.path,
+                entryType = pending.entryType,
+                identity = null,
+                available = true,
+                sortOrder = 0,
+                createdAt = 0,
+                updatedAt = 0,
+            )
+            val verified = withContext(ioDispatcher) { verifyReference(candidate, fileSystem) }
+            mutableState.value = when (verified) {
+                is ReferenceVerification.Valid -> {
+                    val result = store.rebindReference(
+                        pending.nodeId,
+                        verified.path,
+                        pending.entryType,
+                        verified.identity,
+                    )
+                    when (result) {
+                    is VirtualViewResult.Success -> state.value.copy(
+                        operationInProgress = false,
+                        pendingRebind = null,
+                        message = "已重新绑定真实项目",
+                    )
+                    else -> state.value.copy(operationInProgress = false, error = result.message())
+                    }
+                }
+                ReferenceVerification.Invalid -> state.value.copy(
+                    operationInProgress = false,
+                    error = "无法校验真实项目，请重试。",
+                )
+            }
+        }
+    }
 
     fun deleteFolder(nodeId: String, confirmed: Boolean) = mutate(confirmationNodeId = nodeId) {
         store.deleteFolder(nodeId, confirmed)
@@ -273,6 +389,26 @@ class VirtualViewViewModel(
         return reverse.asReversed()
     }
 
+    private suspend fun verifyReference(
+        reference: VirtualViewNode.RealReference,
+        fileSystem: RootFileSystem,
+    ): ReferenceVerification {
+        val original = fileSystem.stat(reference.targetPath) as? OperationResult.Success
+            ?: return ReferenceVerification.Invalid
+        if (original.value.type != reference.entryType) return ReferenceVerification.Invalid
+        val canonical = fileSystem.canonicalize(reference.targetPath) as? OperationResult.Success
+            ?: return ReferenceVerification.Invalid
+        val canonicalEntry = fileSystem.stat(canonical.value) as? OperationResult.Success
+            ?: return ReferenceVerification.Invalid
+        if (canonicalEntry.value.type != reference.entryType || canonicalEntry.value.symbolicLink) {
+            return ReferenceVerification.Invalid
+        }
+        val identity = fileSystem.identity(canonical.value) as? OperationResult.Success
+            ?: return ReferenceVerification.Invalid
+        if (reference.identity != null && reference.identity != identity.value) return ReferenceVerification.Invalid
+        return ReferenceVerification.Valid(canonical.value, canonicalEntry.value, identity.value)
+    }
+
     private fun VirtualViewResult?.message(): String = when (this) {
         VirtualViewResult.InvalidName -> "名称不能为空或超过 120 个字符"
         VirtualViewResult.InvalidParent -> "真实文件和文件夹只能作为虚拟视图的最后一层，不能在其下添加内容。"
@@ -286,5 +422,14 @@ class VirtualViewViewModel(
     private sealed interface AddReferenceOutcome {
         data class Result(val value: VirtualViewResult) : AddReferenceOutcome
         data class Failure(val message: String) : AddReferenceOutcome
+    }
+
+    private sealed interface ReferenceVerification {
+        data class Valid(
+            val path: RootPath,
+            val entry: com.iamxpp.isaver.domain.DirectoryEntry,
+            val identity: RootEntryIdentity,
+        ) : ReferenceVerification
+        data object Invalid : ReferenceVerification
     }
 }

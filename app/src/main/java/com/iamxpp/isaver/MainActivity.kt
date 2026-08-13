@@ -19,6 +19,7 @@ import com.iamxpp.isaver.data.local.BrowserSessionStore
 import com.iamxpp.isaver.data.root.RootFileSystem
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.EntryType
+import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.export.ExternalOpenIntentFactory
 import com.iamxpp.isaver.export.ExternalShareIntentFactory
 import kotlinx.coroutines.CoroutineDispatcher
@@ -82,7 +83,7 @@ class MainActivity : ComponentActivity() {
             trashRepository = app.trashRepository,
             checksumFile = app.fileChecksumRepository::sha256,
             checksumFileByAlgorithm = { entry, algorithm -> app.fileChecksumRepository.checksum(entry, algorithm) },
-            bookmarkRepository = app.bookmarkRepository,
+            virtualViewRepository = app.virtualViewRepository,
             browserSessionStore = app.browserSessionStore,
             previewRepository = RootPreviewRepository(app.rootFileSystem),
         )
@@ -194,6 +195,20 @@ class MainActivity : ComponentActivity() {
                             ?: homeState.selectedTab
                         homeViewModel.openArchive(archive.path, archive.name, sourceTab)
                         browserViewModel.consumeArchiveOpen()
+                    }
+
+                    LaunchedEffect(virtualViewState.verifiedReference) {
+                        val verified = virtualViewState.verifiedReference ?: return@LaunchedEffect
+                        when (verified.entry.type) {
+                            EntryType.DIRECTORY -> homeViewModel.openLocation(
+                                verified.entry.path,
+                                verified.displayName,
+                                HomeTab.VIEWS,
+                                recordAccess = false,
+                            )
+                            EntryType.FILE, EntryType.OTHER -> browserViewModel.openEntry(verified.entry)
+                        }
+                        virtualViewViewModel.consumeVerifiedReference()
                     }
 
                     LaunchedEffect(browserState.externalFileToOpen) {
@@ -400,15 +415,24 @@ class MainActivity : ComponentActivity() {
                         onRevalidateCustomLocation = locationHomeViewModel::revalidateCustomLocation,
                         virtualViewState = virtualViewState,
                         onOpenVirtualFolder = virtualViewViewModel::openFolder,
-                        onOpenVirtualReference = { reference ->
-                            if (reference.entryType == EntryType.DIRECTORY && reference.available) {
-                                homeViewModel.openLocation(
-                                    reference.targetPath,
-                                    reference.displayName,
-                                    HomeTab.VIEWS,
-                                    recordAccess = false,
-                                )
-                            }
+                        onOpenVirtualReference = virtualViewViewModel::openReference,
+                        onRetryVirtualReference = virtualViewViewModel::openReference,
+                        onAddVirtualReferenceAgain = { reference ->
+                            virtualViewViewModel.beginAddReference(
+                                reference.targetPath,
+                                reference.displayName,
+                                reference.entryType,
+                            )
+                        },
+                        onRebindVirtualReference = { reference ->
+                            virtualViewViewModel.beginRebind(reference)
+                            val parentValue = reference.targetPath.value.substringBeforeLast('/', "").ifEmpty { "/" }
+                            val parent = RootPath.parse(parentValue).getOrNull() ?: RootPath.parse("/").getOrThrow()
+                            homeViewModel.openLocation(parent, "重新定位", HomeTab.VIEWS, recordAccess = false)
+                        },
+                        onConfirmRebindVirtualReference = { entry ->
+                            virtualViewViewModel.confirmRebind(entry)
+                            homeViewModel.selectTab(HomeTab.VIEWS)
                         },
                         onNavigateVirtual = virtualViewViewModel::navigateTo,
                         onCreateVirtualFolder = virtualViewViewModel::createFolder,
@@ -625,6 +649,7 @@ internal class BrowserViewModelFactory(
     private val operationTaskStore: com.iamxpp.isaver.tasks.OperationTaskStore? = null,
     private val trashRepository: com.iamxpp.isaver.trash.TrashRepository? = null,
     private val bookmarkRepository: com.iamxpp.isaver.bookmarks.BookmarkRepository? = null,
+    private val virtualViewRepository: com.iamxpp.isaver.virtualviews.VirtualViewRepository? = null,
     private val browserSessionStore: BrowserSessionStore? = null,
     private val previewRepository: RootPreviewRepository? = null,
     private val checksumFile: suspend (com.iamxpp.isaver.domain.DirectoryEntry) -> OperationResult<String> = {
@@ -691,6 +716,11 @@ internal class BrowserViewModelFactory(
             bookmarkRepository = bookmarkRepository,
             browserSessionStore = browserSessionStore,
             previewRepository = previewRepository ?: RootPreviewRepository(fileSystem),
+            relocateVirtualReferences = { oldIdentity, output ->
+                val newIdentity = (fileSystem.identity(output.path) as? OperationResult.Success)?.value
+                    ?: return@BrowserViewModel
+                virtualViewRepository?.relocateReferences(oldIdentity, output.path, output.type, newIdentity)
+            },
         ) as T
     }
 }

@@ -114,6 +114,71 @@ class VirtualViewRepositoryTest {
         assertEquals(listOf(userFolder), repository.observeChildren(null).first().map { it.id })
     }
 
+    @Test
+    fun `relocating an identity updates every reference and preserves organization`() = runTest {
+        val firstFolder = repository.createFolder(null, "工作").idOrThrow()
+        val secondFolder = repository.createFolder(null, "常用").idOrThrow()
+        val oldPath = root("/data/local/tmp/old.txt")
+        val newPath = root("/data/local/tmp/new.txt")
+        val oldIdentity = RootEntryIdentity(8, 9)
+        val newIdentity = RootEntryIdentity(8, 9)
+        repository.addReference(firstFolder, oldPath, EntryType.FILE, oldIdentity, "报告").idOrThrow()
+        repository.addReference(secondFolder, oldPath, EntryType.FILE, oldIdentity, "重点报告").idOrThrow()
+
+        assertIs<VirtualViewResult.Success>(
+            repository.relocateReferences(oldIdentity, newPath, EntryType.FILE, newIdentity),
+        )
+
+        val references = listOf(firstFolder, secondFolder).map {
+            repository.observeChildren(it).first().single() as VirtualViewNode.RealReference
+        }
+        assertEquals(listOf("报告", "重点报告"), references.map { it.displayName })
+        assertEquals(listOf(firstFolder, secondFolder), references.map { it.parentId })
+        assertTrue(references.all { it.targetPath == newPath && it.identity == newIdentity && it.available })
+    }
+
+    @Test
+    fun `availability changes only matching identity references`() = runTest {
+        val folder = repository.createFolder(null, "工作").idOrThrow()
+        val path = root("/data/local/tmp/report.txt")
+        val expected = RootEntryIdentity(8, 9)
+        repository.addReference(folder, path, EntryType.FILE, expected, "报告").idOrThrow()
+
+        repository.setReferencesAvailability(expected, false)
+
+        val reference = repository.observeChildren(folder).first().single() as VirtualViewNode.RealReference
+        assertEquals(false, reference.available)
+    }
+
+    @Test
+    fun `rebind rejects a duplicate target in the same virtual folder`() = runTest {
+        val folder = repository.createFolder(null, "工作").idOrThrow()
+        val oldPath = root("/data/local/tmp/old.txt")
+        val existingPath = root("/data/local/tmp/existing.txt")
+        val reference = repository.addReference(
+            folder,
+            oldPath,
+            EntryType.FILE,
+            RootEntryIdentity(8, 9),
+            "旧报告",
+        ).idOrThrow()
+        repository.addReference(
+            folder,
+            existingPath,
+            EntryType.FILE,
+            RootEntryIdentity(8, 10),
+            "已有报告",
+        ).idOrThrow()
+
+        assertIs<VirtualViewResult.DuplicateReference>(
+            repository.rebindReference(reference, existingPath, EntryType.FILE, RootEntryIdentity(8, 10)),
+        )
+
+        val unchanged = repository.findNode(reference) as VirtualViewNode.RealReference
+        assertEquals(oldPath, unchanged.targetPath)
+        assertEquals("旧报告", unchanged.displayName)
+    }
+
     private fun VirtualViewResult.idOrThrow(): String = (this as VirtualViewResult.Success).nodeId
 
     private inline fun <reified T> assertIs(value: Any?) {

@@ -19,6 +19,7 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.FolderName
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.domain.RootPath
+import com.iamxpp.isaver.domain.RootEntryIdentity
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
 import com.iamxpp.isaver.export.ExternalFileGrant
 import com.iamxpp.isaver.fileops.ConflictAction
@@ -93,6 +94,7 @@ class BrowserViewModel(
     private val browserSessionStore: BrowserSessionStore? = null,
     private val localSearchRepository: LocalSearchRepository = LocalSearchRepository(rootFileSystem),
     private val previewRepository: RootPreviewRepository = RootPreviewRepository(rootFileSystem),
+    private val relocateVirtualReferences: suspend (RootEntryIdentity, DirectoryEntry) -> Unit = { _, _ -> },
 ) : ViewModel() {
     private val initialPath = RootPath.parse(INITIAL_PATH).getOrThrow()
     private var selectedRootPath = initialPath
@@ -613,6 +615,9 @@ class BrowserViewModel(
                 for (index in startIndex until selection.entries.size) {
                     awaitTaskResume(taskId, completed.size, completed.knownBytes())
                     val entry = selection.entries[index]
+                    val sourceIdentity = withContext(ioDispatcher) {
+                        (rootFileSystem.identity(entry.path) as? OperationResult.Success)?.value
+                    }
                     val action = if (index == startIndex) currentAction else ConflictAction.CANCEL
                     when (
                         val result = withContext(ioDispatcher) {
@@ -632,6 +637,7 @@ class BrowserViewModel(
                                     is OperationResult.Success -> {
                                         completed += kept.value
                                         relocateBookmark(entry, kept.value)
+                                        sourceIdentity?.let { relocateVirtualReferences(it, kept.value) }
                                         mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                                         recordSuccessfulFileAccess(kept.value)
                                         updateRunningTask(taskId, completed.size, completed.knownBytes())
@@ -688,6 +694,7 @@ class BrowserViewModel(
                         is OperationResult.Success -> {
                             completed += result.value
                             relocateBookmark(entry, result.value)
+                            sourceIdentity?.let { relocateVirtualReferences(it, result.value) }
                             mutableState.value = mutableState.value.copy(moveCompletedCount = completed.size)
                             recordSuccessfulFileAccess(result.value)
                             updateRunningTask(taskId, completed.size, completed.knownBytes())
@@ -1009,6 +1016,9 @@ class BrowserViewModel(
         )
         renameFileJob = viewModelScope.launch {
             try {
+                val sourceIdentity = withContext(ioDispatcher) {
+                    (rootFileSystem.identity(entry.path) as? OperationResult.Success)?.value
+                }
                 when (val result = withContext(ioDispatcher) { renameFile(entry, parent, newName) }) {
                     is OperationResult.Failure -> mutableState.value = mutableState.value.copy(
                         renamingFile = false,
@@ -1016,6 +1026,7 @@ class BrowserViewModel(
                     )
                     is OperationResult.Success -> {
                         relocateBookmark(entry, result.value)
+                        sourceIdentity?.let { relocateVirtualReferences(it, result.value) }
                         mutableState.value = mutableState.value.copy(
                             selectedEntries = emptySet(),
                             renamingFile = false,

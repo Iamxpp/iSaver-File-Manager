@@ -90,6 +90,9 @@ fun LocationHomeScreen(
     onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit = { reference ->
         if (reference.entryType == EntryType.DIRECTORY) onOpenLocation(reference.targetPath, reference.displayName)
     },
+    onRetryVirtualReference: (VirtualViewNode.RealReference) -> Unit = {},
+    onAddVirtualReferenceAgain: (VirtualViewNode.RealReference) -> Unit = {},
+    onRebindVirtualReference: (VirtualViewNode.RealReference) -> Unit = {},
     onNavigateVirtual: (String?) -> Unit = {},
     onCreateVirtualFolder: ((String) -> Unit)? = null,
     onRenameVirtualNode: (String, String) -> Unit = { _, _ -> },
@@ -213,6 +216,22 @@ fun LocationHomeScreen(
             operationInProgress = virtualViewState?.operationInProgress == true,
             onRename = { name -> onRenameVirtualNode(node.id, name); managedVirtualNode = null },
             onMove = { folderId -> onMoveVirtualNode(node.id, folderId); managedVirtualNode = null },
+            onOpen = {
+                if (node is VirtualViewNode.RealReference) onOpenVirtualReference(node)
+                managedVirtualNode = null
+            },
+            onRetry = {
+                if (node is VirtualViewNode.RealReference) onRetryVirtualReference(node)
+                managedVirtualNode = null
+            },
+            onAddAgain = {
+                if (node is VirtualViewNode.RealReference) onAddVirtualReferenceAgain(node)
+                managedVirtualNode = null
+            },
+            onRebind = {
+                if (node is VirtualViewNode.RealReference) onRebindVirtualReference(node)
+                managedVirtualNode = null
+            },
             onRemove = {
                 when (node) {
                     is VirtualViewNode.VirtualFolder -> onDeleteVirtualFolder(node.id, false)
@@ -542,6 +561,10 @@ private fun VirtualNodeManagementDialog(
     operationInProgress: Boolean,
     onRename: (String) -> Unit,
     onMove: (String?) -> Unit,
+    onOpen: () -> Unit,
+    onRetry: () -> Unit,
+    onAddAgain: () -> Unit,
+    onRebind: () -> Unit,
     onRemove: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -552,11 +575,32 @@ private fun VirtualNodeManagementDialog(
             Surface(shape = MaterialTheme.shapes.medium, color = ISaverCard) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                     Text(node.displayName, color = ISaverPrimaryText, modifier = Modifier.padding(20.dp, 12.dp))
+                    if (node is VirtualViewNode.RealReference) {
+                        TextButton(enabled = !operationInProgress, onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+                            Text("打开")
+                        }
+                    }
                     TextButton(enabled = !operationInProgress, onClick = { renameVisible = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("编辑备注")
                     }
                     TextButton(enabled = !operationInProgress, onClick = { moveVisible = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("移动到")
+                    }
+                    if (node is VirtualViewNode.RealReference) {
+                        TextButton(enabled = !operationInProgress, onClick = onAddAgain, modifier = Modifier.fillMaxWidth()) {
+                            Text("再添加到其他位置")
+                        }
+                        TextButton(enabled = !operationInProgress, onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                            Text("重试校验")
+                        }
+                        TextButton(enabled = !operationInProgress, onClick = onRebind, modifier = Modifier.fillMaxWidth()) {
+                            Text("重新定位")
+                        }
+                        Text(
+                            "${if (node.available) "可用" else "不可用"} · ${node.targetPath.value}",
+                            color = ISaverSecondaryText,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
                     }
                     TextButton(enabled = !operationInProgress, onClick = onRemove, modifier = Modifier.fillMaxWidth()) {
                         Text(if (node is VirtualViewNode.VirtualFolder) "移除虚拟文件夹" else "从虚拟视图移除", color = MaterialTheme.colorScheme.error)

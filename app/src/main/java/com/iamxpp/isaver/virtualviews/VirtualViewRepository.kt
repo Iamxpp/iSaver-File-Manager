@@ -163,6 +163,65 @@ class VirtualViewRepository internal constructor(
             VirtualViewResult.NotFound
         }
 
+    suspend fun relocateReferences(
+        oldIdentity: RootEntryIdentity,
+        newPath: RootPath,
+        type: EntryType,
+        newIdentity: RootEntryIdentity,
+    ): VirtualViewResult = database.withTransaction {
+        if (type != EntryType.FILE && type != EntryType.DIRECTORY) return@withTransaction VirtualViewResult.InvalidNode
+        dao.relocateByIdentity(
+            oldIdentity.device,
+            oldIdentity.inode,
+            newPath.value,
+            type.name,
+            newIdentity.device,
+            newIdentity.inode,
+            clock(),
+        )
+        VirtualViewResult.Success("identity:${oldIdentity.device}:${oldIdentity.inode}")
+    }
+
+    suspend fun setReferencesAvailability(identity: RootEntryIdentity, available: Boolean): VirtualViewResult {
+        dao.setAvailabilityByIdentity(identity.device, identity.inode, available, clock())
+        return VirtualViewResult.Success("identity:${identity.device}:${identity.inode}")
+    }
+
+    suspend fun rebindReference(
+        nodeId: String,
+        path: RootPath,
+        type: EntryType,
+        identity: RootEntryIdentity,
+    ): VirtualViewResult = database.withTransaction {
+        if (type != EntryType.FILE && type != EntryType.DIRECTORY) return@withTransaction VirtualViewResult.InvalidNode
+        val node = dao.findById(nodeId) ?: return@withTransaction VirtualViewResult.NotFound
+        if (node.nodeType != VirtualViewNodeType.REAL_REFERENCE.name) {
+            return@withTransaction VirtualViewResult.InvalidNode
+        }
+        val parentId = node.parentId ?: return@withTransaction VirtualViewResult.InvalidParent
+        val duplicate = dao.findReference(parentId, path.value, type.name)
+        if (duplicate != null && duplicate.id != nodeId) {
+            return@withTransaction VirtualViewResult.DuplicateReference
+        }
+        try {
+            if (dao.rebindReference(
+                    nodeId,
+                    path.value,
+                    type.name,
+                    identity.device,
+                    identity.inode,
+                    clock(),
+                ) == 1
+            ) {
+                VirtualViewResult.Success(nodeId)
+            } else {
+                VirtualViewResult.NotFound
+            }
+        } catch (_: SQLiteConstraintException) {
+            VirtualViewResult.DuplicateReference
+        }
+    }
+
     suspend fun cleanupEmptyLegacyMigrationFolder() {
         dao.deleteEmptyFolderById(MIGRATED_UNGROUPED_ID)
     }

@@ -129,15 +129,126 @@ class VirtualViewViewModelTest {
         assertEquals(source, vm.state.value.pendingReference?.path)
     }
 
+    @Test
+    fun `opening a valid reference emits a verified real entry`() = runTest {
+        val store = FakeVirtualViewStore()
+        val path = RootPath.parse("/data/local/tmp/report.txt").getOrThrow()
+        val identity = RootEntryIdentity(12, 34)
+        store.root.value = listOf(folder("folder"))
+        store.children("folder").value = listOf(reference("ref", "folder", path, identity))
+        val fileSystem = FakeRootFileSystem(entry(path, EntryType.FILE), path, entry(path, EntryType.FILE), identity)
+        val vm = VirtualViewViewModel(store, fileSystem, StandardTestDispatcher(testScheduler))
+        testScheduler.runCurrent()
+
+        vm.openReference(store.children("folder").value.single() as VirtualViewNode.RealReference)
+        testScheduler.runCurrent()
+
+        assertEquals(path, vm.state.value.verifiedReference?.entry?.path)
+        assertEquals("ref", vm.state.value.verifiedReference?.nodeId)
+        vm.consumeVerifiedReference()
+        assertNull(vm.state.value.verifiedReference)
+    }
+
+    @Test
+    fun `opening a replaced path keeps the reference and marks it unavailable`() = runTest {
+        val store = FakeVirtualViewStore()
+        val path = RootPath.parse("/data/local/tmp/report.txt").getOrThrow()
+        val expected = RootEntryIdentity(12, 34)
+        store.root.value = listOf(folder("folder"))
+        store.children("folder").value = listOf(reference("ref", "folder", path, expected))
+        val fileSystem = FakeRootFileSystem(
+            entry(path, EntryType.FILE), path, entry(path, EntryType.FILE), RootEntryIdentity(12, 99),
+        )
+        val vm = VirtualViewViewModel(store, fileSystem, StandardTestDispatcher(testScheduler))
+        testScheduler.runCurrent()
+
+        vm.openReference(store.children("folder").value.single() as VirtualViewNode.RealReference)
+        testScheduler.runCurrent()
+
+        assertEquals("ref" to false, store.availabilityChange)
+        assertNull(vm.state.value.verifiedReference)
+        assertTrue(vm.state.value.error!!.contains("移动、删除或被替换"))
+    }
+
+    @Test
+    fun `rebind accepts a verified candidate with the same type`() = runTest {
+        val store = FakeVirtualViewStore()
+        val oldPath = RootPath.parse("/data/local/tmp/old.txt").getOrThrow()
+        val newPath = RootPath.parse("/data/local/tmp/new.txt").getOrThrow()
+        val identity = RootEntryIdentity(12, 56)
+        val reference = reference("ref", "folder", oldPath, RootEntryIdentity(12, 34))
+        val candidate = entry(newPath, EntryType.FILE)
+        val fileSystem = FakeRootFileSystem(candidate, newPath, candidate, identity)
+        val vm = VirtualViewViewModel(store, fileSystem, StandardTestDispatcher(testScheduler))
+        testScheduler.runCurrent()
+
+        vm.beginRebind(reference)
+        vm.confirmRebind(candidate)
+        testScheduler.runCurrent()
+
+        assertEquals(RebindRequest("ref", newPath, EntryType.FILE, identity), store.rebindRequest)
+        assertNull(vm.state.value.pendingRebind)
+        assertEquals("已重新绑定真实项目", vm.state.value.message)
+    }
+
+    @Test
+    fun `rebind rejects a candidate with a different type`() = runTest {
+        val store = FakeVirtualViewStore()
+        val oldPath = RootPath.parse("/data/local/tmp/old.txt").getOrThrow()
+        val newPath = RootPath.parse("/data/local/tmp/new-folder").getOrThrow()
+        val reference = reference("ref", "folder", oldPath, RootEntryIdentity(12, 34))
+        val candidate = entry(newPath, EntryType.DIRECTORY)
+        val fileSystem = FakeRootFileSystem(candidate, newPath, candidate, RootEntryIdentity(12, 56))
+        val vm = VirtualViewViewModel(store, fileSystem, StandardTestDispatcher(testScheduler))
+        testScheduler.runCurrent()
+
+        vm.beginRebind(reference)
+        vm.confirmRebind(candidate)
+        testScheduler.runCurrent()
+
+        assertNull(store.rebindRequest)
+        assertEquals("ref", vm.state.value.pendingRebind?.nodeId)
+        assertTrue(vm.state.value.error!!.contains("类型必须与原引用一致"))
+    }
+
+    @Test
+    fun `root validation failure keeps rebind pending for retry`() = runTest {
+        val store = FakeVirtualViewStore()
+        val oldPath = RootPath.parse("/data/local/tmp/old.txt").getOrThrow()
+        val newPath = RootPath.parse("/data/local/tmp/new.txt").getOrThrow()
+        val reference = reference("ref", "folder", oldPath, RootEntryIdentity(12, 34))
+        val candidate = entry(newPath, EntryType.FILE)
+        val fileSystem = FakeRootFileSystem(
+            candidate,
+            newPath,
+            candidate,
+            RootEntryIdentity(12, 56),
+            failStat = true,
+        )
+        val vm = VirtualViewViewModel(store, fileSystem, StandardTestDispatcher(testScheduler))
+        testScheduler.runCurrent()
+
+        vm.beginRebind(reference)
+        vm.confirmRebind(candidate)
+        testScheduler.runCurrent()
+
+        assertNull(store.rebindRequest)
+        assertEquals("ref", vm.state.value.pendingRebind?.nodeId)
+        assertEquals("无法校验真实项目，请重试。", vm.state.value.error)
+    }
+
     private class FakeVirtualViewStore : VirtualViewStore {
         val root = MutableStateFlow<List<VirtualViewNode>>(emptyList())
         private val childFlows = mutableMapOf<String, MutableStateFlow<List<VirtualViewNode>>>()
         var deleteResult: VirtualViewResult? = null
         var addResult: VirtualViewResult? = null
+        var rebindResult: VirtualViewResult? = null
         var addedPath: RootPath? = null
         var addedType: EntryType? = null
         var addedIdentity: RootEntryIdentity? = null
         var addedName: String? = null
+        var availabilityChange: Pair<String, Boolean>? = null
+        var rebindRequest: RebindRequest? = null
         private var nextId = 0
 
         override fun observeChildren(parentFolderId: String?): Flow<List<VirtualViewNode>> =
@@ -159,6 +270,19 @@ class VirtualViewViewModelTest {
         override suspend fun deleteFolder(nodeId: String, confirmed: Boolean) =
             deleteResult ?: VirtualViewResult.Success(nodeId)
         override suspend fun removeReference(nodeId: String) = VirtualViewResult.Success(nodeId)
+        override suspend fun setReferenceAvailability(nodeId: String, available: Boolean): VirtualViewResult {
+            availabilityChange = nodeId to available
+            return VirtualViewResult.Success(nodeId)
+        }
+        override suspend fun rebindReference(
+            nodeId: String,
+            path: RootPath,
+            type: EntryType,
+            identity: RootEntryIdentity,
+        ): VirtualViewResult {
+            rebindRequest = RebindRequest(nodeId, path, type, identity)
+            return rebindResult ?: VirtualViewResult.Success(nodeId)
+        }
         override suspend fun addReference(
             targetFolderId: String,
             path: RootPath,
@@ -172,6 +296,7 @@ class VirtualViewViewModelTest {
             addedName = displayName
             return addResult ?: VirtualViewResult.Success("reference")
         }
+        fun children(id: String) = childFlows.getOrPut(id) { MutableStateFlow(emptyList()) }
     }
 
     private class FakeRootFileSystem(
@@ -179,10 +304,15 @@ class VirtualViewViewModelTest {
         private val canonicalPath: RootPath,
         private val canonicalEntry: DirectoryEntry,
         private val identity: RootEntryIdentity,
+        private val failStat: Boolean = false,
     ) : RootFileSystem {
         private var statCalls = 0
         override suspend fun stat(path: RootPath): OperationResult<DirectoryEntry> =
-            OperationResult.Success(if (statCalls++ == 0) statEntry else canonicalEntry)
+            if (failStat) {
+                OperationResult.Failure(com.iamxpp.isaver.domain.ErrorCode.NOT_FOUND, "路径不存在")
+            } else {
+                OperationResult.Success(if (statCalls++ == 0) statEntry else canonicalEntry)
+            }
         override suspend fun canonicalize(path: RootPath) = OperationResult.Success(canonicalPath)
         override suspend fun identity(path: RootPath) = OperationResult.Success(identity)
         override suspend fun createDirectory(parent: RootPath, name: com.iamxpp.isaver.domain.FolderName) =
@@ -190,6 +320,13 @@ class VirtualViewViewModelTest {
     }
 
     private companion object {
+        data class RebindRequest(
+            val nodeId: String,
+            val path: RootPath,
+            val type: EntryType,
+            val identity: RootEntryIdentity,
+        )
+
         fun entry(path: RootPath, type: EntryType) = DirectoryEntry(
             path = path,
             name = path.value.substringAfterLast('/'),
@@ -200,5 +337,11 @@ class VirtualViewViewModelTest {
             writable = true,
             symbolicLink = false,
         )
+        fun folder(id: String) = VirtualViewNode.VirtualFolder(id, null, id, 0, 1, 1)
+        fun reference(id: String, parentId: String, path: RootPath, identity: RootEntryIdentity?) =
+            VirtualViewNode.RealReference(
+                id, parentId, path.value.substringAfterLast('/'), path, EntryType.FILE,
+                identity, true, 0, 1, 1,
+            )
     }
 }
