@@ -50,7 +50,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -61,9 +60,6 @@ import com.iamxpp.isaver.fileops.ConflictAction
 import com.iamxpp.isaver.fileops.BatchRenameCase
 import com.iamxpp.isaver.fileops.BatchRenameMode
 import com.iamxpp.isaver.fileops.BatchRenameRule
-import com.iamxpp.isaver.remote.RemoteConnectionDraft
-import com.iamxpp.isaver.remote.RemoteConnectionUiState
-import com.iamxpp.isaver.remote.RemoteProtocol
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FileGridCell
 import com.iamxpp.isaver.ui.files.FileListRow
@@ -174,11 +170,6 @@ fun BrowserScreen(
     onDismissCreateError: () -> Unit = {},
     onDismissCreateFileError: () -> Unit = {},
     onCompress: ((String, ArchiveFormat) -> Unit)? = null,
-    onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
-    remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
-    onDismissRemoteMessage: () -> Unit = {},
-    onRefreshRemote: () -> Unit = {},
-    onCreateRemoteDirectory: (String) -> Unit = {},
     saveAction: FilesSaveAction? = null,
     fileActionsEnabled: Boolean = true,
     selectionOnlyLongPress: Boolean = false,
@@ -190,7 +181,6 @@ fun BrowserScreen(
     var createDialogVisible by remember { mutableStateOf(false) }
     var createFileDialogVisible by remember { mutableStateOf(false) }
     var compressDialogVisible by remember { mutableStateOf(false) }
-    var serverDialogVisible by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var renameDialogEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var batchRenameDialogVisible by remember { mutableStateOf(false) }
@@ -256,16 +246,11 @@ fun BrowserScreen(
                         menuExpanded = false
                         if (onCompress != null) compressDialogVisible = true
                     },
-                    onConnectServer = {
-                        menuExpanded = false
-                        if (onConnectServer != null) serverDialogVisible = true
-                    },
                     canCreateFolder = state.canCreateDirectory && !state.creatingDirectory && !state.creatingFile,
                     canCreateFile = state.canCreateDirectory && !state.creatingDirectory && !state.creatingFile,
                     canCompress = onCompress != null &&
                         state.selectedEntries.isNotEmpty() &&
                         !state.compressing,
-                    canConnectServer = onConnectServer != null,
                     onAddLocation = onAddCurrentToVirtualView?.let { add ->
                         {
                             menuExpanded = false
@@ -415,15 +400,6 @@ fun BrowserScreen(
             onConfirm = { name, format ->
                 compressDialogVisible = false
                 onCompress?.invoke(name, format)
-            },
-        )
-    }
-    if (serverDialogVisible) {
-        ServerConnectionDialog(
-            onDismiss = { serverDialogVisible = false },
-            onConfirm = { draft ->
-                serverDialogVisible = false
-                onConnectServer?.invoke(draft)
             },
         )
     }
@@ -649,21 +625,6 @@ fun BrowserScreen(
                 }
             },
         )
-    }
-    when (remoteConnectionState) {
-        is RemoteConnectionUiState.Connected -> RemoteBrowserDialog(
-            state = remoteConnectionState,
-            onRefresh = onRefreshRemote,
-            onCreateDirectory = onCreateRemoteDirectory,
-            onDismiss = onDismissRemoteMessage,
-        )
-        is RemoteConnectionUiState.Error -> MessageDialog(
-            remoteConnectionState.message,
-            "关闭",
-            onDismissRemoteMessage,
-        )
-        RemoteConnectionUiState.Connecting,
-        RemoteConnectionUiState.Idle -> Unit
     }
 }
 
@@ -1782,145 +1743,6 @@ private fun CompressDialog(onDismiss: () -> Unit, onConfirm: (String, ArchiveFor
                 },
                 enabled = name.isNotBlank(),
             ) { Text("确定") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
-}
-
-@Composable
-private fun RemoteBrowserDialog(
-    state: RemoteConnectionUiState.Connected,
-    onRefresh: () -> Unit,
-    onCreateDirectory: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var folderName by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("远程：${state.host}") },
-        text = {
-            Column {
-                Text("路径：${state.path.value}", color = ISaverSecondaryText)
-                LazyColumn(Modifier.heightIn(max = 260.dp)) {
-                    items(state.entries, key = { it.path.value }) { entry ->
-                        Text(
-                            text = if (entry.directory) "📁 ${entry.name}" else entry.name,
-                            color = com.iamxpp.isaver.ui.theme.ISaverPrimaryText,
-                            modifier = Modifier.padding(vertical = 6.dp),
-                        )
-                    }
-                }
-                TextField(
-                    value = folderName,
-                    onValueChange = { folderName = it },
-                    label = { Text("新建远程文件夹") },
-                    singleLine = true,
-                )
-                TextButton(onClick = onRefresh) { Text("刷新") }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = folderName.isNotBlank(),
-                onClick = {
-                    onCreateDirectory(folderName)
-                    folderName = ""
-                },
-            ) { Text("新建") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
-}
-
-@Composable
-private fun ServerConnectionDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (RemoteConnectionDraft) -> Unit,
-) {
-    var protocol by remember { mutableStateOf(RemoteProtocol.SFTP) }
-    var host by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf(protocol.defaultPort.toString()) }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var fingerprint by remember { mutableStateOf("") }
-    var allowPlaintext by remember { mutableStateOf(false) }
-    val secure = protocol != RemoteProtocol.FTP
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("连接服务器") },
-        text = {
-            Column {
-                Row {
-                    RemoteProtocol.entries.forEach { option ->
-                        TextButton(onClick = {
-                            protocol = option
-                            port = option.defaultPort.toString()
-                        }) { Text(option.name) }
-                    }
-                }
-                TextField(
-                    value = host,
-                    onValueChange = { host = it },
-                    label = { Text("服务器地址") },
-                    singleLine = true,
-                    modifier = Modifier.semantics { contentDescription = "服务器地址" },
-                )
-                TextField(
-                    value = port,
-                    onValueChange = { port = it.filter(Char::isDigit) },
-                    label = { Text("端口") },
-                    singleLine = true,
-                )
-                TextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("用户名") },
-                    singleLine = true,
-                    modifier = Modifier.semantics { contentDescription = "用户名" },
-                )
-                TextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("密码") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.semantics { contentDescription = "密码" },
-                )
-                if (secure) {
-                    TextField(
-                        value = fingerprint,
-                        onValueChange = { fingerprint = it },
-                        label = { Text(if (protocol == RemoteProtocol.SFTP) "主机密钥指纹" else "证书指纹") },
-                        singleLine = true,
-                        modifier = Modifier.semantics { contentDescription = "安全指纹" },
-                    )
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = allowPlaintext, onCheckedChange = { allowPlaintext = it })
-                        Text("我了解普通 FTP 可能明文传输")
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = host.isNotBlank() && username.isNotBlank() && password.isNotEmpty() &&
-                    (port.toIntOrNull() ?: 0) in 1..65_535 &&
-                    (secure && fingerprint.isNotBlank() || !secure && allowPlaintext),
-                onClick = {
-                    onConfirm(
-                        RemoteConnectionDraft(
-                            protocol = protocol,
-                            host = host,
-                            port = port.toIntOrNull() ?: protocol.defaultPort,
-                            username = username,
-                            password = password,
-                            fingerprint = fingerprint,
-                            allowPlaintext = allowPlaintext,
-                        ),
-                    )
-                },
-            ) { Text("连接") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )

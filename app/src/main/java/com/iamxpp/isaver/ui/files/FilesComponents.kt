@@ -56,7 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.iamxpp.isaver.ReleaseFeatures
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.ui.theme.ISaverBackground
@@ -426,11 +425,9 @@ fun FilesOverflowMenu(
     onCreateFolder: () -> Unit,
     onCreateFile: (() -> Unit)? = null,
     onCompress: () -> Unit,
-    onConnectServer: () -> Unit,
     canCreateFolder: Boolean,
     canCreateFile: Boolean = false,
     canCompress: Boolean,
-    canConnectServer: Boolean,
     onAddLocation: (() -> Unit)? = null,
     addLocationLabel: String = "添加位置",
     onOpenTasks: (() -> Unit)? = null,
@@ -483,13 +480,6 @@ fun FilesOverflowMenu(
             enabled = canCompress,
             onClick = onCompress,
         )
-        if (ReleaseFeatures.remoteServers) {
-            FilesMenuItem(
-                text = "连接服务器",
-                enabled = canConnectServer,
-                onClick = onConnectServer,
-            )
-        }
         if (showDisplayModes) {
             HorizontalDivider(color = ISaverDivider)
             DisplayMode.entries.forEach { mode ->

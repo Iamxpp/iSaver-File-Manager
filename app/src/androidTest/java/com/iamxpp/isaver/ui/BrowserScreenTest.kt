@@ -938,7 +938,6 @@ class BrowserScreenTest {
             BrowserScreen(
                 state = state(),
                 onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
-                onConnectServer = {},
             )
         }
         compose.onNodeWithContentDescription("更多操作").performClick()

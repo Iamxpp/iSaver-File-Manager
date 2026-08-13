@@ -15,8 +15,6 @@ import com.iamxpp.isaver.fileops.BatchRenameRule
 import com.iamxpp.isaver.trash.TrashItem
 import com.iamxpp.isaver.locations.LocationId
 import com.iamxpp.isaver.transfer.TransferUiState
-import com.iamxpp.isaver.remote.RemoteConnectionDraft
-import com.iamxpp.isaver.remote.RemoteConnectionUiState
 import com.iamxpp.isaver.ui.files.DisplayMode
 import com.iamxpp.isaver.ui.files.FilesBottomBar
 import com.iamxpp.isaver.ui.files.FilesSaveAction
@@ -157,11 +155,6 @@ fun ISaverHomeScreen(
     onDismissFileRenameError: () -> Unit = {},
     onCompress: (String, ArchiveFormat) -> Unit = { _, _ -> },
     onDismissCompressionMessage: () -> Unit = {},
-    onConnectServer: ((RemoteConnectionDraft) -> Unit)? = null,
-    remoteConnectionState: RemoteConnectionUiState = RemoteConnectionUiState.Idle,
-    onDismissRemoteMessage: () -> Unit = {},
-    onRefreshRemote: () -> Unit = {},
-    onCreateRemoteDirectory: (String) -> Unit = {},
     transferState: TransferUiState = TransferUiState.Idle,
     onSave: () -> Unit = {},
     onStemChange: (String) -> Unit = {},
@@ -386,11 +379,6 @@ fun ISaverHomeScreen(
                 onDismissFileRenameError = onDismissFileRenameError,
                 onCompress = onCompress,
                 onDismissCompressionMessage = onDismissCompressionMessage,
-                onConnectServer = onConnectServer,
-                remoteConnectionState = remoteConnectionState,
-                onDismissRemoteMessage = onDismissRemoteMessage,
-                onRefreshRemote = onRefreshRemote,
-                onCreateRemoteDirectory = onCreateRemoteDirectory,
                 saveAction = saveAction,
                 onOpenDualPane = if (saveMode) null else onOpenDualPane,
                 modifier = Modifier.weight(1f),

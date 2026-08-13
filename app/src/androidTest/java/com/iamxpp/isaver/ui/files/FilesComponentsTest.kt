@@ -316,10 +316,8 @@ class FilesComponentsTest {
                 onSortDirectionToggle = {},
                 onCreateFolder = {},
                 onCompress = {},
-                onConnectServer = {},
                 canCreateFolder = true,
                 canCompress = false,
-                canConnectServer = false,
             )
         }
 

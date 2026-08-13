@@ -52,8 +52,6 @@ import com.iamxpp.isaver.texteditor.TextEditorRepository
 import com.iamxpp.isaver.trash.TrashRepository
 import com.iamxpp.isaver.bookmarks.BookmarkRepository
 import com.iamxpp.isaver.virtualviews.VirtualViewRepository
-import com.iamxpp.isaver.remote.KeystoreCredentialStore
-import com.iamxpp.isaver.remote.RemoteFileSystemFactory
 import com.iamxpp.isaver.ui.LocationHomeAppResolver
 import com.iamxpp.isaver.ui.LocationHomeCustomStore
 import kotlinx.coroutines.CoroutineScope
@@ -250,8 +248,6 @@ class ISaverApplication : Application() {
     internal val operationTaskRepository: OperationTaskRepository by lazy {
         OperationTaskRepository(database.operationTaskDao())
     }
-    internal val remoteCredentialStore by lazy { KeystoreCredentialStore(this) }
-    internal val remoteFileSystemFactory by lazy { RemoteFileSystemFactory(remoteCredentialStore) }
     internal val transferDependencies: TransferDependencies by lazy {
         TransferDependencies(
             parseShare = shareIntentParser::parseAsync,

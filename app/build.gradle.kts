@@ -49,8 +49,6 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.junrar)
     implementation(libs.xz)
-    implementation(libs.commons.net)
-    implementation(libs.jsch)
     implementation(libs.androidx.tracing)
     ksp(libs.room.compiler)
     ksp(libs.hilt.compiler)

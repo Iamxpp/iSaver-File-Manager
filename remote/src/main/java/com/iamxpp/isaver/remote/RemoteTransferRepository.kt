@@ -1,6 +1,5 @@
 package com.iamxpp.isaver.remote
 
-import com.iamxpp.isaver.domain.EntryName
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -23,7 +22,7 @@ class RemoteTransferRepository(
         outputName: String,
     ): Flow<RemoteTransferEvent> = flow {
         emit(RemoteTransferEvent.Preparing)
-        val entryName = EntryName.parse(outputName).getOrElse {
+        val entryName = RemoteEntryName.parse(outputName).getOrElse {
             emit(RemoteTransferEvent.Failed("远程文件名无效"))
             return@flow
         }

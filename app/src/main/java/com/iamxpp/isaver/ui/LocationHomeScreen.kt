@@ -347,10 +347,8 @@ private fun LocationHomeHeader(
                     },
                     onCreateFolder = { menuExpanded = false },
                     onCompress = { menuExpanded = false },
-                    onConnectServer = { menuExpanded = false },
                     canCreateFolder = false,
                     canCompress = false,
-                    canConnectServer = false,
                     onAddLocation = {
                         menuExpanded = false
                         if (virtualMode) creatingVirtualFolder = true else onAdd()

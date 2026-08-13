@@ -47,7 +47,6 @@ import com.iamxpp.isaver.ui.recent.RecentViewModel
 import com.iamxpp.isaver.share.ShareSourceLocationResolver
 import com.iamxpp.isaver.transfer.TransferUiState
 import com.iamxpp.isaver.transfer.TransferViewModel
-import com.iamxpp.isaver.remote.RemoteConnectionViewModel
 import com.iamxpp.isaver.preview.RootPreviewRepository
 import com.iamxpp.isaver.ui.virtualviews.VirtualViewRepositoryStore
 import com.iamxpp.isaver.ui.virtualviews.VirtualViewViewModel
@@ -139,11 +138,6 @@ class MainActivity : ComponentActivity() {
         val app = application as ISaverApplication
         ArchiveViewModelFactory(app.archiveRepository, app.recentRepository, app.operationTaskRepository)
     }
-    private val remoteConnectionViewModel by viewModels<RemoteConnectionViewModel> {
-        val app = application as ISaverApplication
-        RemoteConnectionViewModelFactory(app.remoteCredentialStore, app.remoteFileSystemFactory)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (
@@ -177,7 +171,6 @@ class MainActivity : ComponentActivity() {
                     val fileToolsState by fileToolsViewModel.state.collectAsStateWithLifecycle()
                     val recentState by recentViewModel.state.collectAsStateWithLifecycle()
                     val archiveState by archiveViewModel.state.collectAsStateWithLifecycle()
-                    val remoteConnectionState by remoteConnectionViewModel.state.collectAsStateWithLifecycle()
                     val destination = homeState.destination
                     val pickerActive = transferState != TransferUiState.Idle
                     val movePickerActive = browserState.moveSelection != null
@@ -841,11 +834,6 @@ class MainActivity : ComponentActivity() {
                         onDismissFileRenameError = browserViewModel::dismissFileRenameError,
                         onCompress = browserViewModel::compress,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
-                        onConnectServer = remoteConnectionViewModel::connect,
-                        remoteConnectionState = remoteConnectionState,
-                        onDismissRemoteMessage = remoteConnectionViewModel::clearMessage,
-                        onRefreshRemote = remoteConnectionViewModel::refreshRemote,
-                        onCreateRemoteDirectory = remoteConnectionViewModel::createRemoteDirectory,
                         transferState = transferState,
                         onSave = transferViewModel::save,
                         onStemChange = transferViewModel::setStem,
@@ -1071,18 +1059,6 @@ internal class ArchiveViewModelFactory(
             ioDispatcher = ioDispatcher,
             operationTaskStore = operationTaskStore,
         ) as T
-    }
-}
-
-internal class RemoteConnectionViewModelFactory(
-    private val credentialStore: com.iamxpp.isaver.remote.CredentialStore,
-    private val connector: com.iamxpp.isaver.remote.RemoteConnector,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : ViewModelProvider.Factory {
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        require(modelClass.isAssignableFrom(RemoteConnectionViewModel::class.java))
-        @Suppress("UNCHECKED_CAST")
-        return RemoteConnectionViewModel(credentialStore, connector, ioDispatcher) as T
     }
 }
 

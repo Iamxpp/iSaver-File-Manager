@@ -2,7 +2,6 @@ package com.iamxpp.isaver.remote
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.iamxpp.isaver.domain.EntryName
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -76,7 +75,7 @@ class RemoteConnectionViewModel(
     fun createRemoteDirectory(name: String) {
         val connected = mutableState.value as? RemoteConnectionUiState.Connected ?: return
         val session = activeSession ?: return
-        val entry = EntryName.parse(name).getOrElse {
+        val entry = RemoteEntryName.parse(name).getOrElse {
             mutableState.value = RemoteConnectionUiState.Error("远程文件夹名称无效")
             return
         }

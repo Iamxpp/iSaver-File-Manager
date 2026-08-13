@@ -12,4 +12,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "iSaver"
-include(":app")
+include(":app", ":remote")
