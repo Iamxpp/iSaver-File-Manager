@@ -127,7 +127,7 @@ class BrowserScreenTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun longPressDirectoryOffersMoveAndCopyActions() {
+    fun longPressDirectoryOffersCompactActionsWithoutEnteringSelection() {
         val directory = entry("folder", EntryType.DIRECTORY)
         var selected: DirectoryEntry? = null
         var moved: DirectoryEntry? = null
@@ -147,7 +147,7 @@ class BrowserScreenTest {
         compose.onNodeWithContentDescription("列表项：folder").performTouchInput { longClick() }
         compose.onNodeWithText("复制到").assertIsDisplayed().performClick()
         compose.runOnIdle {
-            assertEquals(directory, selected)
+            assertEquals(null, selected)
             assertEquals(directory, moved)
             assertEquals(directory, copied)
         }
@@ -174,7 +174,7 @@ class BrowserScreenTest {
     }
 
     @Test
-    fun longPressFileOpensActionSheetAndForwardsShare() {
+    fun longPressFileOpensCompactDialogWithoutEnteringSelectionAndForwardsShare() {
         val file = entry("report.pdf", EntryType.FILE)
         var selected: DirectoryEntry? = null
         var shared: DirectoryEntry? = null
@@ -189,12 +189,33 @@ class BrowserScreenTest {
 
         compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
         compose.onNodeWithText("文件操作").assertIsDisplayed()
+        compose.onNodeWithTag("file-actions-dialog").assertIsDisplayed()
+        compose.onNodeWithText("已选择 1 项").assertDoesNotExist()
+        compose.onNodeWithText("取消选择").assertDoesNotExist()
         compose.onNodeWithText("分享").assertIsDisplayed().performClick()
 
         compose.runOnIdle {
-            assertEquals(file, selected)
+            assertEquals(null, selected)
             assertEquals(file, shared)
         }
+    }
+
+    @Test
+    fun compactFileActionDialogStartsSelectionOnlyFromMultiSelectAction() {
+        val file = entry("report.pdf", EntryType.FILE)
+        var selected: DirectoryEntry? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(entries = listOf(file)),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onSelectEntry = { selected = it },
+            )
+        }
+
+        compose.onNodeWithContentDescription("列表项：report.pdf").performTouchInput { longClick() }
+        compose.onNodeWithText("多选").assertIsDisplayed().performClick()
+
+        compose.runOnIdle { assertEquals(file, selected) }
     }
 
     @Test

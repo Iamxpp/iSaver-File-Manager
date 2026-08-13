@@ -2,6 +2,7 @@ package com.iamxpp.isaver.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,10 +12,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -26,7 +30,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -40,12 +44,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.iamxpp.isaver.domain.DirectoryEntry
 import com.iamxpp.isaver.domain.EntryType
 import com.iamxpp.isaver.domain.RootPathRiskPolicy
@@ -361,8 +367,11 @@ fun BrowserScreen(
             onSelectEntry = onSelectEntry,
             onLongPressEntry = { entry ->
                 if (fileActionsEnabled) {
-                    if (entry !in state.selectedEntries) onSelectEntry(entry)
-                    actionEntry = entry
+                    if (state.selectionMode) {
+                        onSelectEntry(entry)
+                    } else {
+                        actionEntry = entry
+                    }
                 }
             },
             modifier = Modifier.weight(1f),
@@ -406,7 +415,7 @@ fun BrowserScreen(
         )
     }
     actionEntry?.let { entry ->
-        FileActionsSheet(
+        FileActionsDialog(
             entry = entry,
             openWithVisible = onOpenWithEntry != null && entry.type == EntryType.FILE,
             openWithEnabled = !state.openingFile && entry.readable && !entry.symbolicLink,
@@ -432,6 +441,8 @@ fun BrowserScreen(
             },
             onCompress = {
                 actionEntry = null
+                onClearSelection()
+                onSelectEntry(entry)
                 compressDialogVisible = true
             },
             onMove = {
@@ -459,9 +470,9 @@ fun BrowserScreen(
                 actionEntry = null
                 onShowFileInfo(entry)
             },
-            onClearSelection = {
+            onSelect = {
                 actionEntry = null
-                onClearSelection()
+                onSelectEntry(entry)
             },
             onDismiss = { actionEntry = null },
         )
@@ -832,8 +843,7 @@ private fun decodePreviewBitmap(bytes: ByteArray): Bitmap? {
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
-private fun FileActionsSheet(
+private fun FileActionsDialog(
     entry: DirectoryEntry,
     openWithVisible: Boolean,
     openWithEnabled: Boolean,
@@ -858,121 +868,102 @@ private fun FileActionsSheet(
     onDelete: () -> Unit,
     onToggleBookmark: () -> Unit,
     onInfo: () -> Unit,
-    onClearSelection: () -> Unit,
+    onSelect: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
+    val actions = buildList {
+        if (openWithVisible) add(FileAction("打开方式", openWithEnabled, onOpenWith))
+        if (shareVisible) add(FileAction("分享", shareEnabled, onShare))
+        if (moveVisible) add(FileAction("移动到", moveEnabled, onMove))
+        if (copyVisible) add(FileAction("复制到", copyEnabled, onCopy))
+        if (renameVisible) add(FileAction("重命名", renameEnabled, onRename))
+        if (compressVisible) add(FileAction("压缩", true, onCompress))
+        add(FileAction(if (bookmarked) "取消收藏" else "收藏", true, onToggleBookmark))
+        add(FileAction("属性", true, onInfo))
+        add(FileAction("多选", true, onSelect))
+        if (deleteVisible) add(FileAction("删除", deleteEnabled, onDelete, destructive = true))
+    }
+
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = ISaverCard,
     ) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-            Text(
-                text = "文件操作",
-                color = ISaverPrimaryText,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            Text(
-                text = entry.name,
-                color = ISaverSecondaryText,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-            )
-            HorizontalDivider(color = ISaverDivider)
-            if (openWithVisible) {
-                FileActionRow(
-                    title = "打开方式",
-                    description = "选择其他应用打开",
-                    enabled = openWithEnabled,
-                    onClick = onOpenWith,
+        Surface(
+            color = ISaverCard,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 360.dp)
+                .testTag("file-actions-dialog"),
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                Text(
+                    text = "文件操作",
+                    color = ISaverPrimaryText,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                 )
-            }
-            if (shareVisible) {
-                FileActionRow(
-                    title = "分享",
-                    description = "分享到其他应用",
-                    enabled = shareEnabled,
-                    onClick = onShare,
+                Text(
+                    text = entry.name,
+                    color = ISaverSecondaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            }
-            if (moveVisible) {
-                FileActionRow(
-                    title = "移动到",
-                    description = "选择新的文件夹",
-                    enabled = moveEnabled,
-                    onClick = onMove,
-                )
-            }
-            if (copyVisible) {
-                FileActionRow(
-                    title = "复制到",
-                    description = "复制到其他文件夹",
-                    enabled = copyEnabled,
-                    onClick = onCopy,
-                )
-            }
-            if (renameVisible) {
-                FileActionRow(
-                    title = "重命名",
-                    description = "修改项目名称",
-                    enabled = renameEnabled,
-                    onClick = onRename,
-                )
-            }
-            if (compressVisible) {
-                FileActionRow(
-                    title = "压缩",
-                    description = "在当前目录创建 ZIP",
-                    onClick = onCompress,
-                )
-            }
-            if (deleteVisible) {
-                FileActionRow(
-                    title = "删除",
-                    description = "共享存储默认进入回收站",
-                    enabled = deleteEnabled,
-                    onClick = onDelete,
-                )
-            }
-            FileActionRow(
-                title = if (bookmarked) "取消收藏" else "收藏",
-                description = if (bookmarked) "从书签中移除此项目" else "添加到书签",
-                onClick = onToggleBookmark,
-            )
-            FileActionRow(
-                title = "属性",
-                description = "查看详细信息和校验和",
-                onClick = onInfo,
-            )
-            HorizontalDivider(color = ISaverDivider)
-            TextButton(
-                onClick = onClearSelection,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("取消选择")
+                Spacer(Modifier.height(8.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                        .testTag("file-actions-list"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    actions.chunked(2).forEach { rowActions ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            rowActions.forEach { action ->
+                                FileActionButton(action, Modifier.weight(1f))
+                            }
+                            if (rowActions.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+private data class FileAction(
+    val title: String,
+    val enabled: Boolean,
+    val onClick: () -> Unit,
+    val destructive: Boolean = false,
+)
+
 @Composable
-private fun FileActionRow(
-    title: String,
-    description: String,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
+private fun FileActionButton(
+    action: FileAction,
+    modifier: Modifier = Modifier,
 ) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(description) },
-        colors = ListItemDefaults.colors(containerColor = ISaverCard),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick),
-    )
+    TextButton(
+        onClick = action.onClick,
+        enabled = action.enabled,
+        modifier = modifier.height(48.dp),
+        shape = RoundedCornerShape(4.dp),
+    ) {
+        Text(
+            text = action.title,
+            color = when {
+                !action.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                action.destructive -> MaterialTheme.colorScheme.error
+                else -> ISaverPrimaryText
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 private fun targetModifier(state: BrowserUiState, entry: DirectoryEntry): Modifier =
