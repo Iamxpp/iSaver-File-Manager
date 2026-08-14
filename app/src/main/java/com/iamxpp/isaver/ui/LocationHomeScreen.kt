@@ -140,6 +140,7 @@ fun LocationHomeScreen(
         common = state.commonLocations.filter { it.displayName.contains(query, ignoreCase = true) },
         custom = state.customLocations.filter { it.location.displayName.contains(query, ignoreCase = true) },
         sortSpec = sortSpec,
+        virtualMode = virtualViewState != null,
     )
 
     Column(
@@ -857,6 +858,7 @@ private fun sortLocationContent(
     common: List<StorageLocation.Direct>,
     custom: List<CustomLocationState>,
     sortSpec: SortSpec,
+    virtualMode: Boolean,
 ): SortedLocationContent {
     val itemDirection = when (sortSpec.field) {
         SortField.TYPE -> SortDirection.ASCENDING
@@ -864,16 +866,6 @@ private fun sortLocationContent(
     }
     val locationComparator = locationComparator(itemDirection)
     val groupComparator = appGroupComparator(itemDirection)
-    val baseSectionOrder = if (apps.isEmpty()) {
-        listOf(LocationSection.COMMON, LocationSection.CUSTOM)
-    } else {
-        listOf(LocationSection.APP, LocationSection.COMMON, LocationSection.CUSTOM)
-    }
-    val sectionOrder = if (sortSpec.field == SortField.TYPE && sortSpec.direction == SortDirection.DESCENDING) {
-        baseSectionOrder.reversed()
-    } else {
-        baseSectionOrder
-    }
     return SortedLocationContent(
         apps = apps
             .sortedWith(groupComparator)
@@ -882,8 +874,32 @@ private fun sortLocationContent(
         custom = custom.sortedWith { left, right ->
             locationComparator.compare(left.location, right.location)
         },
-        sectionOrder = sectionOrder,
+        sectionOrder = locationSectionOrder(apps.isNotEmpty(), virtualMode, sortSpec),
     )
+}
+
+internal fun locationSectionOrder(
+    hasApps: Boolean,
+    virtualMode: Boolean,
+    sortSpec: SortSpec,
+): List<LocationSection> {
+    val baseOrder = buildList {
+        if (hasApps) add(LocationSection.APP)
+        if (virtualMode) {
+            add(LocationSection.CUSTOM)
+            add(LocationSection.COMMON)
+        } else {
+            add(LocationSection.COMMON)
+            add(LocationSection.CUSTOM)
+        }
+    }
+    return if (!virtualMode && sortSpec.field == SortField.TYPE &&
+        sortSpec.direction == SortDirection.DESCENDING
+    ) {
+        baseOrder.reversed()
+    } else {
+        baseOrder
+    }
 }
 
 private fun locationComparator(direction: SortDirection): Comparator<StorageLocation.Direct> =
@@ -914,7 +930,7 @@ private data class SortedLocationContent(
     val sectionOrder: List<LocationSection>,
 )
 
-private enum class LocationSection { APP, COMMON, CUSTOM }
+internal enum class LocationSection { APP, COMMON, CUSTOM }
 
 private data class PresentedLocation(
     val location: StorageLocation.Direct,

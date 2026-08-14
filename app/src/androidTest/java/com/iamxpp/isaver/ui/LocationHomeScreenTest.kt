@@ -48,7 +48,7 @@ class LocationHomeScreenTest {
     val compose = createComposeRule()
 
     @Test
-    fun virtualViewSectionDistinguishesFoldersReferencesAndKeepsTrashLast() {
+    fun virtualViewSectionAppearsAboveCommonLocationsAndKeepsTrashLastInCommonSection() {
         val common = direct("common.downloads", "下载", "/download", StorageLocation.Source.BUILT_IN)
         val folder = VirtualViewNode.VirtualFolder("vf", null, "工作", 0, 1, 1)
         val reference = VirtualViewNode.RealReference(
@@ -79,8 +79,8 @@ class LocationHomeScreenTest {
             assertEquals(reference.targetPath, openedReference)
             assertTrue(trashOpened)
         }
+        assertTextBefore("虚拟视图位置", "通用位置")
         assertTextBefore("下载", "回收站")
-        assertTextBefore("回收站", "虚拟视图位置")
     }
 
     @Test
