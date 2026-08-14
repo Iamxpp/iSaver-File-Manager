@@ -2,13 +2,14 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-iSaver 是一款仅面向 Root 设备的 Android 文件管理器，适合需要直接访问真实 Android 文件系统的用户。它把常用存储位置、Root 浏览器、最近项目，以及安全的分享/打开保存流程整合在一个应用里。
+iSaver 是一款面向 Android 真实文件系统的文件管理器。Root 模式提供完整文件管理能力，非 Root 模式可只读浏览应用有权访问的目录。
 
-当前公开版本：`0.1.2`。
+当前公开版本：`0.1.3`。
 
 ## 功能
 
 - Root 权限门禁，支持明确的重试和退出操作。
+- 非 Root 只读浏览，可访问应用当前有权读取的目录。
 - 最近项目、位置、Root 浏览器三个主入口。
 - 内置通用 Android 存储位置，并支持用虚拟文件夹组织真实文件/目录引用。
 - 列表/网格视图、搜索、稳定排序和新建文件夹。
@@ -29,10 +30,10 @@ iSaver 是一款仅面向 Root 设备的 Android 文件管理器，适合需要�
 ## 要求
 
 - Android 10 或更高版本。
-- 可用的 Root 方案，并提供 `su`。
-- 已授予 iSaver Root 权限。
+- 写操作和受保护路径需要可用的 Root 方案并提供 `su`。
+- 建议授予 iSaver Root 权限以使用完整功能。
 
-iSaver 不提供 Root 能力，也不包含 SAF、Shizuku 或非 Root 后备方案。
+iSaver 不提供 Root 能力，也不集成 SAF 或 Shizuku。非 Root 模式仅提供只读访问，并受 Android 应用沙箱权限限制。
 
 ## 安装
 

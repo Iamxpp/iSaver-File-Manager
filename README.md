@@ -2,13 +2,14 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-iSaver is a Root-only Android file manager for users who need direct access to the real Android filesystem. It combines common storage locations, a Root browser, recent items, and a safe share/open save flow in one app.
+iSaver is an Android file manager for users who need direct access to the real Android filesystem. Root mode enables the complete file-management toolset, while non-Root mode provides read-only access to directories the app can open.
 
-Current public build: `0.5.0`.
+Current public build: `0.1.3`.
 
 ## Features
 
 - Root permission gate with explicit retry and exit actions.
+- Non-Root read-only browsing for directories available to the app.
 - Recent, locations, and Root browser tabs.
 - Built-in common Android storage locations plus virtual folders for organizing real file and directory references.
 - List/grid presentation, stable natural sorting, deep search, history, and persistent tasks.
@@ -30,10 +31,10 @@ Remote SFTP, FTPS, and FTP code is still experimental and is not exposed as a su
 ## Requirements
 
 - Android 10 or later.
-- A working Root solution that provides `su`.
-- Root authorization granted to iSaver.
+- A working Root solution that provides `su` is required for write operations and protected paths.
+- Root authorization granted to iSaver is recommended for the complete feature set.
 
-iSaver does not provide Root access and does not include a SAF, Shizuku, or non-Root fallback.
+iSaver does not provide Root access and does not include SAF or Shizuku integration. Non-Root mode is intentionally read-only and remains subject to Android application sandbox permissions.
 
 ## Install
 

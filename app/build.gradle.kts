@@ -14,8 +14,8 @@ android {
         applicationId = "com.isaver.filemanager"
         minSdk = 29
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.1"
+        versionCode = 6
+        versionName = "0.1.3"
         testInstrumentationRunner = "com.isaver.filemanager.ISaverTestRunner"
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
     }
