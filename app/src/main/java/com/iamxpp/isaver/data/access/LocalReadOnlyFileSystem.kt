@@ -214,15 +214,17 @@ class LocalReadOnlyFileSystem(
     private fun version(path: Path): RootFileVersion {
         val attrs = attributes(path)
         val identity = identityOf(path, attrs)
-        val modifiedSeconds = attrs.lastModifiedTime().to(TimeUnit.SECONDS)
+        val modifiedMillis = attrs.lastModifiedTime().toMillis()
+        val modifiedSeconds = Math.floorDiv(modifiedMillis, 1_000L)
+        val modifiedNanoseconds = Math.floorMod(modifiedMillis, 1_000L) * 1_000_000L
         return RootFileVersion(
             sizeBytes = attrs.size(),
             device = identity.device,
             inode = identity.inode,
             modifiedSeconds = modifiedSeconds,
-            modifiedNanoseconds = 0,
+            modifiedNanoseconds = modifiedNanoseconds,
             changedSeconds = modifiedSeconds,
-            changedNanoseconds = 0,
+            changedNanoseconds = modifiedNanoseconds,
         )
     }
 

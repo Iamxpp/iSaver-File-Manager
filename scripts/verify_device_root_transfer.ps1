@@ -15,7 +15,7 @@ $appApk = Join-Path $repo "app\build\outputs\apk\debug\app-debug.apk"
 $testApk = Join-Path $repo "app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk"
 $packageName = "com.iamxpp.isaver"
 $testPackageName = "com.iamxpp.isaver.test"
-$runner = "$testPackageName/androidx.test.runner.AndroidJUnitRunner"
+$runner = "$testPackageName/com.iamxpp.isaver.ISaverTestRunner"
 $rootStreamTest = "com.iamxpp.isaver.transfer.RootStreamTransferInstrumentedTest"
 
 if (-not $Serial) {

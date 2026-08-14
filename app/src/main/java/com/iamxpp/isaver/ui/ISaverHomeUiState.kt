@@ -4,6 +4,8 @@ import com.iamxpp.isaver.domain.RootPath
 import com.iamxpp.isaver.ui.files.HomeTab
 
 sealed interface HomeDestination {
+    data object Device : HomeDestination
+
     data class Tab(val tab: HomeTab) : HomeDestination {
         init {
             require(tab != HomeTab.BROWSE) { "Browse must use the root browser destination" }

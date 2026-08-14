@@ -22,6 +22,8 @@ import kotlinx.coroutines.withContext
 sealed interface RootGateUiState {
     data object Checking : RootGateUiState
 
+    data object EnablingRoot : RootGateUiState
+
     data object Granted : RootGateUiState
 
     data class ReadOnly(val reason: String? = null) : RootGateUiState
@@ -60,13 +62,24 @@ class RootGateViewModel(
                     checkJob?.cancelAndJoin()
                     checkJob = null
                     if (generation == checkGeneration) {
+                        try {
+                            rootSession.invalidate()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // Local read-only mode is already active even if shell cleanup fails.
+                        }
                         persistMode(FileAccessMode.LOCAL_READ_ONLY)
                     }
                 }
             }
             return
         }
-        mutableState.value = RootGateUiState.Checking
+        mutableState.value = if (accessController.mode.value == FileAccessMode.LOCAL_READ_ONLY) {
+            RootGateUiState.EnablingRoot
+        } else {
+            RootGateUiState.Checking
+        }
         orchestrateCheck(invalidateSession = true)
     }
 

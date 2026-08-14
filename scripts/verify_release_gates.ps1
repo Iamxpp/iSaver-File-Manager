@@ -50,7 +50,7 @@ function Assert-Instrumentation {
     $output = Invoke-Adb -Arguments @(
         "shell", "timeout", "180s", "am", "instrument", "-w", "-r",
         "-e", "class", $ClassName,
-        "com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner"
+        "com.iamxpp.isaver.test/com.iamxpp.isaver.ISaverTestRunner"
     )
     $text = $output -join "`n"
     if ($text -notmatch 'OK \(\d+ tests?\)') {

@@ -55,7 +55,8 @@ fun ISaverHomeScreen(
     onTogglePaneLock: () -> Unit = {},
     onCopyToOtherPane: () -> Unit = {},
     onMoveToOtherPane: () -> Unit = {},
-    onOpenDualPane: () -> Unit = {},
+    onOpenDualPane: (() -> Unit)? = null,
+    onOpenDevice: () -> Unit = {},
     displayMode: DisplayMode,
     sortSpec: SortSpec = SortSpec(SortField.DISPLAY_NAME, SortDirection.ASCENDING),
     onSelectTab: (HomeTab) -> Unit,
@@ -153,7 +154,7 @@ fun ISaverHomeScreen(
     onClearTrash: (List<TrashItem>) -> Unit = {},
     onDismissTrashError: () -> Unit = {},
     onDismissFileRenameError: () -> Unit = {},
-    onCompress: (String, ArchiveFormat) -> Unit = { _, _ -> },
+    onCompress: ((String, ArchiveFormat) -> Unit)? = null,
     onDismissCompressionMessage: () -> Unit = {},
     transferState: TransferUiState = TransferUiState.Idle,
     onSave: () -> Unit = {},
@@ -243,6 +244,7 @@ fun ISaverHomeScreen(
 
     Column(modifier.fillMaxSize().background(ISaverBackground)) {
         when (homeState.destination) {
+            HomeDestination.Device -> Unit
             is HomeDestination.Tab -> when (homeState.selectedTab) {
                 HomeTab.RECENT -> RecentScreen(
                     state = recentState,
@@ -279,6 +281,7 @@ fun ISaverHomeScreen(
                     onDismissVirtualDelete = onDismissVirtualDelete,
                     onRemoveVirtualReference = onRemoveVirtualReference,
                     onOpenTrash = { trashVisible = true },
+                    onOpenDevice = onOpenDevice,
                     modifier = Modifier.weight(1f),
                 )
                 HomeTab.BROWSE -> Unit
@@ -445,6 +448,7 @@ fun ISaverHomeScreen(
                     onDismissVirtualDelete = onDismissVirtualDelete,
                     onRemoveVirtualReference = onRemoveVirtualReference,
                     onOpenTrash = { trashVisible = true },
+                    onOpenDevice = onOpenDevice,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -502,6 +506,7 @@ fun ISaverHomeScreen(
                     onDismissVirtualDelete = onDismissVirtualDelete,
                     onRemoveVirtualReference = onRemoveVirtualReference,
                     onOpenTrash = { trashVisible = true },
+                    onOpenDevice = onOpenDevice,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -559,6 +564,7 @@ fun ISaverHomeScreen(
                     onDismissVirtualDelete = onDismissVirtualDelete,
                     onRemoveVirtualReference = onRemoveVirtualReference,
                     onOpenTrash = { trashVisible = true },
+                    onOpenDevice = onOpenDevice,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -567,6 +573,7 @@ fun ISaverHomeScreen(
             InlineSaveBar(
                 state = transferState,
                 itemCount = when (homeState.destination) {
+                    HomeDestination.Device -> 0
                     is HomeDestination.Browser -> browserState.totalCount
                     is HomeDestination.Tab -> if (homeState.selectedTab == HomeTab.VIEWS) {
                         locationState.visibleLocationCount()

@@ -48,6 +48,33 @@ class LocationHomeScreenTest {
     val compose = createComposeRule()
 
     @Test
+    fun viewsRootShowsDeviceMenuAlignedWithOverflow() {
+        var opened = false
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(loading = false),
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { _, _ -> },
+                onAdd = { _, _ -> },
+                onEdit = { _, _, _ -> },
+                onRemove = {},
+                onRetry = {},
+                onOpenDevice = { opened = true },
+            )
+        }
+
+        val menu = compose.onNodeWithTag("views-device-menu").assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        val overflow = compose.onNodeWithTag("files-top-bar-overflow").assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+
+        assertEquals(menu.center.y, overflow.center.y, 1f)
+        assertEquals(menu.width, overflow.width, 1f)
+        compose.onNodeWithTag("views-device-menu").performClick()
+        compose.runOnIdle { assertTrue(opened) }
+    }
+
+    @Test
     fun virtualViewSectionAppearsAboveCommonLocationsAndKeepsTrashLastInCommonSection() {
         val common = direct("common.downloads", "下载", "/download", StorageLocation.Source.BUILT_IN)
         val folder = VirtualViewNode.VirtualFolder("vf", null, "工作", 0, 1, 1)

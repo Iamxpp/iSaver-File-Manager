@@ -2,7 +2,7 @@
 
 > 版本：1.0
 > 日期：2026-08-14
-> 状态：已批准实施
+> 状态：已完成
 > 依赖基线：M1-M9 本地能力已完成
 > 范围约束：M10 远程文件继续冻结
 
@@ -154,3 +154,7 @@ UI 的禁用状态用于减少误操作，但不能替代数据层门禁。
 - 小米 9 完成 Root -> 非 Root -> Root 实机流程和 Root 文件专项回归。
 - `:app` 仍不依赖 `:remote`，APK 远程代码排除门禁继续通过。
 - 提交按可运行切片进入 `main` 并推送 GitHub；M10 保持未启动。
+
+## 8. 完成记录
+
+M9.1 已于 2026-08-14 完成。664 个 JVM 测试、Lint、Debug/AndroidTest 构建通过；小米 9 非 Root Android 专项 1/1、Root 流专项 7/7 及 Root -> 非 Root -> Root 真实 UI 流程通过。Compose UI 类在 MIUI runner 上 180 秒无结果超时，详细证据和剩余风险见 `docs/audits/2026-08-14-m9.1-non-root-device-audit.md`。

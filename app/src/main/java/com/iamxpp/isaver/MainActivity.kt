@@ -54,6 +54,10 @@ import com.iamxpp.isaver.ui.dualpane.DualPaneBrowserCallbacks
 import com.iamxpp.isaver.ui.dualpane.DualPaneViewModel
 import com.iamxpp.isaver.ui.dualpane.PaneId
 import com.iamxpp.isaver.ui.dualpane.other
+import com.iamxpp.isaver.ui.device.DeviceOverviewRepository
+import com.iamxpp.isaver.ui.device.DeviceSettingsScreen
+import com.iamxpp.isaver.ui.device.DeviceSettingsViewModel
+import com.iamxpp.isaver.data.access.FileAccessMode
 import com.iamxpp.isaver.texteditor.TextEditorScreen
 import com.iamxpp.isaver.texteditor.TextEditorViewModel
 import com.iamxpp.isaver.filetools.FileToolsScreen
@@ -122,6 +126,9 @@ class MainActivity : ComponentActivity() {
         ViewModelProvider(this, factory).get("secondary-browser", BrowserViewModel::class.java)
     }
     private val dualPaneViewModel by viewModels<DualPaneViewModel>()
+    private val deviceSettingsViewModel by viewModels<DeviceSettingsViewModel> {
+        DeviceSettingsViewModelFactory()
+    }
     private val textEditorViewModel by viewModels<TextEditorViewModel> {
         val app = application as ISaverApplication
         TextEditorViewModelFactory(app.textEditorRepository, app.textDraftStore)
@@ -161,7 +168,11 @@ class MainActivity : ComponentActivity() {
             val uiState by rootGateViewModel.state.collectAsStateWithLifecycle()
 
             ISaverTheme {
-                if (uiState == RootGateUiState.Granted || uiState is RootGateUiState.ReadOnly) {
+                if (
+                    uiState == RootGateUiState.Granted ||
+                    uiState == RootGateUiState.EnablingRoot ||
+                    uiState is RootGateUiState.ReadOnly
+                ) {
                     val transferState by transferViewModel.state.collectAsStateWithLifecycle()
                     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
                     val locationState by locationHomeViewModel.state.collectAsStateWithLifecycle()
@@ -173,6 +184,10 @@ class MainActivity : ComponentActivity() {
                     val fileToolsState by fileToolsViewModel.state.collectAsStateWithLifecycle()
                     val recentState by recentViewModel.state.collectAsStateWithLifecycle()
                     val archiveState by archiveViewModel.state.collectAsStateWithLifecycle()
+                    val deviceSettingsState by deviceSettingsViewModel.state.collectAsStateWithLifecycle()
+                    val accessMode by (application as ISaverApplication)
+                        .fileAccessController.mode.collectAsStateWithLifecycle()
+                    val rootMode = accessMode == FileAccessMode.ROOT
                     val destination = homeState.destination
                     val pickerActive = transferState != TransferUiState.Idle
                     val movePickerActive = browserState.moveSelection != null
@@ -211,8 +226,17 @@ class MainActivity : ComponentActivity() {
                         if (pickerActive) homeViewModel.selectTab(HomeTab.VIEWS)
                     }
 
+                    LaunchedEffect(accessMode) {
+                        locationHomeViewModel.refresh()
+                        virtualViewViewModel.navigateTo(virtualViewState.currentFolderId)
+                        recentViewModel.refresh()
+                        if (destination is HomeDestination.Browser) browserViewModel.retry()
+                        if (dualPaneState.enabled) secondaryBrowserViewModel.retry()
+                    }
+
                     LaunchedEffect(destination) {
                         when (destination) {
+                            HomeDestination.Device -> Unit
                             is HomeDestination.Browser -> if (
                                 destination.source == HomeTab.BROWSE && destination.path.value == "/"
                             ) {
@@ -439,6 +463,7 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(pickerActive, destination, browserState.currentPath) {
                         if (pickerActive) {
                             when (destination) {
+                                HomeDestination.Device -> transferViewModel.clearTarget()
                                 is HomeDestination.Browser -> {
                                     if (destination.path == browserState.currentPath) {
                                         transferViewModel.selectTarget(browserState.currentPath)
@@ -533,6 +558,7 @@ class MainActivity : ComponentActivity() {
                             destination is HomeDestination.CopyTarget && destination.targetBrowser != null ->
                                 handleBrowserBack()
                             destination is HomeDestination.CopyTarget -> cancelCopyPicker()
+                            destination == HomeDestination.Device -> homeViewModel.closeDevice()
                         }
                     }
                     if (fileToolsState.visible) {
@@ -559,6 +585,17 @@ class MainActivity : ComponentActivity() {
                             onDiscard = textEditorViewModel::discardAndClose,
                             onCancelClose = textEditorViewModel::cancelClose,
                             onDismissError = textEditorViewModel::dismissError,
+                        )
+                    } else if (destination == HomeDestination.Device) {
+                        DeviceSettingsScreen(
+                            state = deviceSettingsState,
+                            rootState = uiState,
+                            onRootModeChange = { enabled ->
+                                if (!enabled) dualPaneViewModel.setEnabled(false)
+                                rootGateViewModel.setRootEnabled(enabled)
+                            },
+                            onBack = homeViewModel::closeDevice,
+                            onRetryStorage = deviceSettingsViewModel::refresh,
                         )
                     } else ISaverHomeScreen(
                         homeState = homeState,
@@ -620,7 +657,12 @@ class MainActivity : ComponentActivity() {
                         ),
                         onActivatePane = dualPaneViewModel::activate,
                         onCloseDualPane = { dualPaneViewModel.setEnabled(false) },
-                        onOpenDualPane = { dualPaneViewModel.setEnabled(true) },
+                        onOpenDualPane = if (rootMode) {
+                            { dualPaneViewModel.setEnabled(true) }
+                        } else {
+                            null
+                        },
+                        onOpenDevice = homeViewModel::openDevice,
                         onSyncDualPane = {
                             val source = if (dualPaneState.activePane == PaneId.PRIMARY) browserState else secondaryBrowserState
                             val targetPane = dualPaneState.activePane.other()
@@ -762,9 +804,13 @@ class MainActivity : ComponentActivity() {
                         onDismissPermissionConfirmation = browserViewModel::dismissPermissionConfirmation,
                         onDismissFileOpenError = browserViewModel::dismissFileOpenError,
                         onDismissPreview = browserViewModel::dismissPreview,
-                        onEditPreview = { entry ->
-                            browserViewModel.dismissPreview()
-                            textEditorViewModel.open(entry, browserState.currentPath)
+                        onEditPreview = if (rootMode) {
+                            { entry ->
+                                browserViewModel.dismissPreview()
+                                textEditorViewModel.open(entry, browserState.currentPath)
+                            }
+                        } else {
+                            null
                         },
                         onOpenHex = fileToolsViewModel::openHex,
                         onCompareSelection = { entries ->
@@ -773,18 +819,22 @@ class MainActivity : ComponentActivity() {
                         },
                         onShareBrowserEntry = browserViewModel::shareEntry,
                         onShareBrowserSelection = browserViewModel::shareSelection,
-                        onRecycleBrowserSelection = browserViewModel::recycleSelection,
+                        onRecycleBrowserSelection = if (rootMode) browserViewModel::recycleSelection else null,
                         onDismissFileShareError = browserViewModel::dismissFileShareError,
-                        onMoveBrowserEntry = { entry ->
-                            if (!pickerActive && browserViewModel.beginMove(entry)) {
-                                homeViewModel.chooseMoveTarget()
+                        onMoveBrowserEntry = if (rootMode) {
+                            { entry ->
+                                if (!pickerActive && browserViewModel.beginMove(entry)) {
+                                    homeViewModel.chooseMoveTarget()
+                                }
                             }
-                        },
-                        onMoveBrowserSelection = {
-                            if (!pickerActive && browserViewModel.beginMoveSelection()) {
-                                homeViewModel.chooseMoveTarget()
+                        } else null,
+                        onMoveBrowserSelection = if (rootMode) {
+                            {
+                                if (!pickerActive && browserViewModel.beginMoveSelection()) {
+                                    homeViewModel.chooseMoveTarget()
+                                }
                             }
-                        },
+                        } else null,
                         onMoveHere = {
                             val move = homeState.destination as? HomeDestination.MoveTarget
                             if (
@@ -795,16 +845,20 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onDismissFileMoveError = browserViewModel::dismissFileMoveError,
-                        onCopyBrowserEntry = { entry ->
-                            if (!pickerActive && !movePickerActive && browserViewModel.beginCopy(entry)) {
-                                homeViewModel.chooseCopyTarget()
+                        onCopyBrowserEntry = if (rootMode) {
+                            { entry ->
+                                if (!pickerActive && !movePickerActive && browserViewModel.beginCopy(entry)) {
+                                    homeViewModel.chooseCopyTarget()
+                                }
                             }
-                        },
-                        onCopyBrowserSelection = {
-                            if (!pickerActive && !movePickerActive && browserViewModel.beginCopySelection()) {
-                                homeViewModel.chooseCopyTarget()
+                        } else null,
+                        onCopyBrowserSelection = if (rootMode) {
+                            {
+                                if (!pickerActive && !movePickerActive && browserViewModel.beginCopySelection()) {
+                                    homeViewModel.chooseCopyTarget()
+                                }
                             }
-                        },
+                        } else null,
                         onCopyHere = {
                             val copy = homeState.destination as? HomeDestination.CopyTarget
                             if (
@@ -816,16 +870,16 @@ class MainActivity : ComponentActivity() {
                         },
                         onDismissFileCopyError = browserViewModel::dismissFileCopyError,
                         onResolveBrowserConflict = browserViewModel::resolveConflict,
-                        onRenameBrowserEntry = browserViewModel::renameEntry,
-                        onPreviewBatchRename = browserViewModel::previewBatchRename,
-                        onExecuteBatchRename = browserViewModel::executeBatchRename,
+                        onRenameBrowserEntry = if (rootMode) browserViewModel::renameEntry else null,
+                        onPreviewBatchRename = if (rootMode) browserViewModel::previewBatchRename else null,
+                        onExecuteBatchRename = if (rootMode) browserViewModel::executeBatchRename else null,
                         onDismissBatchRename = browserViewModel::dismissBatchRename,
                         onClearFinishedTasks = browserViewModel::clearFinishedTasks,
                         onPauseTask = browserViewModel::pauseTask,
                         onResumeTask = browserViewModel::resumeTask,
                         onCancelTask = browserViewModel::cancelTask,
-                        onRecycleEntry = browserViewModel::recycleEntry,
-                        onDeleteEntryPermanently = browserViewModel::deleteEntryPermanently,
+                        onRecycleEntry = if (rootMode) browserViewModel::recycleEntry else null,
+                        onDeleteEntryPermanently = if (rootMode) browserViewModel::deleteEntryPermanently else null,
                         onRestoreTrashItem = browserViewModel::restoreTrashItem,
                         onRestoreTrashItemWithAction = browserViewModel::restoreTrashItem,
                         onDismissRestoreConflict = browserViewModel::dismissRestoreConflict,
@@ -834,7 +888,7 @@ class MainActivity : ComponentActivity() {
                         onClearTrash = browserViewModel::clearTrash,
                         onDismissTrashError = browserViewModel::dismissTrashError,
                         onDismissFileRenameError = browserViewModel::dismissFileRenameError,
-                        onCompress = browserViewModel::compress,
+                        onCompress = if (rootMode) browserViewModel::compress else null,
                         onDismissCompressionMessage = browserViewModel::clearCompressionMessage,
                         transferState = transferState,
                         onSave = transferViewModel::save,
@@ -1106,5 +1160,13 @@ private class RootGateViewModelFactory(
             modeStore = modeStore,
             accessController = accessController,
         ) as T
+    }
+}
+
+private class DeviceSettingsViewModelFactory : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(DeviceSettingsViewModel::class.java))
+        @Suppress("UNCHECKED_CAST")
+        return DeviceSettingsViewModel(DeviceOverviewRepository()) as T
     }
 }

@@ -46,6 +46,7 @@ fun RootGateScreen(
     ) {
         when (uiState) {
             RootGateUiState.Checking -> CheckingCard()
+            RootGateUiState.EnablingRoot -> CheckingCard()
             is RootGateUiState.Denied -> DeniedCard(
                 reason = uiState.reason,
                 onRetry = onRetry,

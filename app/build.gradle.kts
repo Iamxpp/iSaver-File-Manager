@@ -14,9 +14,9 @@ android {
         applicationId = "com.iamxpp.isaver"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.5.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 5
+        versionName = "0.5.1"
+        testInstrumentationRunner = "com.iamxpp.isaver.ISaverTestRunner"
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }

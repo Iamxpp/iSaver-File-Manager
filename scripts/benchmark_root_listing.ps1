@@ -201,7 +201,7 @@ try {
     $instrumentation = Invoke-Adb -Arguments @(
         "shell", "am", "instrument", "-w", "-r",
         "-e", "class", "com.iamxpp.isaver.ui.RootBrowserPerformanceTest",
-        "com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner"
+        "com.iamxpp.isaver.test/com.iamxpp.isaver.ISaverTestRunner"
     )
     $instrumentation | Out-Host
     Assert-True (($instrumentation -join "`n") -match 'OK \(1 test\)') "Performance instrumentation did not pass"

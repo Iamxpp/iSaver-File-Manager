@@ -90,7 +90,7 @@ class RootGateViewModelTest {
 
         viewModel.retry()
 
-        assertEquals(RootGateUiState.Checking, viewModel.state.value)
+        assertEquals(RootGateUiState.EnablingRoot, viewModel.state.value)
         dispatcher.scheduler.runCurrent()
         assertEquals(RootGateUiState.Granted, viewModel.state.value)
     }

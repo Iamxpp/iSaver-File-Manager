@@ -84,7 +84,7 @@ try {
     $instrumentation = Invoke-Adb @(
         "shell", "am", "instrument", "-w", "-r",
         "-e", "class", "com.iamxpp.isaver.ui.RootGateScreenTest,com.iamxpp.isaver.ui.files.FilesComponentsTest",
-        "com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner"
+        "com.iamxpp.isaver.test/com.iamxpp.isaver.ISaverTestRunner"
     )
     if (($instrumentation -join "`n") -notmatch 'OK \(') { throw "Compatibility instrumentation failed" }
 

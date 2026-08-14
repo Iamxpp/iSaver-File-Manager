@@ -10,6 +10,19 @@ import org.junit.Test
 
 class ISaverHomeViewModelTest {
     @Test
+    fun `device page opens from views and returns to views`() {
+        val viewModel = ISaverHomeViewModel(SavedStateHandle())
+
+        viewModel.openDevice()
+
+        assertEquals(HomeDestination.Device, viewModel.state.value.destination)
+        assertEquals(HomeTab.VIEWS, viewModel.state.value.selectedTab)
+
+        viewModel.closeDevice()
+
+        assertEquals(HomeDestination.Tab(HomeTab.VIEWS), viewModel.state.value.destination)
+    }
+    @Test
     fun `copy target reuses tabs and returns to its source browser`() {
         val source = HomeDestination.Browser(
             RootPath.parse("/data/local/tmp/source").getOrThrow(),

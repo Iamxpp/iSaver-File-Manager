@@ -5,6 +5,8 @@
 
 > 2026-08-14 M9.1 增量设计：M1-M9 本地能力已经通过 M9 发布审计，M10 远程模块继续冻结。启动门禁改造为访问模式协调器：默认首选 Root，Root 不可用时自动激活 `LOCAL_READ_ONLY`，应用不再因缺少 Root 完全阻断。运行时由 `ModeAwareRootFileSystem` 动态委派完整 `RootFileSystem` 接口；本地只读实现仅使用应用进程的 Android/Java 文件 API，所有写原语固定返回 `NOT_WRITABLE`。访问模式由独立 DataStore 保存；Root 开关只有在 `uid=0` 检查成功后才切换。设备页通过 `StatFs` 读取内部存储容量，不扫描用户文件。完整规格见《iSaver_M9.1_非Root只读与设备概览需求与技术落地.md》。
 
+> 2026-08-14 M9.1 完成同步：版本 0.5.1 已完成模式代理、本地只读文件系统、设备页、Root 开关、存储概览、写操作 UI 收口和 instrumentation runner 适配。664 个 JVM 测试、Lint、构建、小米 9 非 Root 专项 1/1 与 Root 流 7/7 通过；审计见 `docs/audits/2026-08-14-m9.1-non-root-device-audit.md`。
+
 > 2026-08-14 性能与模块化实现同步：远程协议、凭据、安全策略、ViewModel 与测试整体迁入独立 `:remote` Android library，远程 basename 使用模块内 `RemoteEntryName`，避免反向依赖 `:app` 领域层。当前 `:app` 不声明 `implementation(project(":remote"))`，也不再携带 Commons Net/JSch、远程 Application 单例、Activity 状态收集或 Browser 对话框。Release 启用 R8 `proguard-android-optimize.txt` 与资源收缩，仅抑制归档依赖可选的 `StaticLoggerBinder` 告警；`verify_apk_size.ps1` 限制 APK 不超过 8 MiB，并从最终 DEX 拒绝 `org.apache.commons.net`、`com.jcraft.jsch` 和 `com.iamxpp.isaver.remote`。本轮 unsigned Release 为 3,798,909 bytes，Debug 从 34,713,852 降至 33,669,702 bytes。95 个套件、650 个 JVM 测试及小米 9 完整发布门禁通过；当前 200 项冷/热、缓存和 1000 项首批可见 P95 分别为 104.73、98.40、13.30 和 211.19 ms。
 
 > 2026-08-14 M9 本地发布门禁实现同步：发布脚本串行执行 648 个 JVM 测试、Lint、四 ABI native/Debug/AndroidTest 构建、23 组小米 9 instrumentation、共享存储可见工作流与 Root 性能测试，并对每组 instrumentation 设置 180 秒上限。10,000 项读取、512 MiB Hex/SHA-256、共享存储解压和 1000 项分页均通过；自然名称排序键改为每条目预计算一次后，首屏 P95 从 554.28 ms 降至 219.19 ms。API 29/33/35 本轮 Emulator 兼容回归通过。写任务固定 `NEVER_REPLAY`，进程死亡转 `NEEDS_REVIEW`，不确定提交不重放；完整风险矩阵见 `docs/audits/2026-08-14-m9-local-release-audit.md`。远程常量保持关闭。

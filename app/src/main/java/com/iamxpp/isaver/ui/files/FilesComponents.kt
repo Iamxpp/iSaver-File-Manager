@@ -79,6 +79,7 @@ fun FilesPageHeader(
     onQueryChange: (String) -> Unit,
     onOverflow: () -> Unit,
     onBack: (() -> Unit)? = null,
+    onMenu: (() -> Unit)? = null,
     saveAction: FilesSaveAction? = null,
     topBarTestTag: String = "files-top-bar",
     searchTestTag: String = "files-search",
@@ -96,6 +97,7 @@ fun FilesPageHeader(
         FilesTopBar(
             title = title,
             onBack = onBack,
+            onMenu = onMenu,
             onOverflow = onOverflow,
             saveAction = saveAction,
             testTag = topBarTestTag,
@@ -122,6 +124,8 @@ fun FilesTopBar(
     title: String,
     onOverflow: () -> Unit,
     onBack: (() -> Unit)? = null,
+    onMenu: (() -> Unit)? = null,
+    showOverflow: Boolean = true,
     saveAction: FilesSaveAction? = null,
     testTag: String = "files-top-bar",
     modifier: Modifier = Modifier,
@@ -144,6 +148,12 @@ fun FilesTopBar(
                     contentDescription = "返回",
                     onClick = onBack,
                 ) { BackChevron() }
+            } else if (onMenu != null) {
+                HeaderAction(
+                    contentDescription = "设备与设置",
+                    onClick = onMenu,
+                    modifier = Modifier.testTag("views-device-menu"),
+                ) { MenuGlyph() }
             }
         }
         Box(
@@ -164,14 +174,14 @@ fun FilesTopBar(
             )
         }
         Box(Modifier.width(actionWidth).height(48.dp), contentAlignment = Alignment.Center) {
-            if (saveAction == null) {
+            if (saveAction == null && showOverflow) {
                 HeaderAction(
                     contentDescription = "更多操作",
                     onClick = onOverflow,
                     modifier = Modifier.testTag("files-top-bar-overflow"),
                 ) { OverflowGlyph() }
                 overflowMenuContent()
-            } else {
+            } else if (saveAction != null) {
                 TextButton(
                     onClick = saveAction.onSave,
                     enabled = saveAction.enabled,
@@ -673,6 +683,21 @@ private fun BackChevron() {
     Canvas(Modifier.size(24.dp)) {
         drawLine(ISaverBlue, Offset(size.width * .62f, size.height * .18f), Offset(size.width * .32f, size.height * .5f), 2.5.dp.toPx(), StrokeCap.Round)
         drawLine(ISaverBlue, Offset(size.width * .32f, size.height * .5f), Offset(size.width * .62f, size.height * .82f), 2.5.dp.toPx(), StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun MenuGlyph() {
+    Canvas(Modifier.size(24.dp)) {
+        listOf(.25f, .5f, .75f).forEach { y ->
+            drawLine(
+                color = ISaverBlue,
+                start = Offset(size.width * .18f, size.height * y),
+                end = Offset(size.width * .82f, size.height * y),
+                strokeWidth = 2.5.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+        }
     }
 }
 

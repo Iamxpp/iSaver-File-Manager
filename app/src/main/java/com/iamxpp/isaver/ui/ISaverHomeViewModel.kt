@@ -15,6 +15,24 @@ class ISaverHomeViewModel(
 
     val state: StateFlow<ISaverHomeUiState> = mutableState.asStateFlow()
 
+    fun openDevice() {
+        transition(
+            mutableState.value.copy(
+                selectedTab = HomeTab.VIEWS,
+                destination = HomeDestination.Device,
+            ),
+        )
+    }
+
+    fun closeDevice() {
+        transition(
+            mutableState.value.copy(
+                selectedTab = HomeTab.VIEWS,
+                destination = HomeDestination.Tab(HomeTab.VIEWS),
+            ),
+        )
+    }
+
     fun selectTab(tab: HomeTab) {
         val copy = mutableState.value.destination as? HomeDestination.CopyTarget
         if (copy != null) {
@@ -281,6 +299,12 @@ class ISaverHomeViewModel(
         mutableState.value = state
         savedStateHandle[KEY_SELECTED_TAB] = state.selectedTab.name
         when (val destination = state.destination) {
+            HomeDestination.Device -> {
+                savedStateHandle[KEY_DESTINATION] = DESTINATION_DEVICE
+                savedStateHandle.remove<String>(KEY_PATH)
+                savedStateHandle.remove<String>(KEY_TITLE)
+                savedStateHandle.remove<String>(KEY_SOURCE)
+            }
             is HomeDestination.Tab -> {
                 savedStateHandle[KEY_DESTINATION] = DESTINATION_TAB
                 savedStateHandle.remove<String>(KEY_PATH)
@@ -340,6 +364,7 @@ class ISaverHomeViewModel(
         return try {
             val selected = HomeTab.valueOf(savedStateHandle.get<String>(KEY_SELECTED_TAB).orEmpty())
             when (savedStateHandle.get<String>(KEY_DESTINATION)) {
+                DESTINATION_DEVICE -> ISaverHomeUiState(HomeTab.VIEWS, HomeDestination.Device)
                 DESTINATION_TAB -> ISaverHomeUiState(selected, HomeDestination.Tab(selected))
                 DESTINATION_BROWSER -> {
                     val path = RootPath.parse(savedStateHandle.get<String>(KEY_PATH).orEmpty()).getOrThrow()
@@ -434,6 +459,7 @@ class ISaverHomeViewModel(
         const val KEY_TARGET_SOURCE = "home.targetSource"
         const val KEY_TARGET_RECORD_ACCESS = "home.targetRecordAccess"
         const val DESTINATION_TAB = "TAB"
+        const val DESTINATION_DEVICE = "DEVICE"
         const val DESTINATION_BROWSER = "BROWSER"
         const val DESTINATION_ARCHIVE = "ARCHIVE"
         const val DESTINATION_EXTRACTION_TARGET = "EXTRACTION_TARGET"

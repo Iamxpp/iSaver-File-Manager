@@ -53,7 +53,7 @@ fun FileInfoDialog(
     onDismiss: () -> Unit,
 ) {
     val editableMode = metadata?.mode?.takeIf { it in 0..0x1FF }
-    val canEditPermissions = editableMode != null && !entry.symbolicLink && entry.type != EntryType.OTHER &&
+    val canEditPermissions = editableMode != null && entry.writable && !entry.symbolicLink && entry.type != EntryType.OTHER &&
         !RootPathRiskPolicy.isProtected(entry.path)
     var editingPermissions by remember(entry.path, editableMode) { mutableStateOf(false) }
     var permissionDraft by remember(entry.path, editableMode) {

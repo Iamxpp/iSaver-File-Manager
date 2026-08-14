@@ -101,6 +101,7 @@ fun LocationHomeScreen(
     onDismissVirtualDelete: () -> Unit = {},
     onRemoveVirtualReference: (String) -> Unit = {},
     onOpenTrash: () -> Unit = {},
+    onOpenDevice: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
@@ -176,6 +177,7 @@ fun LocationHomeScreen(
             virtualMode = virtualViewState != null,
             onCreateVirtualFolder = onCreateVirtualFolder,
             onBack = openedVirtualFolder?.let { { navigateVirtual(virtualParentId) } },
+            onOpenDevice = onOpenDevice,
         )
         val targetHint = virtualTargetError ?: saveAction?.disabledReason?.takeIf {
             !saveAction.enabled && virtualViewState != null
@@ -332,6 +334,7 @@ private fun LocationHomeHeader(
     virtualMode: Boolean,
     onCreateVirtualFolder: ((String) -> Unit)?,
     onBack: (() -> Unit)?,
+    onOpenDevice: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var creatingVirtualFolder by remember { mutableStateOf(false) }
@@ -343,6 +346,7 @@ private fun LocationHomeHeader(
             onQueryChange = onQueryChange,
             onOverflow = { menuExpanded = true },
             onBack = onBack,
+            onMenu = onOpenDevice.takeIf { onBack == null && saveAction == null },
             saveAction = saveAction,
             topBarTestTag = "views-top-bar",
             searchTestTag = "views-search",
