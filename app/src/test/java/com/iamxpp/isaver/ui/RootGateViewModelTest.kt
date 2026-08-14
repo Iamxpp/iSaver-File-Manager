@@ -1,6 +1,9 @@
 package com.iamxpp.isaver.ui
 
 import com.iamxpp.isaver.data.root.RootSession
+import com.iamxpp.isaver.data.access.FileAccessController
+import com.iamxpp.isaver.data.access.FileAccessMode
+import com.iamxpp.isaver.data.access.FileAccessModeStore
 import com.iamxpp.isaver.data.root.LibsuRootSession
 import com.iamxpp.isaver.data.root.RootUidCheckResult
 import com.iamxpp.isaver.data.root.RootUidChecker
@@ -64,7 +67,7 @@ class RootGateViewModelTest {
     }
 
     @Test
-    fun `unavailable root denies access with user reason`() {
+    fun `unavailable root falls back to read only with user reason`() {
         val reason = "Root 权限未授予，请授权后重试"
         val viewModel = RootGateViewModel(
             rootSession = FakeRootSession(RootStatus.Unavailable(reason)),
@@ -73,7 +76,7 @@ class RootGateViewModelTest {
 
         dispatcher.scheduler.runCurrent()
 
-        assertEquals(RootGateUiState.Denied(reason), viewModel.state.value)
+        assertEquals(RootGateUiState.ReadOnly(reason), viewModel.state.value)
     }
 
     @Test
@@ -139,7 +142,7 @@ class RootGateViewModelTest {
         dispatcher.scheduler.runCurrent()
 
         assertEquals(
-            RootGateUiState.Denied("无法确认 Root 权限，请重试"),
+            RootGateUiState.ReadOnly("无法确认 Root 权限，请重试"),
             viewModel.state.value,
         )
         assertEquals(1, rootSession.checks)
@@ -174,7 +177,7 @@ class RootGateViewModelTest {
         dispatcher.scheduler.runCurrent()
 
         assertEquals(
-            RootGateUiState.Denied("无法确认 Root 权限，请重试"),
+            RootGateUiState.ReadOnly("无法确认 Root 权限，请重试"),
             viewModel.state.value,
         )
     }
@@ -198,6 +201,44 @@ class RootGateViewModelTest {
 
         assertEquals(RootGateUiState.Granted, viewModel.state.value)
     }
+
+    @Test
+    fun `stored read only preference skips root check`() {
+        val rootSession = FakeRootSession(RootStatus.Available)
+        val controller = FileAccessController(FileAccessMode.ROOT)
+        val viewModel = RootGateViewModel(
+            rootSession = rootSession,
+            checkDispatcher = dispatcher,
+            modeStore = FakeModeStore(FileAccessMode.LOCAL_READ_ONLY),
+            accessController = controller,
+        )
+
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(RootGateUiState.ReadOnly(), viewModel.state.value)
+        assertEquals(FileAccessMode.LOCAL_READ_ONLY, controller.mode.value)
+        assertEquals(0, rootSession.checks)
+    }
+
+    @Test
+    fun `disabling root activates and persists read only mode`() {
+        val store = FakeModeStore(FileAccessMode.ROOT)
+        val controller = FileAccessController(FileAccessMode.LOCAL_READ_ONLY)
+        val viewModel = RootGateViewModel(
+            rootSession = FakeRootSession(RootStatus.Available),
+            checkDispatcher = dispatcher,
+            modeStore = store,
+            accessController = controller,
+        )
+        dispatcher.scheduler.runCurrent()
+
+        viewModel.setRootEnabled(false)
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(RootGateUiState.ReadOnly(), viewModel.state.value)
+        assertEquals(FileAccessMode.LOCAL_READ_ONLY, controller.mode.value)
+        assertEquals(FileAccessMode.LOCAL_READ_ONLY, store.savedMode)
+    }
 }
 
 private class FakeRootSession(
@@ -206,11 +247,29 @@ private class FakeRootSession(
     private val statuses = ArrayDeque(statuses.toList())
     var invalidations: Int = 0
         private set
+    var checks: Int = 0
+        private set
 
-    override suspend fun check(): RootStatus = statuses.removeFirst()
+    override suspend fun check(): RootStatus {
+        checks += 1
+        return statuses.removeFirst()
+    }
 
     override suspend fun invalidate() {
         invalidations += 1
+    }
+}
+
+private class FakeModeStore(initialMode: FileAccessMode) : FileAccessModeStore {
+    private var currentMode = initialMode
+    var savedMode: FileAccessMode? = null
+        private set
+
+    override suspend fun load(): FileAccessMode = currentMode
+
+    override suspend fun save(mode: FileAccessMode) {
+        currentMode = mode
+        savedMode = mode
     }
 }
 

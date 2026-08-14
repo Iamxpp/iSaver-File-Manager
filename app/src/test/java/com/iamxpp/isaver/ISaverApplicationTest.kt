@@ -24,6 +24,8 @@ class ISaverApplicationTest {
         assertSame(application.locationHomeAppResolver, application.locationHomeAppResolver)
         assertSame(application.locationHomeCustomStore, application.locationHomeCustomStore)
         assertSame(application.browserPreferencesStore, application.browserPreferencesStore)
+        assertSame(application.fileAccessModeStore, application.fileAccessModeStore)
+        assertSame(application.fileAccessController, application.fileAccessController)
         assertSame(application.shareIntentParser, application.shareIntentParser)
         assertSame(application.incomingFileCache, application.incomingFileCache)
         assertSame(application.incomingStreamRegistry, application.incomingStreamRegistry)

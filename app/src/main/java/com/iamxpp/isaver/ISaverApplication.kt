@@ -18,6 +18,12 @@ import com.iamxpp.isaver.domain.ErrorCode
 import com.iamxpp.isaver.domain.OperationResult
 import com.iamxpp.isaver.data.root.LibsuRootFileSystem
 import com.iamxpp.isaver.data.root.RootFileSystem
+import com.iamxpp.isaver.data.access.FileAccessController
+import com.iamxpp.isaver.data.access.FileAccessMode
+import com.iamxpp.isaver.data.access.FileAccessModeRepository
+import com.iamxpp.isaver.data.access.FileAccessModeStore
+import com.iamxpp.isaver.data.access.LocalReadOnlyFileSystem
+import com.iamxpp.isaver.data.access.ModeAwareRootFileSystem
 import com.iamxpp.isaver.locations.CustomLocationRepository
 import com.iamxpp.isaver.locations.CustomLocationResult
 import com.iamxpp.isaver.locations.LocationId
@@ -68,7 +74,14 @@ import dagger.hilt.android.HiltAndroidApp
 class ISaverApplication : Application() {
     private val applicationScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     internal val rootSession: RootSession by lazy { LibsuRootSession() }
-    internal val rootFileSystem: RootFileSystem by lazy { LibsuRootFileSystem("${applicationInfo.nativeLibraryDir}/libisaver_fs_helper.so") }
+    internal val fileAccessController by lazy { FileAccessController(FileAccessMode.LOCAL_READ_ONLY) }
+    private val privilegedFileSystem: RootFileSystem by lazy {
+        LibsuRootFileSystem("${applicationInfo.nativeLibraryDir}/libisaver_fs_helper.so")
+    }
+    private val localReadOnlyFileSystem: RootFileSystem by lazy { LocalReadOnlyFileSystem() }
+    internal val rootFileSystem: RootFileSystem by lazy {
+        ModeAwareRootFileSystem(fileAccessController, privilegedFileSystem, localReadOnlyFileSystem)
+    }
     internal val database: ISaverDatabase by lazy {
         Room.databaseBuilder(this, ISaverDatabase::class.java, DATABASE_NAME)
             .addMigrations(
@@ -109,6 +122,15 @@ class ISaverApplication : Application() {
             scope = applicationScope,
             produceFile = { preferencesDataStoreFile("browser.preferences_pb") },
         )
+    }
+    private val accessModeDataStore by lazy {
+        PreferenceDataStoreFactory.create(
+            scope = applicationScope,
+            produceFile = { preferencesDataStoreFile("file-access.preferences_pb") },
+        )
+    }
+    internal val fileAccessModeStore: FileAccessModeStore by lazy {
+        FileAccessModeRepository(accessModeDataStore)
     }
     internal val browserPreferencesStore: BrowserPreferencesStore by lazy {
         BrowserPreferencesRepository(browserDataStore)

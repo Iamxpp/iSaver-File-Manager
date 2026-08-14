@@ -152,6 +152,8 @@ class MainActivity : ComponentActivity() {
             this,
             RootGateViewModelFactory(
                 rootSession = (application as ISaverApplication).rootSession,
+                modeStore = (application as ISaverApplication).fileAccessModeStore,
+                accessController = (application as ISaverApplication).fileAccessController,
             ),
         )[RootGateViewModel::class.java]
 
@@ -159,7 +161,7 @@ class MainActivity : ComponentActivity() {
             val uiState by rootGateViewModel.state.collectAsStateWithLifecycle()
 
             ISaverTheme {
-                if (uiState == RootGateUiState.Granted) {
+                if (uiState == RootGateUiState.Granted || uiState is RootGateUiState.ReadOnly) {
                     val transferState by transferViewModel.state.collectAsStateWithLifecycle()
                     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
                     val locationState by locationHomeViewModel.state.collectAsStateWithLifecycle()
@@ -1089,6 +1091,8 @@ internal class VirtualViewViewModelFactory(
 
 private class RootGateViewModelFactory(
     private val rootSession: RootSession,
+    private val modeStore: com.iamxpp.isaver.data.access.FileAccessModeStore,
+    private val accessController: com.iamxpp.isaver.data.access.FileAccessController,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(RootGateViewModel::class.java)) {
@@ -1099,6 +1103,8 @@ private class RootGateViewModelFactory(
         return RootGateViewModel(
             rootSession = rootSession,
             checkDispatcher = Dispatchers.IO,
+            modeStore = modeStore,
+            accessController = accessController,
         ) as T
     }
 }

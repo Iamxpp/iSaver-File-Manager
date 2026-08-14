@@ -52,6 +52,7 @@ fun RootGateScreen(
                 onExit = onExit,
             )
             RootGateUiState.Granted -> GrantedPlaceholder()
+            is RootGateUiState.ReadOnly -> GrantedPlaceholder()
         }
     }
 }
