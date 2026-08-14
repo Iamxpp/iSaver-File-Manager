@@ -1,9 +1,9 @@
 package com.iamxpp.isaver.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -109,6 +109,12 @@ fun LocationHomeScreen(
     var removal by remember { mutableStateOf<StorageLocation.Direct?>(null) }
     var managedVirtualNode by remember { mutableStateOf<VirtualViewNode?>(null) }
     var virtualTargetError by remember { mutableStateOf<String?>(null) }
+    val openedVirtualFolder = virtualViewState?.takeIf { it.currentFolderId != null }
+    val currentVirtualFolder = openedVirtualFolder?.let { opened ->
+        opened.breadcrumbs.lastOrNull()
+            ?: opened.allFolders.firstOrNull { it.id == opened.currentFolderId }
+    }
+    val virtualParentId = currentVirtualFolder?.parentId
 
     val openVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit = { folder ->
         virtualTargetError = null
@@ -134,6 +140,13 @@ fun LocationHomeScreen(
     LaunchedEffect(saveAction != null) {
         if (saveAction == null) virtualTargetError = null
     }
+    LaunchedEffect(virtualViewState?.currentFolderId) {
+        query = ""
+    }
+
+    BackHandler(enabled = openedVirtualFolder != null) {
+        navigateVirtual(virtualParentId)
+    }
 
     val content = sortLocationContent(
         apps = state.appGroups.filterForQuery(query),
@@ -149,6 +162,7 @@ fun LocationHomeScreen(
             .background(ISaverBackground),
     ) {
         LocationHomeHeader(
+            title = currentVirtualFolder?.displayName ?: if (openedVirtualFolder == null) "视图" else "虚拟视图位置",
             query = query,
             onQueryChange = { query = it },
             error = state.error,
@@ -161,6 +175,7 @@ fun LocationHomeScreen(
             saveAction = saveAction,
             virtualMode = virtualViewState != null,
             onCreateVirtualFolder = onCreateVirtualFolder,
+            onBack = openedVirtualFolder?.let { { navigateVirtual(virtualParentId) } },
         )
         val targetHint = virtualTargetError ?: saveAction?.disabledReason?.takeIf {
             !saveAction.enabled && virtualViewState != null
@@ -175,7 +190,17 @@ fun LocationHomeScreen(
                     .semantics { contentDescription = "目标不可用：$targetHint" },
             )
         }
-        if (displayMode == DisplayMode.LIST) {
+        if (openedVirtualFolder != null) {
+            VirtualFolderContent(
+                state = openedVirtualFolder,
+                query = query,
+                displayMode = displayMode,
+                onOpenVirtualFolder = openVirtualFolder,
+                onOpenVirtualReference = openVirtualReference,
+                onManageVirtualNode = { managedVirtualNode = it },
+                modifier = Modifier.weight(1f),
+            )
+        } else if (displayMode == DisplayMode.LIST) {
             LocationList(
                 state = state,
                 content = content,
@@ -187,7 +212,6 @@ fun LocationHomeScreen(
                 onOpenVirtualFolder = openVirtualFolder,
                 onOpenVirtualReference = openVirtualReference,
                 onManageVirtualNode = { managedVirtualNode = it },
-                onNavigateVirtual = navigateVirtual,
                 onOpenTrash = onOpenTrash,
                 modifier = Modifier.weight(1f),
             )
@@ -203,7 +227,6 @@ fun LocationHomeScreen(
                 onOpenVirtualFolder = openVirtualFolder,
                 onOpenVirtualReference = openVirtualReference,
                 onManageVirtualNode = { managedVirtualNode = it },
-                onNavigateVirtual = navigateVirtual,
                 onOpenTrash = onOpenTrash,
                 modifier = Modifier.weight(1f),
             )
@@ -295,6 +318,7 @@ fun LocationHomeScreen(
 
 @Composable
 private fun LocationHomeHeader(
+    title: String,
     query: String,
     onQueryChange: (String) -> Unit,
     error: String?,
@@ -307,16 +331,18 @@ private fun LocationHomeHeader(
     saveAction: FilesSaveAction?,
     virtualMode: Boolean,
     onCreateVirtualFolder: ((String) -> Unit)?,
+    onBack: (() -> Unit)?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var creatingVirtualFolder by remember { mutableStateOf(false) }
 
     Column {
         FilesPageHeader(
-            title = "视图",
+            title = title,
             query = query,
             onQueryChange = onQueryChange,
             onOverflow = { menuExpanded = true },
+            onBack = onBack,
             saveAction = saveAction,
             topBarTestTag = "views-top-bar",
             searchTestTag = "views-search",
@@ -384,6 +410,52 @@ private fun LocationHomeHeader(
 }
 
 @Composable
+private fun VirtualFolderContent(
+    state: VirtualViewUiState,
+    query: String,
+    displayMode: DisplayMode,
+    onOpenVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit,
+    onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit,
+    onManageVirtualNode: (VirtualViewNode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val children = state.children.filter { it.displayName.contains(query, ignoreCase = true) }
+    when {
+        state.loading -> VirtualFolderStatus("正在加载目录", modifier)
+        state.error != null -> VirtualFolderStatus(state.error, modifier)
+        children.isEmpty() -> VirtualFolderStatus(
+            if (query.isEmpty()) "此目录为空" else "没有匹配项目",
+            modifier,
+        )
+        displayMode == DisplayMode.LIST -> LazyColumn(
+            modifier = modifier.background(ISaverCard).testTag("virtual-folder-list"),
+        ) {
+            items(children, key = { it.id }) { node ->
+                VirtualViewListRow(node, onOpenVirtualFolder, onOpenVirtualReference, onManageVirtualNode)
+            }
+        }
+        else -> LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = modifier.background(ISaverCard).testTag("virtual-folder-grid"),
+        ) {
+            gridItems(children, key = { it.id }) { node ->
+                VirtualViewGridCell(node, onOpenVirtualFolder, onOpenVirtualReference, onManageVirtualNode)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VirtualFolderStatus(message: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.fillMaxSize().background(ISaverCard),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(message, color = ISaverSecondaryText)
+    }
+}
+
+@Composable
 private fun LocationList(
     state: LocationHomeUiState,
     content: SortedLocationContent,
@@ -395,7 +467,6 @@ private fun LocationList(
     onOpenVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit,
     onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit,
     onManageVirtualNode: (VirtualViewNode) -> Unit,
-    onNavigateVirtual: (String?) -> Unit,
     onOpenTrash: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -443,7 +514,7 @@ private fun LocationList(
                 LocationSection.CUSTOM -> {
                     if (virtualViewState != null) {
                         item(key = "section-custom") {
-                            VirtualSectionHeader(virtualViewState, onNavigateVirtual)
+                            VirtualSectionHeader(virtualViewState)
                         }
                         if (virtualViewState.children.isEmpty() && !virtualViewState.loading) {
                             item(key = "virtual-empty") {
@@ -502,30 +573,10 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 @Composable
 private fun VirtualSectionHeader(
     state: VirtualViewUiState,
-    onNavigate: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth()) {
         SectionTitle("虚拟视图位置")
-        if (state.breadcrumbs.isNotEmpty()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("根目录", color = ISaverBlue, modifier = Modifier.clickable { onNavigate(null) }.padding(8.dp))
-                state.breadcrumbs.forEach { folder ->
-                    Text("/", color = ISaverSecondaryText)
-                    Text(
-                        folder.displayName,
-                        color = ISaverBlue,
-                        modifier = Modifier.clickable { onNavigate(folder.id) }.padding(8.dp),
-                    )
-                }
-            }
-        }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp, 4.dp)) }
     }
 }
@@ -686,7 +737,6 @@ private fun LocationHomeGrid(
     onOpenVirtualFolder: (VirtualViewNode.VirtualFolder) -> Unit,
     onOpenVirtualReference: (VirtualViewNode.RealReference) -> Unit,
     onManageVirtualNode: (VirtualViewNode) -> Unit,
-    onNavigateVirtual: (String?) -> Unit,
     onOpenTrash: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -749,7 +799,7 @@ private fun LocationHomeGrid(
                 LocationSection.CUSTOM -> {
                     if (virtualViewState != null) {
                         fullSpanItem("section-custom") {
-                            VirtualSectionHeader(virtualViewState, onNavigateVirtual, Modifier.testTag("section-custom"))
+                            VirtualSectionHeader(virtualViewState, Modifier.testTag("section-custom"))
                         }
                         if (virtualViewState.children.isEmpty() && !virtualViewState.loading) {
                             fullSpanItem("virtual-empty") {

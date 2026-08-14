@@ -84,6 +84,44 @@ class LocationHomeScreenTest {
     }
 
     @Test
+    fun openedVirtualFolderUsesDirectoryPresentationAndBackNavigatesToParent() {
+        val parent = VirtualViewNode.VirtualFolder("parent", null, "父目录", 0, 1, 1)
+        val folder = VirtualViewNode.VirtualFolder("folder", "parent", "M71", 0, 1, 1)
+        var backTarget: String? = "unchanged"
+        compose.setContent {
+            LocationHomeScreen(
+                state = LocationHomeUiState(
+                    loading = false,
+                    commonLocations = listOf(
+                        direct("common.downloads", "下载", "/download", StorageLocation.Source.BUILT_IN),
+                    ),
+                ),
+                displayMode = DisplayMode.LIST,
+                onOpenLocation = { _, _ -> },
+                onAdd = { _, _ -> },
+                onEdit = { _, _, _ -> },
+                onRemove = {},
+                onRetry = {},
+                virtualViewState = VirtualViewUiState(
+                    currentFolderId = folder.id,
+                    breadcrumbs = listOf(parent, folder),
+                    children = emptyList(),
+                    loading = false,
+                ),
+                onNavigateVirtual = { backTarget = it },
+            )
+        }
+
+        compose.onNodeWithText("M71").assertIsDisplayed()
+        compose.onNodeWithContentDescription("返回").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(parent.id, backTarget) }
+        compose.onNodeWithText("此目录为空").assertIsDisplayed()
+        compose.onNodeWithText("虚拟视图位置").assertDoesNotExist()
+        compose.onNodeWithText("通用位置").assertDoesNotExist()
+        compose.onNodeWithText("下载").assertDoesNotExist()
+    }
+
+    @Test
     fun displaysViewsTitleAndLocationSections() {
         compose.setContent {
             LocationHomeScreen(
