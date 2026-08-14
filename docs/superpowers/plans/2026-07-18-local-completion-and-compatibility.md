@@ -13,9 +13,9 @@
 ### Task 1: Recent activity model and repository contract
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/recent/RecentRepository.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/recent/RecentRepositoryTest.kt`
-- Verify: `app/src/main/java/com/iamxpp/isaver/data/local/RecentItemEntity.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/recent/RecentRepository.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/recent/RecentRepositoryTest.kt`
+- Verify: `app/src/main/java/com/isaver/filemanager/data/local/RecentItemEntity.kt`
 
 - [ ] **Step 1: Write failing repository tests**
 
@@ -41,7 +41,7 @@ Add tests proving compressed and extracted activities round-trip without a Room 
 Run:
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.recent.RecentRepositoryTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.recent.RecentRepositoryTest"
 ```
 
 Expected: compilation fails because `COMPRESSED`, `EXTRACTED`, `recordCompressed`, and `recordExtracted` do not exist.
@@ -67,20 +67,20 @@ Run the focused repository test and `RecentItemDaoRoomTest`. Expected: both suit
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/recent/RecentRepository.kt app/src/test/java/com/iamxpp/isaver/recent/RecentRepositoryTest.kt
+git add app/src/main/java/com/isaver/filemanager/recent/RecentRepository.kt app/src/test/java/com/isaver/filemanager/recent/RecentRepositoryTest.kt
 git commit -m "feat: model complete recent activities"
 ```
 
 ### Task 2: Recent ViewModel and real Recent screen
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/recent/RecentUiState.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/recent/RecentViewModel.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/recent/RecentScreen.kt`
-- Create: `app/src/test/java/com/iamxpp/isaver/ui/recent/RecentViewModelTest.kt`
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/ui/recent/RecentScreenTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt`
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/ui/ISaverHomeScreenTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/recent/RecentUiState.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/recent/RecentViewModel.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/recent/RecentScreen.kt`
+- Create: `app/src/test/java/com/isaver/filemanager/ui/recent/RecentViewModelTest.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/ui/recent/RecentScreenTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/ui/ISaverHomeScreenTest.kt`
 
 - [ ] **Step 1: Write failing ViewModel tests**
 
@@ -150,15 +150,15 @@ Run both recent test classes and `ISaverHomeScreenTest`, then commit as `feat: a
 ### Task 3: Protected path policy and read-only custom locations
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/domain/RootPathRiskPolicy.kt`
-- Create: `app/src/test/java/com/iamxpp/isaver/domain/RootPathRiskPolicyTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/LocationHomeUiState.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/LocationHomeViewModel.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/LocationHomeScreen.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/ui/LocationHomeViewModelTest.kt`
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/ui/LocationHomeScreenTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/ISaverApplicationTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/domain/RootPathRiskPolicy.kt`
+- Create: `app/src/test/java/com/isaver/filemanager/domain/RootPathRiskPolicyTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/LocationHomeUiState.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/LocationHomeViewModel.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/LocationHomeScreen.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/ui/LocationHomeViewModelTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/ui/LocationHomeScreenTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/ISaverApplicationTest.kt`
 
 - [ ] **Step 1: Write and run protected-path RED tests**
 
@@ -198,14 +198,14 @@ Run domain, location ViewModel, location Compose, and application tests; commit 
 ### Task 4: File information and long-press compression selection
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/FileInfoDialog.kt`
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/ui/FileInfoDialogTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/BrowserUiState.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/BrowserViewModel.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/BrowserScreen.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/files/FilesComponents.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/ui/BrowserViewModelTest.kt`
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/ui/BrowserScreenTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/FileInfoDialog.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/ui/FileInfoDialogTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/BrowserUiState.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/BrowserViewModel.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/BrowserScreen.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/files/FilesComponents.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/ui/BrowserViewModelTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/ui/BrowserScreenTest.kt`
 
 - [ ] **Step 1: Write file routing and selection RED tests**
 
@@ -242,15 +242,15 @@ Run `FileInfoDialogTest`, `BrowserScreenTest`, and file component tests; commit 
 ### Task 5: Archive tree and full-page archive browser
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/archive/ArchiveTree.kt`
-- Create: `app/src/test/java/com/iamxpp/isaver/archive/ArchiveTreeTest.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/archive/ArchiveUiState.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/archive/ArchiveViewModel.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/archive/ArchiveScreen.kt`
-- Create: `app/src/test/java/com/iamxpp/isaver/ui/archive/ArchiveViewModelTest.kt`
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/ui/archive/ArchiveScreenTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeUiState.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeViewModel.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/archive/ArchiveTree.kt`
+- Create: `app/src/test/java/com/isaver/filemanager/archive/ArchiveTreeTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/archive/ArchiveUiState.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/archive/ArchiveViewModel.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/archive/ArchiveScreen.kt`
+- Create: `app/src/test/java/com/isaver/filemanager/ui/archive/ArchiveViewModelTest.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/ui/archive/ArchiveScreenTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeUiState.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeViewModel.kt`
 
 - [ ] **Step 1: Write archive-tree RED tests**
 
@@ -284,14 +284,14 @@ Add `HomeDestination.Archive(source, sourceTab)` and `HomeDestination.Extraction
 ### Task 6: Identity-bound extraction staging primitives
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/data/root/ExtractionStage.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/data/root/RootFileSystem.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/data/root/RootTransferHelper.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/data/root/LibsuRootFileSystem.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/data/root/ExtractionStage.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/data/root/RootFileSystem.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/data/root/RootTransferHelper.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/data/root/LibsuRootFileSystem.kt`
 - Modify: `app/src/main/cpp/isaver_fs_helper.c`
-- Create: `app/src/test/java/com/iamxpp/isaver/data/root/ExtractionStageTest.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/data/root/RootTransferHelperTest.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/data/root/LibsuRootFileSystemTest.kt`
+- Create: `app/src/test/java/com/isaver/filemanager/data/root/ExtractionStageTest.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/data/root/RootTransferHelperTest.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/data/root/LibsuRootFileSystemTest.kt`
 - Modify: `scripts/verify_root_transfer_helper.ps1`
 
 - [ ] **Step 1: Write typed API and command RED tests**
@@ -347,13 +347,13 @@ Commit as `feat: add safe extraction staging primitives`.
 ### Task 7: Archive extraction flow, progress, cancellation, and recent records
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/archive/ArchiveModels.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/archive/ArchiveRepository.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/archive/LocalArchiveEngine.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/archive/ArchiveRepositoryTest.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/archive/LocalArchiveEngineTest.kt`
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/archive/ArchiveRootInstrumentedTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/archive/ArchiveModels.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/archive/ArchiveRepository.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/archive/LocalArchiveEngine.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/archive/ArchiveRepositoryTest.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/archive/LocalArchiveEngineTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/archive/ArchiveRootInstrumentedTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`
 
 - [ ] **Step 1: Write repository RED tests**
 
@@ -394,12 +394,12 @@ Run archive JVM and Root instrumentation. Commit as `feat: complete archive extr
 ### Task 8: Activity wiring and end-to-end local flows
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/MainActivity.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/BrowserViewModelFactoryTest.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/ISaverApplicationTest.kt`
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/MainActivitySmokeTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/MainActivity.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/BrowserViewModelFactoryTest.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/ISaverApplicationTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/MainActivitySmokeTest.kt`
 - Modify: `scripts/verify_release_gates.ps1`
 
 - [ ] **Step 1: Write wiring RED tests**
@@ -434,7 +434,7 @@ Commit as `feat: wire complete local file workflows`.
 
 **Files:**
 - Create: `scripts/verify_android_compatibility.ps1`
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/CompatibilitySmokeTest.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/CompatibilitySmokeTest.kt`
 - Create: `docs/testing/android-compatibility-matrix.md`
 - Modify: `.gitignore` only if generated emulator reports need an ignored local directory
 

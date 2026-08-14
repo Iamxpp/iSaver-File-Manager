@@ -12,24 +12,24 @@
 
 ## File map
 
-- Create `app/src/main/java/com/iamxpp/isaver/ui/files/FilesModels.kt`: 标签、显示模式、排序字段和方向。
-- Create `app/src/main/java/com/iamxpp/isaver/data/local/BrowserPreferencesRepository.kt`: DataStore 偏好。
-- Create `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeViewModel.kt`: 标签与页面导航编排。
-- Create `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt`: 三标签 App Shell。
-- Create `app/src/main/java/com/iamxpp/isaver/ui/LocationHomeScreen.kt`: “视图”页。
-- Create `app/src/main/java/com/iamxpp/isaver/ui/CustomLocationDialog.kt`: 添加/编辑备注与 Root 路径。
-- Create `app/src/main/java/com/iamxpp/isaver/ui/files/FilesComponents.kt`: 顶栏、搜索、列表行、网格项、底栏和菜单。
-- Modify `app/src/main/java/com/iamxpp/isaver/ui/BrowserUiState.kt`: 显示/排序/选择状态。
-- Modify `app/src/main/java/com/iamxpp/isaver/ui/BrowserViewModel.kt`: 根 `/`、排序与偏好事件。
-- Modify `app/src/main/java/com/iamxpp/isaver/ui/BrowserScreen.kt`: 高保真列表/网格与菜单。
-- Modify `app/src/main/java/com/iamxpp/isaver/MainActivity.kt`: Granted 后组装三标签。
-- Modify `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`: Room、Store 和 Preferences 单例。
+- Create `app/src/main/java/com/isaver/filemanager/ui/files/FilesModels.kt`: 标签、显示模式、排序字段和方向。
+- Create `app/src/main/java/com/isaver/filemanager/data/local/BrowserPreferencesRepository.kt`: DataStore 偏好。
+- Create `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeViewModel.kt`: 标签与页面导航编排。
+- Create `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt`: 三标签 App Shell。
+- Create `app/src/main/java/com/isaver/filemanager/ui/LocationHomeScreen.kt`: “视图”页。
+- Create `app/src/main/java/com/isaver/filemanager/ui/CustomLocationDialog.kt`: 添加/编辑备注与 Root 路径。
+- Create `app/src/main/java/com/isaver/filemanager/ui/files/FilesComponents.kt`: 顶栏、搜索、列表行、网格项、底栏和菜单。
+- Modify `app/src/main/java/com/isaver/filemanager/ui/BrowserUiState.kt`: 显示/排序/选择状态。
+- Modify `app/src/main/java/com/isaver/filemanager/ui/BrowserViewModel.kt`: 根 `/`、排序与偏好事件。
+- Modify `app/src/main/java/com/isaver/filemanager/ui/BrowserScreen.kt`: 高保真列表/网格与菜单。
+- Modify `app/src/main/java/com/isaver/filemanager/MainActivity.kt`: Granted 后组装三标签。
+- Modify `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`: Room、Store 和 Preferences 单例。
 
 ### Task 1: 显示与排序领域模型
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/files/FilesModels.kt`
-- Test: `app/src/test/java/com/iamxpp/isaver/ui/files/FileEntrySorterTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/files/FilesModels.kt`
+- Test: `app/src/test/java/com/isaver/filemanager/ui/files/FileEntrySorterTest.kt`
 
 - [ ] **Step 1: 写排序 RED**
 
@@ -44,7 +44,7 @@
 
 - [ ] **Step 2: 运行 RED**
 
-Run: `.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.ui.files.FileEntrySorterTest"`
+Run: `.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.ui.files.FileEntrySorterTest"`
 
 Expected: FAIL，缺少 `FileEntrySorter`/模型。
 
@@ -71,8 +71,8 @@ Commit: `feat: add file display and sorting models`
 **Files:**
 - Modify: `gradle/libs.versions.toml`
 - Modify: `app/build.gradle.kts`
-- Create: `app/src/main/java/com/iamxpp/isaver/data/local/BrowserPreferencesRepository.kt`
-- Test: `app/src/test/java/com/iamxpp/isaver/data/local/BrowserPreferencesRepositoryTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/data/local/BrowserPreferencesRepository.kt`
+- Test: `app/src/test/java/com/isaver/filemanager/data/local/BrowserPreferencesRepositoryTest.kt`
 
 - [ ] **Step 1: 写持久化 RED**
 
@@ -102,9 +102,9 @@ Commit: `feat: persist browser display preferences`
 ### Task 3: BrowserViewModel 显示、排序和 Browse 根目录
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/BrowserUiState.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/BrowserViewModel.kt`
-- Test: `app/src/test/java/com/iamxpp/isaver/ui/BrowserViewModelTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/BrowserUiState.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/BrowserViewModel.kt`
+- Test: `app/src/test/java/com/isaver/filemanager/ui/BrowserViewModelTest.kt`
 
 - [ ] **Step 1: 写事件 RED**
 
@@ -125,9 +125,9 @@ Commit: `feat: add configurable root browser presentation`
 ### Task 4: 三标签 App Shell 与位置导航
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeViewModel.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeUiState.kt`
-- Test: `app/src/test/java/com/iamxpp/isaver/ui/ISaverHomeViewModelTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeViewModel.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeUiState.kt`
+- Test: `app/src/test/java/com/isaver/filemanager/ui/ISaverHomeViewModelTest.kt`
 
 - [ ] **Step 1: 写导航 RED**
 
@@ -153,10 +153,10 @@ Commit: `feat: add three-tab file navigation`
 ### Task 5: iOS Files 可复用 Compose 组件
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/files/FilesComponents.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/theme/Color.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/theme/Theme.kt`
-- Test: `app/src/androidTest/java/com/iamxpp/isaver/ui/files/FilesComponentsTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/files/FilesComponents.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/theme/Color.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/theme/Theme.kt`
+- Test: `app/src/androidTest/java/com/isaver/filemanager/ui/files/FilesComponentsTest.kt`
 
 - [ ] **Step 1: 写 Compose 语义 RED**
 
@@ -177,9 +177,9 @@ Commit: `feat: add ios files compose components`
 ### Task 6: “视图”页和自定义路径弹窗
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/LocationHomeScreen.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/CustomLocationDialog.kt`
-- Test: `app/src/androidTest/java/com/iamxpp/isaver/ui/LocationHomeScreenTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/LocationHomeScreen.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/CustomLocationDialog.kt`
+- Test: `app/src/androidTest/java/com/isaver/filemanager/ui/LocationHomeScreenTest.kt`
 
 - [ ] **Step 1: 写 UI RED**
 
@@ -198,8 +198,8 @@ Commit: `feat: add custom path views screen`
 ### Task 7: BrowserScreen 高保真菜单与新建文件夹
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/BrowserScreen.kt`
-- Test: `app/src/androidTest/java/com/iamxpp/isaver/ui/BrowserScreenTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/BrowserScreen.kt`
+- Test: `app/src/androidTest/java/com/isaver/filemanager/ui/BrowserScreenTest.kt`
 
 - [ ] **Step 1: 写 UI RED**
 
@@ -218,10 +218,10 @@ Commit: `feat: add ios-style root browser screen`
 ### Task 8: Activity/Application 集成
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/MainActivity.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt`
-- Test: `app/src/androidTest/java/com/iamxpp/isaver/ui/ISaverHomeScreenTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/MainActivity.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt`
+- Test: `app/src/androidTest/java/com/isaver/filemanager/ui/ISaverHomeScreenTest.kt`
 
 - [ ] **Step 1: 写 Granted 后默认显示“视图”的 RED**
 - [ ] **Step 2: 运行 RED**

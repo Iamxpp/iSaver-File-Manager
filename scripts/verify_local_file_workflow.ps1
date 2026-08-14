@@ -185,12 +185,12 @@ try {
     Invoke-Root -Command "mkdir -p -- $fixtureRoot" | Out-Null
     Invoke-Root -Command "mv -- $remoteNote $fixtureRoot/note.txt" | Out-Null
     Invoke-Root -Command "mv -- $remoteZip $fixtureRoot/sample.zip" | Out-Null
-    Invoke-Adb -Arguments @("shell", "am", "force-stop", "com.iamxpp.isaver") | Out-Null
+    Invoke-Adb -Arguments @("shell", "am", "force-stop", "com.isaver.filemanager") | Out-Null
     $launch = (Invoke-Adb -Arguments @(
         "shell", "am", "start", "-W",
         "-a", "android.intent.action.MAIN",
         "-c", "android.intent.category.LAUNCHER",
-        "-n", "com.iamxpp.isaver/.MainActivity"
+        "-n", "com.isaver.filemanager/.MainActivity"
     )) -join "`n"
     if ($launch -notmatch 'Status:\s+ok') {
         throw "Activity launch failed`n$launch"

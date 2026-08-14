@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.iamxpp.isaver.remote"
+    namespace = "com.isaver.filemanager.remote"
     compileSdk = 35
 
     defaultConfig {

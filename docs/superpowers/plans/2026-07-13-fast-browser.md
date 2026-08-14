@@ -13,12 +13,12 @@
 ### Task 1: Versioned Native Listing Protocol
 
 **Files:**
-- Create: app/src/main/java/com/iamxpp/isaver/data/root/DirectorySnapshot.kt
-- Create: app/src/main/java/com/iamxpp/isaver/data/root/NativeDirectoryListingParser.kt
-- Create: app/src/test/java/com/iamxpp/isaver/data/root/NativeDirectoryListingParserTest.kt
+- Create: app/src/main/java/com/isaver/filemanager/data/root/DirectorySnapshot.kt
+- Create: app/src/main/java/com/isaver/filemanager/data/root/NativeDirectoryListingParser.kt
+- Create: app/src/test/java/com/isaver/filemanager/data/root/NativeDirectoryListingParserTest.kt
 
 - [ ] Write RED tests for the V1 parent header, file/directory/other records, spaces, Chinese, quotes, embedded newline, symlink, unknown type, malformed Base64, field count, limits, and one bad record not corrupting valid siblings.
-- [ ] Run: .\gradlew.bat testDebugUnitTest --tests com.iamxpp.isaver.data.root.NativeDirectoryListingParserTest
+- [ ] Run: .\gradlew.bat testDebugUnitTest --tests com.isaver.filemanager.data.root.NativeDirectoryListingParserTest
 - [ ] Confirm failure because parser and DirectorySnapshot do not exist.
 - [ ] Implement the smallest strict parser. It accepts exactly the V1 header, decodes UTF-8 with CodingErrorAction.REPORT, validates RootPath, and returns typed protocol failures without logging raw paths.
 - [ ] Rerun the focused test and existing DirectoryListingParserTest.
@@ -28,8 +28,8 @@
 
 **Files:**
 - Modify: app/src/main/cpp/isaver_fs_helper.c
-- Modify: app/src/main/java/com/iamxpp/isaver/data/root/RootTransferHelper.kt
-- Create: app/src/test/java/com/iamxpp/isaver/data/root/RootDirectoryHelperTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/data/root/RootTransferHelper.kt
+- Create: app/src/test/java/com/isaver/filemanager/data/root/RootDirectoryHelperTest.kt
 - Create: scripts/verify_root_list_helper.ps1
 
 - [ ] Write RED command-construction tests proving only the fixed helper path and list-dir subcommand are emitted and the path is one safely quoted argument.
@@ -42,9 +42,9 @@
 ### Task 3: Production RootFileSystem Integration
 
 **Files:**
-- Modify: app/src/main/java/com/iamxpp/isaver/data/root/RootFileSystem.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/data/root/LibsuRootFileSystem.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/data/root/LibsuRootFileSystemTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/data/root/RootFileSystem.kt
+- Modify: app/src/main/java/com/isaver/filemanager/data/root/LibsuRootFileSystem.kt
+- Modify: app/src/test/java/com/isaver/filemanager/data/root/LibsuRootFileSystemTest.kt
 
 - [ ] Write RED tests for readDirectory(path) returning entries and parent capabilities from one helper invocation, native typed exits, timeout, cancellation, malformed output, and no follow-up parent stat.
 - [ ] Run the focused LibsuRootFileSystem tests and confirm the missing API/old shell list failure.
@@ -56,10 +56,10 @@
 ### Task 4: LRU Snapshot and Perceived Loading
 
 **Files:**
-- Create: app/src/main/java/com/iamxpp/isaver/ui/DirectorySnapshotCache.kt
-- Create: app/src/test/java/com/iamxpp/isaver/ui/DirectorySnapshotCacheTest.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/ui/BrowserViewModel.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/ui/BrowserViewModelTest.kt
+- Create: app/src/main/java/com/isaver/filemanager/ui/DirectorySnapshotCache.kt
+- Create: app/src/test/java/com/isaver/filemanager/ui/DirectorySnapshotCacheTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/ui/BrowserViewModel.kt
+- Modify: app/src/test/java/com/isaver/filemanager/ui/BrowserViewModelTest.kt
 
 - [ ] Write RED tests for 16-entry LRU, 2-second TTL, immediate stale snapshot, background refresh, navigation generation, refresh failure preserving old rows, and no initial storage prefetch.
 - [ ] Write RED virtual-time test proving the blocking spinner remains hidden for loads completing before 120ms.
@@ -71,11 +71,11 @@
 ### Task 5: One Compact Header Everywhere
 
 **Files:**
-- Modify: app/src/main/java/com/iamxpp/isaver/ui/files/FilesComponents.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/ui/LocationHomeScreen.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/ui/BrowserScreen.kt
-- Modify: app/src/androidTest/java/com/iamxpp/isaver/ui/files/FilesComponentsTest.kt
-- Modify: app/src/androidTest/java/com/iamxpp/isaver/ui/BrowserScreenTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/ui/files/FilesComponents.kt
+- Modify: app/src/main/java/com/isaver/filemanager/ui/LocationHomeScreen.kt
+- Modify: app/src/main/java/com/isaver/filemanager/ui/BrowserScreen.kt
+- Modify: app/src/androidTest/java/com/isaver/filemanager/ui/files/FilesComponentsTest.kt
+- Modify: app/src/androidTest/java/com/isaver/filemanager/ui/BrowserScreenTest.kt
 
 - [ ] Write RED bounds tests: title centerX equals bar centerX; title/back/overflow vertical ranges overlap; search begins immediately after bar; long title remains one line.
 - [ ] Replace Browser FilesLargeTitleHeader with shared FilesPageHeader and remove vertical search top padding.
@@ -88,7 +88,7 @@
 
 **Files:**
 - Create: scripts/benchmark_root_listing.ps1
-- Create: app/src/androidTest/java/com/iamxpp/isaver/ui/RootBrowserPerformanceTest.kt
+- Create: app/src/androidTest/java/com/isaver/filemanager/ui/RootBrowserPerformanceTest.kt
 - Modify: docs/superpowers/plans/2026-07-13-fast-browser.md
 
 - [x] Build only /data/local/tmp/isaver-perf fixtures with 0/50/200/1000 entries; cleanup in finally.

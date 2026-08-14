@@ -13,7 +13,7 @@
 ### Task 1: Lock the launcher icon contract
 
 **Files:**
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/LauncherIconInstrumentedTest.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/LauncherIconInstrumentedTest.kt`
 - Modify: `app/src/main/AndroidManifest.xml`
 - Create: `app/src/main/res/drawable/ic_launcher_background.xml`
 - Create: `app/src/main/res/drawable/ic_launcher_foreground.xml`
@@ -36,7 +36,7 @@ adb -s d51f42ac push app\build\outputs\apk\debug\app-debug.apk /data/local/tmp/i
 adb -s d51f42ac shell su -c "pm install -r /data/local/tmp/isaver-debug.apk"
 adb -s d51f42ac push app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk /data/local/tmp/isaver-debug-test.apk
 adb -s d51f42ac shell su -c "pm install -r /data/local/tmp/isaver-debug-test.apk"
-adb -s d51f42ac shell am instrument -w -r -e class com.iamxpp.isaver.LauncherIconInstrumentedTest com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner
+adb -s d51f42ac shell am instrument -w -r -e class com.isaver.filemanager.LauncherIconInstrumentedTest com.isaver.filemanager.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 Expected: FAIL because the application currently declares neither `android:icon` nor `android:roundIcon`.
@@ -68,7 +68,7 @@ Use the Root `pm install -r` flow if MIUI blocks ordinary ADB installation, then
 
 - [ ] **Step 3: Inspect package icon declarations**
 
-Use `dumpsys package com.iamxpp.isaver` and the instrumentation contract to verify the installed package resolves both resources.
+Use `dumpsys package com.isaver.filemanager` and the instrumentation contract to verify the installed package resolves both resources.
 
 - [ ] **Step 4: Capture and inspect the launcher**
 

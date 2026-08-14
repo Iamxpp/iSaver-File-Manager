@@ -13,8 +13,8 @@
 ### Task 1: Correct the archive extraction device fixture
 
 **Files:**
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/archive/ArchiveRootInstrumentedTest.kt`
-- Verify: `app/src/main/java/com/iamxpp/isaver/archive/ArchiveRepository.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/archive/ArchiveRootInstrumentedTest.kt`
+- Verify: `app/src/main/java/com/isaver/filemanager/archive/ArchiveRepository.kt`
 
 - [x] **Step 1: Preserve the existing RED evidence**
 
@@ -22,8 +22,8 @@ Run:
 
 ```powershell
 adb -s d51f42ac shell am instrument -w -r `
-  -e class com.iamxpp.isaver.archive.ArchiveRootInstrumentedTest `
-  com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner
+  -e class com.isaver.filemanager.archive.ArchiveRootInstrumentedTest `
+  com.isaver.filemanager.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 Expected: FAIL at ZIP extraction because `/data/local/tmp/isaver-archive-test/extracted` does not exist.
@@ -46,7 +46,7 @@ Rebuild/install the test APK and rerun the class. Expected: `OK (1 test)`, corre
 - [x] **Step 4: Run archive JVM tests**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.archive.*"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.archive.*"
 ```
 
 Expected: all archive JVM tests pass.
@@ -54,9 +54,9 @@ Expected: all archive JVM tests pass.
 ### Task 2: Diagnose the MainActivity smoke timeout
 
 **Files:**
-- Inspect: `app/src/androidTest/java/com/iamxpp/isaver/MainActivitySmokeTest.kt`
-- Inspect: `app/src/main/java/com/iamxpp/isaver/MainActivity.kt`
-- Inspect: `app/src/main/java/com/iamxpp/isaver/ui/RootGateViewModel.kt`
+- Inspect: `app/src/androidTest/java/com/isaver/filemanager/MainActivitySmokeTest.kt`
+- Inspect: `app/src/main/java/com/isaver/filemanager/MainActivity.kt`
+- Inspect: `app/src/main/java/com/isaver/filemanager/ui/RootGateViewModel.kt`
 - Modify only the file proven responsible by diagnostics.
 
 - [x] **Step 1: Reproduce from a clean process**

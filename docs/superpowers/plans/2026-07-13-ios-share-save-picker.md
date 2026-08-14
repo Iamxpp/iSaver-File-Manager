@@ -17,9 +17,9 @@
 ### Task 1: SEND and VIEW Parser Contract
 
 **Files:**
-- Modify: app/src/main/java/com/iamxpp/isaver/share/ShareIntentParser.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/share/IncomingShare.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/share/ShareIntentParserTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/share/ShareIntentParser.kt
+- Modify: app/src/main/java/com/isaver/filemanager/share/IncomingShare.kt
+- Modify: app/src/test/java/com/isaver/filemanager/share/ShareIntentParserTest.kt
 
 - [ ] Write RED API29/33/35 tests for VIEW intent.data, SEND EXTRA_STREAM, one-item and multi-item ClipData, matching extra+clip, conflicting sources, MAIN, SEND_MULTIPLE, file/http, bad Parcelable, and content readability without trusting flags.
 - [ ] Add RED metadata tests for null/blank DISPLAY_NAME, null/negative SIZE, MIME fallback, Security/runtime provider failures, caller cancellation, and the 2-second asynchronous Parser timeout driven by `CancellationSignal`.
@@ -33,9 +33,9 @@
 
 **Files:**
 - Modify: app/src/main/AndroidManifest.xml
-- Modify: app/src/main/java/com/iamxpp/isaver/MainActivity.kt
-- Create: app/src/androidTest/java/com/iamxpp/isaver/share/ShareIntentResolutionTest.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/MainActivityTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/MainActivity.kt
+- Create: app/src/androidTest/java/com/isaver/filemanager/share/ShareIntentResolutionTest.kt
+- Modify: app/src/test/java/com/isaver/filemanager/MainActivityTest.kt
 
 - [ ] Write RED PackageManager tests proving SEND and content VIEW resolve iSaver while file/http VIEW and SEND_MULTIPLE do not; separately prove file/http SEND can resolve by MIME but Parser rejects it at runtime.
 - [ ] Write RED Activity tests for cold intent once, MAIN normal launch, onNewIntent, history relaunch suppression, and Root-gate pending request retention.
@@ -47,14 +47,14 @@
 ### Task 3: Editable Output Name Model
 
 **Files:**
-- Create: app/src/main/java/com/iamxpp/isaver/transfer/OutputNameDraft.kt
-- Create: app/src/test/java/com/iamxpp/isaver/transfer/OutputNameDraftTest.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferUiState.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferViewModel.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/transfer/TargetNameResolver.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/transfer/RootFileTransferRepository.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/transfer/TargetNameResolverTest.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/transfer/RootFileTransferRepositoryTest.kt
+- Create: app/src/main/java/com/isaver/filemanager/transfer/OutputNameDraft.kt
+- Create: app/src/test/java/com/isaver/filemanager/transfer/OutputNameDraftTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/transfer/TransferUiState.kt
+- Modify: app/src/main/java/com/isaver/filemanager/transfer/TransferViewModel.kt
+- Modify: app/src/main/java/com/isaver/filemanager/transfer/TargetNameResolver.kt
+- Modify: app/src/main/java/com/isaver/filemanager/transfer/RootFileTransferRepository.kt
+- Modify: app/src/test/java/com/isaver/filemanager/transfer/TargetNameResolverTest.kt
+- Modify: app/src/test/java/com/isaver/filemanager/transfer/RootFileTransferRepositoryTest.kt
 
 - [ ] Write RED tests for report.pdf, archive.tar.gz, .env, name., Chinese/emoji, empty extension, multi-part extension, leading-dot extension rejection, slash/NUL, lone surrogate, dot/dot-dot, and 255 UTF-8 bytes.
 - [ ] Implement deterministic split and combine. Stem is required; extension is optional and excludes the separately rendered leading dot.
@@ -67,11 +67,11 @@
 ### Task 4: Immediate Private Cache State Machine
 
 **Files:**
-- Modify: app/src/main/java/com/iamxpp/isaver/transfer/IncomingFileCache.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferUiState.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/transfer/TransferViewModel.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/transfer/IncomingFileCacheTest.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/transfer/TransferViewModelTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/transfer/IncomingFileCache.kt
+- Modify: app/src/main/java/com/isaver/filemanager/transfer/TransferUiState.kt
+- Modify: app/src/main/java/com/isaver/filemanager/transfer/TransferViewModel.kt
+- Modify: app/src/test/java/com/isaver/filemanager/transfer/IncomingFileCacheTest.kt
+- Modify: app/src/test/java/com/isaver/filemanager/transfer/TransferViewModelTest.kt
 
 - [ ] Write RED tests proving acceptShare starts caching immediately even behind Root gate, chooser remains navigable after grant, byte progress updates, save waits for cache, cancel/Root-gate exit cleans pre-publish cache, provider loss requires reshare, and SavedState contains summary but no Uri/cache path.
 - [ ] Define each `RootFileSystem.transferFromAppCache` call as one non-cancellable in-flight publish window; add RED cancellation and new-intent tests immediately before, during, and between ALREADY_EXISTS attempts.
@@ -92,10 +92,10 @@
 - Modify: build.gradle.kts
 - Modify: gradle/libs.versions.toml
 - Modify: app/build.gradle.kts
-- Modify: app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/MainActivity.kt
-- Create: app/src/main/java/com/iamxpp/isaver/di/TransferModule.kt
-- Modify: app/src/test/java/com/iamxpp/isaver/ISaverApplicationTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/ISaverApplication.kt
+- Modify: app/src/main/java/com/isaver/filemanager/MainActivity.kt
+- Create: app/src/main/java/com/isaver/filemanager/di/TransferModule.kt
+- Modify: app/src/test/java/com/isaver/filemanager/ISaverApplicationTest.kt
 
 - [ ] Write RED graph tests that the production parser, cache, transfer repository, resolver, recent recorder, IO dispatcher, and TransferViewModel are wired once.
 - [ ] Add the Hilt plugin/compiler, `@HiltAndroidApp`, `@AndroidEntryPoint`, a focused TransferModule, and `@HiltViewModel` SavedStateHandle injection without exposing Root operations to Activity/Composable.
@@ -107,10 +107,10 @@
 ### Task 6: Full-screen Save Picker Compose UI
 
 **Files:**
-- Create: app/src/main/java/com/iamxpp/isaver/ui/ShareSavePickerScreen.kt
-- Create: app/src/androidTest/java/com/iamxpp/isaver/ui/ShareSavePickerScreenTest.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt
-- Modify: app/src/main/java/com/iamxpp/isaver/MainActivity.kt
+- Create: app/src/main/java/com/isaver/filemanager/ui/ShareSavePickerScreen.kt
+- Create: app/src/androidTest/java/com/isaver/filemanager/ui/ShareSavePickerScreenTest.kt
+- Modify: app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt
+- Modify: app/src/main/java/com/isaver/filemanager/MainActivity.kt
 
 - [ ] Write RED Compose tests for hidden three-tab bar, centered compact title, cancel/back, overflow/save, close search spacing, directories enabled/files disabled, item count, two text fields, progress, retry, uncertain, and no Uri/cache semantics.
 - [ ] Implement a separate scaffold reusing location/browser rows but not FilesBottomBar.
@@ -123,7 +123,7 @@
 ### Task 7: Xiaomi 9 End-to-End Acceptance
 
 **Files:**
-- Create: app/src/androidTest/java/com/iamxpp/isaver/share/ShareSaveEndToEndTest.kt
+- Create: app/src/androidTest/java/com/isaver/filemanager/share/ShareSaveEndToEndTest.kt
 - Create: scripts/send_isaver_test_file.ps1
 - Modify: docs/superpowers/plans/2026-07-13-ios-share-save-picker.md
 

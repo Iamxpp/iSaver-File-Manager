@@ -46,7 +46,7 @@ if ($LASTEXITCODE -ne 0) {
 $forbidden = @(
     'org.apache.commons.net',
     'com.jcraft.jsch',
-    'com.iamxpp.isaver.remote'
+    'com.isaver.filemanager.remote'
 )
 foreach ($package in $forbidden) {
     if ($packages -match [regex]::Escape($package)) {

@@ -8,7 +8,7 @@
 
 ## Problem
 
-On the Xiaomi 9, the Root shell has `uid=0` but runs under SELinux context `u:r:su:s0`. That context can browse Root directories yet cannot open files labeled as iSaver private app data. A real ACTION_VIEW save therefore reaches the publish boundary and fails when the native helper opens `/data/user/0/com.iamxpp.isaver/cache/incoming/<uuid>.tmp`.
+On the Xiaomi 9, the Root shell has `uid=0` but runs under SELinux context `u:r:su:s0`. That context can browse Root directories yet cannot open files labeled as iSaver private app data. A real ACTION_VIEW save therefore reaches the publish boundary and fails when the native helper opens `/data/user/0/com.isaver.filemanager/cache/incoming/<uuid>.tmp`.
 
 The internal cache remains the required source of truth. The fix must not move plaintext to shared storage, weaken permissions, change ownership, accept arbitrary paths, or bypass the existing atomic publish protocol.
 

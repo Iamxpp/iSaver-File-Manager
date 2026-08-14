@@ -50,7 +50,7 @@ function Assert-Instrumentation {
     $output = Invoke-Adb -Arguments @(
         "shell", "timeout", "180s", "am", "instrument", "-w", "-r",
         "-e", "class", $ClassName,
-        "com.iamxpp.isaver.test/com.iamxpp.isaver.ISaverTestRunner"
+        "com.isaver.filemanager.test/com.isaver.filemanager.ISaverTestRunner"
     )
     $text = $output -join "`n"
     if ($text -notmatch 'OK \(\d+ tests?\)') {
@@ -60,7 +60,7 @@ function Assert-Instrumentation {
         throw "Instrumentation reported failure text: $ClassName`n$text"
     }
     $fatal = (Invoke-Adb -Arguments @("logcat", "-d", "-v", "brief")) -join "`n"
-    if ($fatal -match 'FATAL EXCEPTION|ANR in com\.iamxpp\.isaver') {
+    if ($fatal -match 'FATAL EXCEPTION|ANR in com\.isaver\.filemanager') {
         throw "Fatal/ANR detected after $ClassName`n$fatal"
     }
 }
@@ -107,29 +107,29 @@ try {
     Invoke-Root "pm install -r -t $remoteTestApk" | Out-Null
 
     $groups = @(
-        "com.iamxpp.isaver.archive.ArchiveRootInstrumentedTest",
-        "com.iamxpp.isaver.bookmarks.RootBookmarkInstrumentedTest",
-        "com.iamxpp.isaver.data.local.BrowserSessionInstrumentedTest",
-        "com.iamxpp.isaver.data.local.ISaverDatabaseMigrationTest",
-        "com.iamxpp.isaver.export.ExternalFileProviderInstrumentedTest",
-        "com.iamxpp.isaver.export.RootFileOpenInstrumentedTest",
-        "com.iamxpp.isaver.export.RootFileShareInstrumentedTest",
-        "com.iamxpp.isaver.fileops.RootChecksumInstrumentedTest",
-        "com.iamxpp.isaver.fileops.RootDirectoryCopyMoveInstrumentedTest",
-        "com.iamxpp.isaver.fileops.RootFileCopyInstrumentedTest",
-        "com.iamxpp.isaver.fileops.RootFileCreateInstrumentedTest",
-        "com.iamxpp.isaver.fileops.RootFileMoveInstrumentedTest",
-        "com.iamxpp.isaver.fileops.RootFilePermissionInstrumentedTest",
-        "com.iamxpp.isaver.filetools.RootFileToolsInstrumentedTest",
-        "com.iamxpp.isaver.LauncherIconInstrumentedTest",
-        "com.iamxpp.isaver.release.LocalStabilityInstrumentedTest",
-        "com.iamxpp.isaver.search.LocalSearchInstrumentedTest",
-        "com.iamxpp.isaver.share.ShareIntentResolutionTest",
-        "com.iamxpp.isaver.texteditor.RootTextEditorInstrumentedTest",
-        "com.iamxpp.isaver.transfer.IncomingStreamProviderInstrumentedTest",
-        "com.iamxpp.isaver.transfer.RootStreamTransferInstrumentedTest",
-        "com.iamxpp.isaver.ui.theme.ThemeConfigurationInstrumentedTest",
-        "com.iamxpp.isaver.MainActivitySmokeTest"
+        "com.isaver.filemanager.archive.ArchiveRootInstrumentedTest",
+        "com.isaver.filemanager.bookmarks.RootBookmarkInstrumentedTest",
+        "com.isaver.filemanager.data.local.BrowserSessionInstrumentedTest",
+        "com.isaver.filemanager.data.local.ISaverDatabaseMigrationTest",
+        "com.isaver.filemanager.export.ExternalFileProviderInstrumentedTest",
+        "com.isaver.filemanager.export.RootFileOpenInstrumentedTest",
+        "com.isaver.filemanager.export.RootFileShareInstrumentedTest",
+        "com.isaver.filemanager.fileops.RootChecksumInstrumentedTest",
+        "com.isaver.filemanager.fileops.RootDirectoryCopyMoveInstrumentedTest",
+        "com.isaver.filemanager.fileops.RootFileCopyInstrumentedTest",
+        "com.isaver.filemanager.fileops.RootFileCreateInstrumentedTest",
+        "com.isaver.filemanager.fileops.RootFileMoveInstrumentedTest",
+        "com.isaver.filemanager.fileops.RootFilePermissionInstrumentedTest",
+        "com.isaver.filemanager.filetools.RootFileToolsInstrumentedTest",
+        "com.isaver.filemanager.LauncherIconInstrumentedTest",
+        "com.isaver.filemanager.release.LocalStabilityInstrumentedTest",
+        "com.isaver.filemanager.search.LocalSearchInstrumentedTest",
+        "com.isaver.filemanager.share.ShareIntentResolutionTest",
+        "com.isaver.filemanager.texteditor.RootTextEditorInstrumentedTest",
+        "com.isaver.filemanager.transfer.IncomingStreamProviderInstrumentedTest",
+        "com.isaver.filemanager.transfer.RootStreamTransferInstrumentedTest",
+        "com.isaver.filemanager.ui.theme.ThemeConfigurationInstrumentedTest",
+        "com.isaver.filemanager.MainActivitySmokeTest"
     )
     foreach ($group in $groups) {
         Assert-Instrumentation -ClassName $group

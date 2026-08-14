@@ -156,7 +156,7 @@ ISaverHomeScreen
 7. 夜间模式下名称、分组标题和输入内容仍使用浅色主题的深色文字。
 8. 保存成功后退出分享流程；普通启动恢复三点菜单。
 
-真机验收使用 debug `content://com.iamxpp.isaver.debug-share/report.pdf`，禁止读取或修改真实微信数据。小米 9 保持夜间模式，分别截图“视图”“真实目录”“保存中/完成后”状态，与 `save-picker-layout-v2.html` 和用户参考图对比。
+真机验收使用 debug `content://com.isaver.filemanager.debug-share/report.pdf`，禁止读取或修改真实微信数据。小米 9 保持夜间模式，分别截图“视图”“真实目录”“保存中/完成后”状态，与 `save-picker-layout-v2.html` 和用户参考图对比。
 
 ## 11. 文档同步范围
 

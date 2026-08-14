@@ -12,31 +12,31 @@
 
 ## File Structure
 
-- Create `app/src/main/java/com/iamxpp/isaver/data/root/RootTransferSource.kt`: typed one-shot content stream capability used only at the Root publish boundary.
-- Create `app/src/main/java/com/iamxpp/isaver/transfer/IncomingStreamRegistry.kt`: token issue, expiry, atomic consume, validation, and revocation.
-- Create `app/src/main/java/com/iamxpp/isaver/transfer/IncomingStreamProvider.kt`: Binder/ContentProvider adapter with Root/Shell-only reads.
-- Create `app/src/test/java/com/iamxpp/isaver/transfer/IncomingStreamRegistryTest.kt`: deterministic registry security and concurrency tests.
-- Create `app/src/androidTest/java/com/iamxpp/isaver/transfer/IncomingStreamProviderInstrumentedTest.kt`: real descriptor bridge and replay tests.
-- Create `app/src/androidTest/java/com/iamxpp/isaver/transfer/RootStreamTransferInstrumentedTest.kt`: actual libsu/native publish test on the Root device.
+- Create `app/src/main/java/com/isaver/filemanager/data/root/RootTransferSource.kt`: typed one-shot content stream capability used only at the Root publish boundary.
+- Create `app/src/main/java/com/isaver/filemanager/transfer/IncomingStreamRegistry.kt`: token issue, expiry, atomic consume, validation, and revocation.
+- Create `app/src/main/java/com/isaver/filemanager/transfer/IncomingStreamProvider.kt`: Binder/ContentProvider adapter with Root/Shell-only reads.
+- Create `app/src/test/java/com/isaver/filemanager/transfer/IncomingStreamRegistryTest.kt`: deterministic registry security and concurrency tests.
+- Create `app/src/androidTest/java/com/isaver/filemanager/transfer/IncomingStreamProviderInstrumentedTest.kt`: real descriptor bridge and replay tests.
+- Create `app/src/androidTest/java/com/isaver/filemanager/transfer/RootStreamTransferInstrumentedTest.kt`: actual libsu/native publish test on the Root device.
 - Modify `app/src/main/AndroidManifest.xml`: register the narrow stream provider.
-- Modify `app/src/main/java/com/iamxpp/isaver/transfer/IncomingFileCache.kt`: expose one synchronous identity validator shared by the provider and suspend API.
-- Modify `app/src/main/java/com/iamxpp/isaver/data/root/RootFileSystem.kt`: replace path-based cache publication with the typed stream source.
-- Modify `app/src/main/java/com/iamxpp/isaver/data/root/RootTransferHelper.kt`: construct the fixed `content read | copy-publish-stdin` pipeline.
-- Modify `app/src/main/java/com/iamxpp/isaver/data/root/LibsuRootFileSystem.kt`: dispatch the stream command while retaining stage/reconciliation logic.
+- Modify `app/src/main/java/com/isaver/filemanager/transfer/IncomingFileCache.kt`: expose one synchronous identity validator shared by the provider and suspend API.
+- Modify `app/src/main/java/com/isaver/filemanager/data/root/RootFileSystem.kt`: replace path-based cache publication with the typed stream source.
+- Modify `app/src/main/java/com/isaver/filemanager/data/root/RootTransferHelper.kt`: construct the fixed `content read | copy-publish-stdin` pipeline.
+- Modify `app/src/main/java/com/isaver/filemanager/data/root/LibsuRootFileSystem.kt`: dispatch the stream command while retaining stage/reconciliation logic.
 - Modify `app/src/main/cpp/isaver_fs_helper.c`: replace the private-path source open with exact-length stdin ingestion.
-- Modify `app/src/main/java/com/iamxpp/isaver/transfer/RootFileTransferRepository.kt`: issue/revoke one capability per candidate publish window.
-- Modify `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`: own and connect the registry, provider, repository, and Root filesystem.
+- Modify `app/src/main/java/com/isaver/filemanager/transfer/RootFileTransferRepository.kt`: issue/revoke one capability per candidate publish window.
+- Modify `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`: own and connect the registry, provider, repository, and Root filesystem.
 - Modify adjacent JVM tests named in each task.
 - Modify PRD/SDD 3.3 and the superseded picker plan after runtime behavior is green.
 
 ### Task 1: One-Shot Stream Capability Registry
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/data/root/RootTransferSource.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/transfer/IncomingStreamRegistry.kt`
-- Create: `app/src/test/java/com/iamxpp/isaver/transfer/IncomingStreamRegistryTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/transfer/IncomingFileCache.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/transfer/IncomingFileCacheTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/data/root/RootTransferSource.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/transfer/IncomingStreamRegistry.kt`
+- Create: `app/src/test/java/com/isaver/filemanager/transfer/IncomingStreamRegistryTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/transfer/IncomingFileCache.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/transfer/IncomingFileCacheTest.kt`
 
 - [ ] **Step 1: Write RED registry tests**
 
@@ -48,7 +48,7 @@ Create deterministic tests covering token shape, exact URI, single consumption, 
     val source = registry.issue(cached()).getOrThrow()
 
     assertEquals(
-        "content://com.iamxpp.isaver.incoming-stream/incoming/${"ab".repeat(32)}",
+        "content://com.isaver.filemanager.incoming-stream/incoming/${"ab".repeat(32)}",
         source.contentUri,
     )
     assertEquals(4L, source.expectedSizeBytes)
@@ -82,7 +82,7 @@ Use an injected token factory returning `ByteArray(32) { 0xab.toByte() }`, and a
 Run:
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.transfer.IncomingStreamRegistryTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.transfer.IncomingStreamRegistryTest"
 ```
 
 Expected: compilation fails because `IncomingStreamRegistry` and `RootTransferSource` do not exist.
@@ -169,7 +169,7 @@ Extend `IncomingFileCacheTest` to prove replacement with a same-sized different 
 - [ ] **Step 5: Run focused tests and verify GREEN**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.transfer.IncomingStreamRegistryTest" --tests "com.iamxpp.isaver.transfer.IncomingFileCacheTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.transfer.IncomingStreamRegistryTest" --tests "com.isaver.filemanager.transfer.IncomingFileCacheTest"
 ```
 
 Expected: all selected tests pass.
@@ -177,18 +177,18 @@ Expected: all selected tests pass.
 - [ ] **Step 6: Commit the registry slice**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/data/root/RootTransferSource.kt app/src/main/java/com/iamxpp/isaver/transfer/IncomingStreamRegistry.kt app/src/main/java/com/iamxpp/isaver/transfer/IncomingFileCache.kt app/src/test/java/com/iamxpp/isaver/transfer/IncomingStreamRegistryTest.kt app/src/test/java/com/iamxpp/isaver/transfer/IncomingFileCacheTest.kt
+git add app/src/main/java/com/isaver/filemanager/data/root/RootTransferSource.kt app/src/main/java/com/isaver/filemanager/transfer/IncomingStreamRegistry.kt app/src/main/java/com/isaver/filemanager/transfer/IncomingFileCache.kt app/src/test/java/com/isaver/filemanager/transfer/IncomingStreamRegistryTest.kt app/src/test/java/com/isaver/filemanager/transfer/IncomingFileCacheTest.kt
 git commit -m "feat: add one-shot incoming stream capabilities"
 ```
 
 ### Task 2: Root/Shell-Only ContentProvider
 
 **Files:**
-- Create: `app/src/main/java/com/iamxpp/isaver/transfer/IncomingStreamProvider.kt`
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/transfer/IncomingStreamProviderInstrumentedTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/transfer/IncomingStreamProvider.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/transfer/IncomingStreamProviderInstrumentedTest.kt`
 - Modify: `app/src/main/AndroidManifest.xml`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/ISaverApplicationTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/ISaverApplicationTest.kt`
 
 - [ ] **Step 1: Write RED application ownership and manifest tests**
 
@@ -231,7 +231,7 @@ Also query `PackageManager` and assert `${context.packageName}.incoming-stream` 
 - [ ] **Step 2: Run tests and verify RED**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.ISaverApplicationTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.ISaverApplicationTest"
 .\gradlew.bat assembleDebugAndroidTest
 ```
 
@@ -309,13 +309,13 @@ internal val incomingStreamRegistry: IncomingStreamRegistry by lazy {
 Build, install through the known MIUI Root path, then run only the non-Activity class:
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.ISaverApplicationTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.ISaverApplicationTest"
 .\gradlew.bat assembleDebug assembleDebugAndroidTest
 adb -s d51f42ac push app\build\outputs\apk\debug\app-debug.apk /data/local/tmp/isaver-debug.apk
 adb -s d51f42ac shell su -c "pm install -r -t /data/local/tmp/isaver-debug.apk"
 adb -s d51f42ac push app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk /data/local/tmp/isaver-debug-androidTest.apk
 adb -s d51f42ac shell su -c "pm install -r -t /data/local/tmp/isaver-debug-androidTest.apk"
-adb -s d51f42ac shell am instrument -w -r -e class com.iamxpp.isaver.transfer.IncomingStreamProviderInstrumentedTest com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner
+adb -s d51f42ac shell am instrument -w -r -e class com.isaver.filemanager.transfer.IncomingStreamProviderInstrumentedTest com.isaver.filemanager.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 Expected: JVM and provider tests pass; first shell read equals fixture bytes, replay and app-UID access do not.
@@ -323,18 +323,18 @@ Expected: JVM and provider tests pass; first shell read equals fixture bytes, re
 - [ ] **Step 7: Commit the provider slice**
 
 ```powershell
-git add app/src/main/AndroidManifest.xml app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt app/src/main/java/com/iamxpp/isaver/transfer/IncomingStreamProvider.kt app/src/test/java/com/iamxpp/isaver/ISaverApplicationTest.kt app/src/androidTest/java/com/iamxpp/isaver/transfer/IncomingStreamProviderInstrumentedTest.kt
+git add app/src/main/AndroidManifest.xml app/src/main/java/com/isaver/filemanager/ISaverApplication.kt app/src/main/java/com/isaver/filemanager/transfer/IncomingStreamProvider.kt app/src/test/java/com/isaver/filemanager/ISaverApplicationTest.kt app/src/androidTest/java/com/isaver/filemanager/transfer/IncomingStreamProviderInstrumentedTest.kt
 git commit -m "feat: expose one-shot root stream provider"
 ```
 
 ### Task 3: Typed Root Stream Command
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/data/root/RootFileSystem.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/data/root/RootTransferHelper.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/data/root/LibsuRootFileSystem.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/data/root/RootTransferHelperTest.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/data/root/RootTransferStagingTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/data/root/RootFileSystem.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/data/root/RootTransferHelper.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/data/root/LibsuRootFileSystem.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/data/root/RootTransferHelperTest.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/data/root/RootTransferStagingTest.kt`
 
 - [ ] **Step 1: Write RED command and staging tests**
 
@@ -349,7 +349,7 @@ Replace path-source expectations with the desired fixed pipeline:
         final = "报告 'final'.pdf",
         parentId = RootFileIdentity(1, 2),
         source = RootTransferSource(
-            contentUri = "content://com.iamxpp.isaver.incoming-stream/incoming/${"ab".repeat(32)}",
+            contentUri = "content://com.isaver.filemanager.incoming-stream/incoming/${"ab".repeat(32)}",
             expectedSizeBytes = 37,
             token = "ab".repeat(32),
         ),
@@ -368,7 +368,7 @@ Update `RootTransferStagingTest` to call `transferFromStream(source(), target, n
 - [ ] **Step 2: Run tests and verify RED**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.data.root.RootTransferHelperTest" --tests "com.iamxpp.isaver.data.root.RootTransferStagingTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.data.root.RootTransferHelperTest" --tests "com.isaver.filemanager.data.root.RootTransferStagingTest"
 ```
 
 Expected: compilation fails because the stream API and command do not exist.
@@ -430,7 +430,7 @@ Rename the override to `transferFromStream`, use `source.expectedSizeBytes` for 
 - [ ] **Step 6: Run focused tests and verify GREEN**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.data.root.RootTransferHelperTest" --tests "com.iamxpp.isaver.data.root.RootTransferStagingTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.data.root.RootTransferHelperTest" --tests "com.isaver.filemanager.data.root.RootTransferStagingTest"
 ```
 
 Expected: all selected tests pass and command assertions contain no private cache path.
@@ -438,7 +438,7 @@ Expected: all selected tests pass and command assertions contain no private cach
 - [ ] **Step 7: Commit the Kotlin Root boundary slice**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/data/root/RootFileSystem.kt app/src/main/java/com/iamxpp/isaver/data/root/RootTransferHelper.kt app/src/main/java/com/iamxpp/isaver/data/root/LibsuRootFileSystem.kt app/src/test/java/com/iamxpp/isaver/data/root/RootTransferHelperTest.kt app/src/test/java/com/iamxpp/isaver/data/root/RootTransferStagingTest.kt
+git add app/src/main/java/com/isaver/filemanager/data/root/RootFileSystem.kt app/src/main/java/com/isaver/filemanager/data/root/RootTransferHelper.kt app/src/main/java/com/isaver/filemanager/data/root/LibsuRootFileSystem.kt app/src/test/java/com/isaver/filemanager/data/root/RootTransferHelperTest.kt app/src/test/java/com/isaver/filemanager/data/root/RootTransferStagingTest.kt
 git commit -m "refactor: publish root files from typed streams"
 ```
 
@@ -446,7 +446,7 @@ git commit -m "refactor: publish root files from typed streams"
 
 **Files:**
 - Modify: `app/src/main/cpp/isaver_fs_helper.c`
-- Modify: `app/src/test/java/com/iamxpp/isaver/data/root/RootTransferHelperTest.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/data/root/RootTransferHelperTest.kt`
 
 - [ ] **Step 1: Add the RED allowlist assertion**
 
@@ -468,7 +468,7 @@ Add a source-level contract test that reads the C file and proves the new allowl
 - [ ] **Step 2: Run and verify RED**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.data.root.RootTransferHelperTest.native helper allowlists only stdin publication"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.data.root.RootTransferHelperTest.native helper allowlists only stdin publication"
 ```
 
 Expected: assertion fails because `main` still allowlists `copy-publish`.
@@ -518,7 +518,7 @@ Retain 0600 payload verification, fsync, `renameat2(RENAME_NOREPLACE)`, stage id
 - [ ] **Step 4: Build every ABI and run the contract test**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.data.root.RootTransferHelperTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.data.root.RootTransferHelperTest"
 .\gradlew.bat assembleDebug
 ```
 
@@ -527,16 +527,16 @@ Expected: tests and NDK builds for arm64-v8a, armeabi-v7a, x86, and x86_64 pass.
 - [ ] **Step 5: Commit the native stream slice**
 
 ```powershell
-git add app/src/main/cpp/isaver_fs_helper.c app/src/test/java/com/iamxpp/isaver/data/root/RootTransferHelperTest.kt
+git add app/src/main/cpp/isaver_fs_helper.c app/src/test/java/com/isaver/filemanager/data/root/RootTransferHelperTest.kt
 git commit -m "feat: publish exact native stdin streams"
 ```
 
 ### Task 5: Capability Lifecycle Per Publish Attempt
 
 **Files:**
-- Modify: `app/src/main/java/com/iamxpp/isaver/transfer/RootFileTransferRepository.kt`
-- Modify: `app/src/test/java/com/iamxpp/isaver/transfer/RootFileTransferRepositoryTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/transfer/RootFileTransferRepository.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/transfer/RootFileTransferRepositoryTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ISaverApplication.kt`
 
 - [ ] **Step 1: Write RED lifecycle tests**
 
@@ -572,7 +572,7 @@ Extend repository tests with issuer/revoker spies:
 private fun source(index: Int): RootTransferSource {
     val token = (index + 1).toString(16).padStart(64, '0')
     return RootTransferSource(
-        contentUri = "content://com.iamxpp.isaver.incoming-stream/incoming/$token",
+        contentUri = "content://com.isaver.filemanager.incoming-stream/incoming/$token",
         expectedSizeBytes = 1L,
         token = token,
     )
@@ -584,7 +584,7 @@ Also cover exception, cancellation before Root dispatch, definite failure, and u
 - [ ] **Step 2: Run and verify RED**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.transfer.RootFileTransferRepositoryTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.transfer.RootFileTransferRepositoryTest"
 ```
 
 Expected: compilation fails because repository has no issue/revoke dependencies and fake filesystem still uses path sources.
@@ -649,7 +649,7 @@ revokeSource = incomingStreamRegistry::revoke,
 - [ ] **Step 5: Run repository and transfer-state regressions**
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.transfer.RootFileTransferRepositoryTest" --tests "com.iamxpp.isaver.transfer.TransferViewModelTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.transfer.RootFileTransferRepositoryTest" --tests "com.isaver.filemanager.transfer.TransferViewModelTest"
 ```
 
 Expected: all selected tests pass.
@@ -657,14 +657,14 @@ Expected: all selected tests pass.
 - [ ] **Step 6: Commit the lifecycle slice**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/transfer/RootFileTransferRepository.kt app/src/test/java/com/iamxpp/isaver/transfer/RootFileTransferRepositoryTest.kt app/src/main/java/com/iamxpp/isaver/ISaverApplication.kt
+git add app/src/main/java/com/isaver/filemanager/transfer/RootFileTransferRepository.kt app/src/test/java/com/isaver/filemanager/transfer/RootFileTransferRepositoryTest.kt app/src/main/java/com/isaver/filemanager/ISaverApplication.kt
 git commit -m "fix: stream private cache into root publishes"
 ```
 
 ### Task 6: Actual Root Stream Integration
 
 **Files:**
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/transfer/RootStreamTransferInstrumentedTest.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/transfer/RootStreamTransferInstrumentedTest.kt`
 - Modify only owning production files if this test reveals a verified defect.
 
 - [ ] **Step 1: Write the Root integration test**
@@ -780,7 +780,7 @@ The shorter and longer declared sizes respectively exercise extra-byte and early
 Install the app/test APKs through Root and run:
 
 ```powershell
-adb -s d51f42ac shell am instrument -w -r -e class com.iamxpp.isaver.transfer.RootStreamTransferInstrumentedTest com.iamxpp.isaver.test/androidx.test.runner.AndroidJUnitRunner
+adb -s d51f42ac shell am instrument -w -r -e class com.isaver.filemanager.transfer.RootStreamTransferInstrumentedTest com.isaver.filemanager.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 Expected before the complete bridge: test fails at the actual publish boundary; after Tasks 1–5 it must pass.
@@ -790,7 +790,7 @@ Expected before the complete bridge: test fails at the actual publish boundary; 
 Have the test or ADB record only the exit status, not the cache path contents:
 
 ```powershell
-adb -s d51f42ac shell su -c "head -c 1 /data/user/0/com.iamxpp.isaver/cache/incoming/*.tmp >/dev/null 2>&1"; $LASTEXITCODE
+adb -s d51f42ac shell su -c "head -c 1 /data/user/0/com.isaver.filemanager/cache/incoming/*.tmp >/dev/null 2>&1"; $LASTEXITCODE
 ```
 
 Expected: non-zero, while the provider-backed integration test passes.
@@ -798,7 +798,7 @@ Expected: non-zero, while the provider-backed integration test passes.
 - [ ] **Step 4: Commit the integration test**
 
 ```powershell
-git add app/src/androidTest/java/com/iamxpp/isaver/transfer/RootStreamTransferInstrumentedTest.kt
+git add app/src/androidTest/java/com/isaver/filemanager/transfer/RootStreamTransferInstrumentedTest.kt
 git commit -m "test: verify root stream publishing on device"
 ```
 
@@ -809,7 +809,7 @@ git commit -m "test: verify root stream publishing on device"
 - Modify: `E:/PROJECT/Android_files/项目文档/iSaver_SDD_系统设计文档.md`
 - Modify: `docs/superpowers/plans/2026-07-13-ios-share-save-picker.md`
 - Modify: `app/src/main/res/values/themes.xml`
-- Add: `app/src/androidTest/java/com/iamxpp/isaver/ui/theme/ThemeConfigurationInstrumentedTest.kt`
+- Add: `app/src/androidTest/java/com/isaver/filemanager/ui/theme/ThemeConfigurationInstrumentedTest.kt`
 
 - [ ] **Step 1: Update PRD/SDD stream semantics**
 
@@ -840,8 +840,8 @@ Install through the MIUI Root path and run the provider, Root stream, theme, par
 
 ```powershell
 adb -s d51f42ac shell su -c "rm -rf /data/local/tmp/isaver-inline-save-test && mkdir -p /data/local/tmp/isaver-inline-save-test"
-adb -s d51f42ac shell am force-stop com.iamxpp.isaver
-adb -s d51f42ac shell am start -W -a android.intent.action.VIEW -d content://com.iamxpp.isaver.debug-share/report.pdf -t application/pdf --grant-read-uri-permission -n com.iamxpp.isaver/.MainActivity
+adb -s d51f42ac shell am force-stop com.isaver.filemanager
+adb -s d51f42ac shell am start -W -a android.intent.action.VIEW -d content://com.isaver.filemanager.debug-share/report.pdf -t application/pdf --grant-read-uri-permission -n com.isaver.filemanager/.MainActivity
 ```
 
 Using iSaver, enter the isolated target from Browse or an existing temporary custom location and tap “存储”. Verify:
@@ -857,7 +857,7 @@ Using iSaver, enter the isolated target from Browse or an existing temporary cus
 
 ```powershell
 adb -s d51f42ac shell su -c "rm -rf /data/local/tmp/isaver-inline-save-test"
-adb -s d51f42ac logcat -d -t 300 | Select-String "FATAL EXCEPTION|AndroidRuntime|com.iamxpp.isaver"
+adb -s d51f42ac logcat -d -t 300 | Select-String "FATAL EXCEPTION|AndroidRuntime|com.isaver.filemanager"
 ```
 
 Expected: test directory and temporary stages are gone, and no iSaver fatal exception exists. Do not add screenshots, XML dumps, or logs to Git.
@@ -865,7 +865,7 @@ Expected: test directory and temporary stages are gone, and no iSaver fatal exce
 - [ ] **Step 6: Commit the verified theme/docs slice**
 
 ```powershell
-git add app/src/main/res/values/themes.xml app/src/androidTest/java/com/iamxpp/isaver/ui/theme/ThemeConfigurationInstrumentedTest.kt docs/superpowers/plans/2026-07-13-ios-share-save-picker.md
+git add app/src/main/res/values/themes.xml app/src/androidTest/java/com/isaver/filemanager/ui/theme/ThemeConfigurationInstrumentedTest.kt docs/superpowers/plans/2026-07-13-ios-share-save-picker.md
 git diff --cached --check
 git commit -m "fix: complete inline root save workflow"
 ```

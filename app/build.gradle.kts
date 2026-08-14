@@ -7,16 +7,16 @@ plugins {
 }
 
 android {
-    namespace = "com.iamxpp.isaver"
+    namespace = "com.isaver.filemanager"
     compileSdk = 35
     buildToolsVersion = "35.0.0"
     defaultConfig {
-        applicationId = "com.iamxpp.isaver"
+        applicationId = "com.isaver.filemanager"
         minSdk = 29
         targetSdk = 35
         versionCode = 5
         versionName = "0.5.1"
-        testInstrumentationRunner = "com.iamxpp.isaver.ISaverTestRunner"
+        testInstrumentationRunner = "com.isaver.filemanager.ISaverTestRunner"
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }

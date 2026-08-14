@@ -196,12 +196,12 @@ try {
     Invoke-Adb -Arguments @("push", $TestApk, "/data/local/tmp/app-debug-androidTest.apk") | Out-Host
     Invoke-Root "pm install -r -t /data/local/tmp/app-debug.apk" | Out-Host
     Invoke-Root "pm install -r -t /data/local/tmp/app-debug-androidTest.apk" | Out-Host
-    Invoke-Root "cmd appops set com.iamxpp.isaver 10021 allow" | Out-Null
+    Invoke-Root "cmd appops set com.isaver.filemanager 10021 allow" | Out-Null
     Invoke-Adb -Arguments @("logcat", "-c") | Out-Null
     $instrumentation = Invoke-Adb -Arguments @(
         "shell", "am", "instrument", "-w", "-r",
-        "-e", "class", "com.iamxpp.isaver.ui.RootBrowserPerformanceTest",
-        "com.iamxpp.isaver.test/com.iamxpp.isaver.ISaverTestRunner"
+        "-e", "class", "com.isaver.filemanager.ui.RootBrowserPerformanceTest",
+        "com.isaver.filemanager.test/com.isaver.filemanager.ISaverTestRunner"
     )
     $instrumentation | Out-Host
     Assert-True (($instrumentation -join "`n") -match 'OK \(1 test\)') "Performance instrumentation did not pass"

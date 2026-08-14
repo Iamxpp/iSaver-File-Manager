@@ -12,24 +12,24 @@
 
 ## File Structure
 
-- Create `app/src/main/java/com/iamxpp/isaver/ui/InlineSaveBar.kt`: compact two-field editor and transfer status/actions.
-- Create `app/src/androidTest/java/com/iamxpp/isaver/ui/InlineSaveBarTest.kt`: size, value, editability, and error-action UI coverage.
-- Modify `app/src/main/java/com/iamxpp/isaver/ui/files/FilesComponents.kt`: mutually exclusive overflow/save top-bar action.
-- Modify `app/src/main/java/com/iamxpp/isaver/ui/LocationHomeScreen.kt`: render save action on the Views header and explicitly color location text.
-- Modify `app/src/main/java/com/iamxpp/isaver/ui/BrowserScreen.kt`: render save action on every real directory header.
-- Modify `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt`: retain all tabs and insert the inline save bar.
-- Modify `app/src/main/java/com/iamxpp/isaver/transfer/TransferViewModel.kt`: clear stale logical targets.
-- Modify `app/src/main/java/com/iamxpp/isaver/MainActivity.kt`: remove standalone picker routing and synchronize home navigation with transfer targets.
-- Delete `app/src/main/java/com/iamxpp/isaver/ui/ShareSavePickerScreen.kt`: remove the superseded standalone product surface.
-- Delete `app/src/androidTest/java/com/iamxpp/isaver/ui/ShareSavePickerScreenTest.kt`: replace old behavior tests with inline-mode tests.
+- Create `app/src/main/java/com/isaver/filemanager/ui/InlineSaveBar.kt`: compact two-field editor and transfer status/actions.
+- Create `app/src/androidTest/java/com/isaver/filemanager/ui/InlineSaveBarTest.kt`: size, value, editability, and error-action UI coverage.
+- Modify `app/src/main/java/com/isaver/filemanager/ui/files/FilesComponents.kt`: mutually exclusive overflow/save top-bar action.
+- Modify `app/src/main/java/com/isaver/filemanager/ui/LocationHomeScreen.kt`: render save action on the Views header and explicitly color location text.
+- Modify `app/src/main/java/com/isaver/filemanager/ui/BrowserScreen.kt`: render save action on every real directory header.
+- Modify `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt`: retain all tabs and insert the inline save bar.
+- Modify `app/src/main/java/com/isaver/filemanager/transfer/TransferViewModel.kt`: clear stale logical targets.
+- Modify `app/src/main/java/com/isaver/filemanager/MainActivity.kt`: remove standalone picker routing and synchronize home navigation with transfer targets.
+- Delete `app/src/main/java/com/isaver/filemanager/ui/ShareSavePickerScreen.kt`: remove the superseded standalone product surface.
+- Delete `app/src/androidTest/java/com/isaver/filemanager/ui/ShareSavePickerScreenTest.kt`: replace old behavior tests with inline-mode tests.
 - Modify `app/src/main/res/values/themes.xml`: disable platform Force Dark.
 - Modify adjacent unit/instrumentation tests and the PRD/SDD listed in Task 6.
 
 ### Task 1: Clear Targets Outside Real Directories
 
 **Files:**
-- Modify: `app/src/test/java/com/iamxpp/isaver/transfer/TransferViewModelTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/transfer/TransferViewModel.kt`
+- Modify: `app/src/test/java/com/isaver/filemanager/transfer/TransferViewModelTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/transfer/TransferViewModel.kt`
 
 - [ ] **Step 1: Write the failing target-clear test**
 
@@ -63,7 +63,7 @@ fun `clearing target disables save without discarding cached share`() = runTest 
 Run:
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.transfer.TransferViewModelTest"
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.transfer.TransferViewModelTest"
 ```
 
 Expected: compilation fails because `clearTarget()` does not exist.
@@ -92,15 +92,15 @@ Run the Task 1 command again. Expected: all `TransferViewModelTest` tests pass.
 - [ ] **Step 5: Commit the target lifecycle slice**
 
 ```powershell
-git add app/src/test/java/com/iamxpp/isaver/transfer/TransferViewModelTest.kt app/src/main/java/com/iamxpp/isaver/transfer/TransferViewModel.kt
+git add app/src/test/java/com/isaver/filemanager/transfer/TransferViewModelTest.kt app/src/main/java/com/isaver/filemanager/transfer/TransferViewModel.kt
 git commit -m "fix: clear stale share save targets"
 ```
 
 ### Task 2: Build the Compact Save Bar
 
 **Files:**
-- Create: `app/src/androidTest/java/com/iamxpp/isaver/ui/InlineSaveBarTest.kt`
-- Create: `app/src/main/java/com/iamxpp/isaver/ui/InlineSaveBar.kt`
+- Create: `app/src/androidTest/java/com/isaver/filemanager/ui/InlineSaveBarTest.kt`
+- Create: `app/src/main/java/com/isaver/filemanager/ui/InlineSaveBar.kt`
 
 - [ ] **Step 1: Write RED Compose tests for content and height**
 
@@ -172,7 +172,7 @@ private fun choosing(draft: OutputNameDraft) = TransferUiState.Choosing(
 Run:
 
 ```powershell
-.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iamxpp.isaver.ui.InlineSaveBarTest
+.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.isaver.filemanager.ui.InlineSaveBarTest
 ```
 
 Expected: compilation fails because `InlineSaveBar` does not exist.
@@ -204,19 +204,19 @@ Run the Task 2 command again. Expected: both `InlineSaveBarTest` cases pass.
 - [ ] **Step 5: Commit the save-bar slice**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/ui/InlineSaveBar.kt app/src/androidTest/java/com/iamxpp/isaver/ui/InlineSaveBarTest.kt
+git add app/src/main/java/com/isaver/filemanager/ui/InlineSaveBar.kt app/src/androidTest/java/com/isaver/filemanager/ui/InlineSaveBarTest.kt
 git commit -m "feat: add compact inline save bar"
 ```
 
 ### Task 3: Replace Overflow with Save Across Existing Screens
 
 **Files:**
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/ui/files/FilesComponentsTest.kt`
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/ui/LocationHomeScreenTest.kt`
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/ui/BrowserScreenTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/files/FilesComponents.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/LocationHomeScreen.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/BrowserScreen.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/ui/files/FilesComponentsTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/ui/LocationHomeScreenTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/ui/BrowserScreenTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/files/FilesComponents.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/LocationHomeScreen.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/BrowserScreen.kt`
 
 - [ ] **Step 1: Write RED tests for mutually exclusive top actions**
 
@@ -278,7 +278,7 @@ assertTrue(saved)
 Run:
 
 ```powershell
-.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iamxpp.isaver.ui.files.FilesComponentsTest,com.iamxpp.isaver.ui.LocationHomeScreenTest,com.iamxpp.isaver.ui.BrowserScreenTest
+.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.isaver.filemanager.ui.files.FilesComponentsTest,com.isaver.filemanager.ui.LocationHomeScreenTest,com.isaver.filemanager.ui.BrowserScreenTest
 ```
 
 Expected: compilation fails because `FilesSaveAction` and screen parameters do not exist.
@@ -329,15 +329,15 @@ Run the Task 3 command again. Expected: all three test classes pass, including p
 - [ ] **Step 6: Commit the shared header slice**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/ui/files/FilesComponents.kt app/src/main/java/com/iamxpp/isaver/ui/LocationHomeScreen.kt app/src/main/java/com/iamxpp/isaver/ui/BrowserScreen.kt app/src/androidTest/java/com/iamxpp/isaver/ui/files/FilesComponentsTest.kt app/src/androidTest/java/com/iamxpp/isaver/ui/LocationHomeScreenTest.kt app/src/androidTest/java/com/iamxpp/isaver/ui/BrowserScreenTest.kt
+git add app/src/main/java/com/isaver/filemanager/ui/files/FilesComponents.kt app/src/main/java/com/isaver/filemanager/ui/LocationHomeScreen.kt app/src/main/java/com/isaver/filemanager/ui/BrowserScreen.kt app/src/androidTest/java/com/isaver/filemanager/ui/files/FilesComponentsTest.kt app/src/androidTest/java/com/isaver/filemanager/ui/LocationHomeScreenTest.kt app/src/androidTest/java/com/isaver/filemanager/ui/BrowserScreenTest.kt
 git commit -m "feat: replace overflow with save action"
 ```
 
 ### Task 4: Embed Save Mode in the Three-Tab Home
 
 **Files:**
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/ui/ISaverHomeScreenTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/ui/ISaverHomeScreenTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt`
 
 - [ ] **Step 1: Write RED home integration tests**
 
@@ -369,7 +369,7 @@ assertEquals(saveBar.bottom, tabs.top, 1f)
 Run:
 
 ```powershell
-.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iamxpp.isaver.ui.ISaverHomeScreenTest
+.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.isaver.filemanager.ui.ISaverHomeScreenTest
 ```
 
 Expected: compilation fails because save-mode inputs and `InlineSaveBar` integration are missing.
@@ -410,17 +410,17 @@ Run the Task 4 command again. Expected: all home tests pass and normal mode stil
 - [ ] **Step 5: Commit the home integration slice**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/ui/ISaverHomeScreen.kt app/src/androidTest/java/com/iamxpp/isaver/ui/ISaverHomeScreenTest.kt
+git add app/src/main/java/com/isaver/filemanager/ui/ISaverHomeScreen.kt app/src/androidTest/java/com/isaver/filemanager/ui/ISaverHomeScreenTest.kt
 git commit -m "feat: embed save mode in three-tab home"
 ```
 
 ### Task 5: Route Activity Sharing into the Home
 
 **Files:**
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/MainActivitySmokeTest.kt`
-- Modify: `app/src/main/java/com/iamxpp/isaver/MainActivity.kt`
-- Delete: `app/src/main/java/com/iamxpp/isaver/ui/ShareSavePickerScreen.kt`
-- Delete: `app/src/androidTest/java/com/iamxpp/isaver/ui/ShareSavePickerScreenTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/MainActivitySmokeTest.kt`
+- Modify: `app/src/main/java/com/isaver/filemanager/MainActivity.kt`
+- Delete: `app/src/main/java/com/isaver/filemanager/ui/ShareSavePickerScreen.kt`
+- Delete: `app/src/androidTest/java/com/isaver/filemanager/ui/ShareSavePickerScreenTest.kt`
 
 - [ ] **Step 1: Write the failing warm ACTION_VIEW integration test**
 
@@ -430,7 +430,7 @@ From the existing activity rule, start the same `singleTop` activity with the de
 val intent = Intent(Intent.ACTION_VIEW).apply {
     setClass(compose.activity, MainActivity::class.java)
     setDataAndType(
-        Uri.parse("content://com.iamxpp.isaver.debug-share/report.pdf"),
+        Uri.parse("content://com.isaver.filemanager.debug-share/report.pdf"),
         "application/pdf",
     )
     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -451,7 +451,7 @@ compose.onNodeWithTag("files-top-bar-overflow").assertDoesNotExist()
 Run:
 
 ```powershell
-.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iamxpp.isaver.MainActivitySmokeTest
+.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.isaver.filemanager.MainActivitySmokeTest
 ```
 
 Expected: the share request opens the standalone picker, so the three-tab assertions fail.
@@ -477,8 +477,8 @@ Delete `ShareSavePickerScreen.kt` and `ShareSavePickerScreenTest.kt`; confirm `r
 Run:
 
 ```powershell
-.\gradlew.bat testDebugUnitTest --tests "com.iamxpp.isaver.transfer.TransferViewModelTest"
-.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iamxpp.isaver.MainActivitySmokeTest,com.iamxpp.isaver.ui.ISaverHomeScreenTest,com.iamxpp.isaver.ui.InlineSaveBarTest
+.\gradlew.bat testDebugUnitTest --tests "com.isaver.filemanager.transfer.TransferViewModelTest"
+.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.isaver.filemanager.MainActivitySmokeTest,com.isaver.filemanager.ui.ISaverHomeScreenTest,com.isaver.filemanager.ui.InlineSaveBarTest
 ```
 
 Expected: all selected tests pass.
@@ -486,14 +486,14 @@ Expected: all selected tests pass.
 - [ ] **Step 6: Commit the routing slice**
 
 ```powershell
-git add app/src/main/java/com/iamxpp/isaver/MainActivity.kt app/src/androidTest/java/com/iamxpp/isaver/MainActivitySmokeTest.kt app/src/main/java/com/iamxpp/isaver/ui/ShareSavePickerScreen.kt app/src/androidTest/java/com/iamxpp/isaver/ui/ShareSavePickerScreenTest.kt
+git add app/src/main/java/com/isaver/filemanager/MainActivity.kt app/src/androidTest/java/com/isaver/filemanager/MainActivitySmokeTest.kt app/src/main/java/com/isaver/filemanager/ui/ShareSavePickerScreen.kt app/src/androidTest/java/com/isaver/filemanager/ui/ShareSavePickerScreenTest.kt
 git commit -m "fix: keep locations available while saving"
 ```
 
 ### Task 6: Disable MIUI Force Dark and Synchronize Documentation
 
 **Files:**
-- Modify: `app/src/androidTest/java/com/iamxpp/isaver/MainActivitySmokeTest.kt`
+- Modify: `app/src/androidTest/java/com/isaver/filemanager/MainActivitySmokeTest.kt`
 - Modify: `app/src/main/res/values/themes.xml`
 - Modify: `E:/PROJECT/Android_files/项目文档/iSaver_PRD_需求说明书.md`
 - Modify: `E:/PROJECT/Android_files/项目文档/iSaver_SDD_系统设计文档.md`
@@ -540,7 +540,7 @@ Update the old 2026-07-13 implementation plan status with a note that its standa
 - [ ] **Step 5: Run focused verification and checks**
 
 ```powershell
-.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.iamxpp.isaver.MainActivitySmokeTest
+.\gradlew.bat connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.isaver.filemanager.MainActivitySmokeTest
 git diff --check
 ```
 
@@ -551,7 +551,7 @@ Expected: activity tests pass and repository diff has no whitespace errors.
 The external PRD/SDD are not inside this Git repository; verify them separately. Commit repository files:
 
 ```powershell
-git add app/src/main/res/values/themes.xml app/src/androidTest/java/com/iamxpp/isaver/MainActivitySmokeTest.kt docs/superpowers/plans/2026-07-13-ios-share-save-picker.md
+git add app/src/main/res/values/themes.xml app/src/androidTest/java/com/isaver/filemanager/MainActivitySmokeTest.kt docs/superpowers/plans/2026-07-13-ios-share-save-picker.md
 git commit -m "fix: keep isaver text visible in night mode"
 ```
 
@@ -592,8 +592,8 @@ Use the Views overflow “添加位置” flow to create a temporary custom loca
 - [ ] **Step 4: Exercise debug ACTION_VIEW and capture visual evidence**
 
 ```powershell
-adb -s d51f42ac shell am force-stop com.iamxpp.isaver
-adb -s d51f42ac shell am start -W -a android.intent.action.VIEW -d content://com.iamxpp.isaver.debug-share/report.pdf -t application/pdf --grant-read-uri-permission -n com.iamxpp.isaver/.MainActivity
+adb -s d51f42ac shell am force-stop com.isaver.filemanager
+adb -s d51f42ac shell am start -W -a android.intent.action.VIEW -d content://com.isaver.filemanager.debug-share/report.pdf -t application/pdf --grant-read-uri-permission -n com.isaver.filemanager/.MainActivity
 ```
 
 Verify in system night mode: Views and all three tabs remain visible; `iSaver 测试` can be opened; the top action is only “存储”; `测试 报告` and `pdf` are dark and visible; the bar is immediately above the tabs and materially shorter than the old footer. Save the fixture and verify with Root that exactly `测试 报告.pdf` exists in the isolated target.
@@ -604,7 +604,7 @@ Remove the temporary custom location through iSaver so only the logical entry is
 
 ```powershell
 adb -s d51f42ac shell su -c "rm -rf /data/local/tmp/isaver-inline-save-test"
-adb -s d51f42ac logcat -d -t 300 | Select-String "FATAL EXCEPTION|AndroidRuntime|com.iamxpp.isaver"
+adb -s d51f42ac logcat -d -t 300 | Select-String "FATAL EXCEPTION|AndroidRuntime|com.isaver.filemanager"
 ```
 
 Expected: isolated test directory is removed and there is no iSaver fatal exception. Do not add screenshots or logs to Git.

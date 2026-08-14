@@ -13,10 +13,10 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $appApk = Join-Path $repo "app\build\outputs\apk\debug\app-debug.apk"
 $testApk = Join-Path $repo "app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk"
-$packageName = "com.iamxpp.isaver"
-$testPackageName = "com.iamxpp.isaver.test"
-$runner = "$testPackageName/com.iamxpp.isaver.ISaverTestRunner"
-$rootStreamTest = "com.iamxpp.isaver.transfer.RootStreamTransferInstrumentedTest"
+$packageName = "com.isaver.filemanager"
+$testPackageName = "com.isaver.filemanager.test"
+$runner = "$testPackageName/com.isaver.filemanager.ISaverTestRunner"
+$rootStreamTest = "com.isaver.filemanager.transfer.RootStreamTransferInstrumentedTest"
 
 if (-not $Serial) {
     $devices = @(& adb devices -l)

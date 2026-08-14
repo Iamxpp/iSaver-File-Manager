@@ -1,6 +1,6 @@
 param(
     [string]$Serial = $env:ISAVER_ADB_SERIAL,
-    [string]$PackageName = "com.iamxpp.isaver",
+    [string]$PackageName = "com.isaver.filemanager",
     [string]$KernelSuManagerPackage = "me.weishu.kernelsu",
     [string]$AndroidSdk = $env:ANDROID_SDK_ROOT,
     [switch]$VerifyOnly

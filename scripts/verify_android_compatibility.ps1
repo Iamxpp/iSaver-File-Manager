@@ -70,29 +70,29 @@ try {
     }
     Invoke-Adb @("install", "-r", $appApk) | Out-Null
     Invoke-Adb @("install", "-r", "-t", $testApk) | Out-Null
-    Invoke-Adb @("shell", "am", "start", "-W", "-n", "com.iamxpp.isaver/.MainActivity") | Out-Null
+    Invoke-Adb @("shell", "am", "start", "-W", "-n", "com.isaver.filemanager/.MainActivity") | Out-Null
     Find-Text "请以 Root 权限运行 iSaver" | Out-Null
     Find-Text "重新检测" | Out-Null
     Find-Text "退出应用" | Out-Null
 
     Click-Text "重新检测"
     Find-Text "请以 Root 权限运行 iSaver" | Out-Null
-    Invoke-Adb @("shell", "am", "force-stop", "com.iamxpp.isaver") | Out-Null
-    Invoke-Adb @("shell", "am", "start", "-W", "-n", "com.iamxpp.isaver/.MainActivity") | Out-Null
+    Invoke-Adb @("shell", "am", "force-stop", "com.isaver.filemanager") | Out-Null
+    Invoke-Adb @("shell", "am", "start", "-W", "-n", "com.isaver.filemanager/.MainActivity") | Out-Null
     Find-Text "请以 Root 权限运行 iSaver" | Out-Null
 
     $instrumentation = Invoke-Adb @(
         "shell", "am", "instrument", "-w", "-r",
-        "-e", "class", "com.iamxpp.isaver.ui.RootGateScreenTest,com.iamxpp.isaver.ui.files.FilesComponentsTest",
-        "com.iamxpp.isaver.test/com.iamxpp.isaver.ISaverTestRunner"
+        "-e", "class", "com.isaver.filemanager.ui.RootGateScreenTest,com.isaver.filemanager.ui.files.FilesComponentsTest",
+        "com.isaver.filemanager.test/com.isaver.filemanager.ISaverTestRunner"
     )
     if (($instrumentation -join "`n") -notmatch 'OK \(') { throw "Compatibility instrumentation failed" }
 
-    Invoke-Adb @("shell", "am", "start", "-W", "-n", "com.iamxpp.isaver/.MainActivity") | Out-Null
+    Invoke-Adb @("shell", "am", "start", "-W", "-n", "com.isaver.filemanager/.MainActivity") | Out-Null
     Click-Text "退出应用"
     Start-Sleep -Milliseconds 500
     $resumed = (Invoke-Adb @("shell", "dumpsys", "activity", "activities")) -join "`n"
-    if ($resumed -match 'mResumedActivity.*com\.iamxpp\.isaver') { throw "Exit action did not close iSaver" }
+    if ($resumed -match 'mResumedActivity.*com\.isaver\.filemanager') { throw "Exit action did not close iSaver" }
     Write-Host "PASS API ${Api}: install, cold start, non-Root gate, retry, recreation, UI tests, and exit."
 }
 finally {
