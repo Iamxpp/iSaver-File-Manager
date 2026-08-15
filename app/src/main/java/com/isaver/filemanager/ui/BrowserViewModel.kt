@@ -220,6 +220,14 @@ class BrowserViewModel(
         openExternalFile(entry, openRequest, chooser = true)
     }
 
+    fun navigateToPath(path: RootPath): Boolean {
+        if (path == mutableState.value.currentPath) return false
+        stack.addLast(mutableState.value.currentPath)
+        forwardStack.clear()
+        load(path)
+        return true
+    }
+
     fun selectEntry(entry: DirectoryEntry) {
         if (!entry.readable || entry.symbolicLink || entry.type == EntryType.OTHER) return
         val selected = mutableState.value.selectedEntries.toMutableSet()

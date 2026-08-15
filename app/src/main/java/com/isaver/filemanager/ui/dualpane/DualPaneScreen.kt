@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,13 +31,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.isaver.filemanager.domain.DirectoryEntry
+import com.isaver.filemanager.domain.RootPath
 import com.isaver.filemanager.fileops.ConflictAction
 import com.isaver.filemanager.ui.BrowserScreen
 import com.isaver.filemanager.ui.BrowserUiState
 import com.isaver.filemanager.ui.theme.ISaverBackground
 import com.isaver.filemanager.ui.theme.ISaverBlue
 import com.isaver.filemanager.ui.theme.ISaverDivider
-import com.isaver.filemanager.ui.theme.ISaverPrimaryText
 import com.isaver.filemanager.ui.theme.ISaverSecondaryText
 
 data class DualPaneBrowserCallbacks(
@@ -46,6 +47,7 @@ data class DualPaneBrowserCallbacks(
     val retry: () -> Unit,
     val loadMore: () -> Unit,
     val query: (String) -> Unit,
+    val navigateToPath: (RootPath) -> Unit = {},
     val toggleSelection: (DirectoryEntry) -> Unit,
     val clearSelection: () -> Unit,
     val openEntry: (DirectoryEntry) -> Unit,
@@ -140,12 +142,7 @@ private fun Pane(
                 if (pane == PaneId.PRIMARY) "主窗" else "副窗",
                 color = if (active) ISaverBlue else ISaverSecondaryText,
             )
-            Text(
-                browserState.currentPath.value,
-                color = ISaverPrimaryText,
-                maxLines = 1,
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
-            )
+            Spacer(Modifier.weight(1f))
             if (dualState.lockedPane == pane) Text("已锁定", color = ISaverSecondaryText)
         }
         HorizontalDivider(color = ISaverDivider)
@@ -160,6 +157,11 @@ private fun Pane(
             onRetry = callbacks.retry,
             onLoadMore = callbacks.loadMore,
             onSearchQueryChange = callbacks.query,
+            onNavigateToPath = {
+                onActivate(pane)
+                callbacks.navigateToPath(it)
+            },
+            showPath = true,
             onToggleSelection = {
                 onActivate(pane)
                 callbacks.toggleSelection(it)

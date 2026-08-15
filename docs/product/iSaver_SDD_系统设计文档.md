@@ -454,6 +454,8 @@ data class BrowserUiState(
 - 单个异常条目转换为不可用条目或忽略并记录脱敏诊断，不使整页失败。
 - `BrowserPreferences` 使用 DataStore 保存 `LIST/GRID`、排序字段和升降序。
 - 排序字段为 `DISPLAY_NAME`、`TYPE`、`MODIFIED_AT`、`SIZE`；排序必须稳定，目录未知大小不触发递归统计。
+- `FilesPathField` 以 `RootPath.parse()` 校验用户输入，只接受以 `/` 开头且不含 NUL 的绝对路径；提交由键盘 IME Done 或“前往”按钮触发，成功后清除焦点，失败仅更新地址栏错误状态。
+- `BrowserViewModel.navigateToPath()` 将当前目录压入后退栈并清空前进栈；目标与当前目录相同则不改变历史。双窗口分别持有一个 `BrowserViewModel`，因此地址栏提交、锁定窗格和导航历史互不串扰。
 
 ### 7.3 导航栈
 
@@ -474,6 +476,7 @@ LocationHome
 - `Views` 顶部使用单行紧凑 `FilesTopBar`：居中标题与右侧 overflow 对齐，左侧使用等宽导航槽保证标题几何居中；搜索框直接位于其下。
 - `Views` overflow 提供虚拟文件夹创建；浏览页当前目录及文件/目录长按面板统一进入虚拟目标文件夹选择器。真实引用不允许承载子节点。
 - `FilesPageHeader` 统一 Views 与所有真实目录层级：56dp 单行 TopBar、左右等宽 action slot、几何居中标题、紧贴其下的搜索框；产品页面停止使用两行大标题。
+- 真实浏览页和移动/复制/解压目标选择器的 `FilesPageHeader` 可选渲染紧凑 `FilesPathField`，位于搜索框上方；没有真实目录目标的首页、虚拟分组页等复用页面隐藏该控件。
 - 使用 Android 系统字体和系统状态栏；不复制 Apple 字体或受保护图标资源。
 - 单窗竖屏图标模式默认三列；详细列表模式保持约 64dp 行高和细分隔线。
 - 双窗允许普通手机竖屏主动开启，也支持横屏、折叠屏和平板；双窗始终锁定详细列表显示，退出后恢复各窗口的单窗显示偏好。

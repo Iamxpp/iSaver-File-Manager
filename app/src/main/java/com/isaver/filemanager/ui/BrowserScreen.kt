@@ -41,12 +41,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.isaver.filemanager.domain.DirectoryEntry
 import com.isaver.filemanager.domain.EntryType
+import com.isaver.filemanager.domain.RootPath
 import com.isaver.filemanager.domain.RootPathRiskPolicy
 import com.isaver.filemanager.fileops.ConflictAction
 import com.isaver.filemanager.fileops.BatchRenameCase
@@ -110,6 +113,8 @@ fun BrowserScreen(
     onOpenDeepSearchResultLocation: (DirectoryEntry) -> Unit = {},
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
+    onNavigateToPath: (RootPath) -> Unit = {},
+    showPath: Boolean = false,
     modifier: Modifier = Modifier,
     onSearchQueryChange: (String) -> Unit = {},
     onDisplayModeChange: (DisplayMode) -> Unit = {},
@@ -177,6 +182,7 @@ fun BrowserScreen(
     compactHeader: Boolean = false,
     onOpenDualPane: (() -> Unit)? = null,
 ) {
+    val focusManager = LocalFocusManager.current
     var menuExpanded by remember { mutableStateOf(false) }
     var createDialogVisible by remember { mutableStateOf(false) }
     var createFileDialogVisible by remember { mutableStateOf(false) }
@@ -188,8 +194,12 @@ fun BrowserScreen(
     var deepSearchVisible by remember { mutableStateOf(false) }
     var deleteEntry by remember { mutableStateOf<DirectoryEntry?>(null) }
     var batchDeleteVisible by remember { mutableStateOf(false) }
+    var pathInput by rememberSaveable { mutableStateOf(state.currentPath.value) }
+    var pathError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.currentPath) {
+        pathInput = state.currentPath.value
+        pathError = null
         actionEntry = null
     }
     LaunchedEffect(state.selectionMode) {
@@ -201,6 +211,23 @@ fun BrowserScreen(
             title = state.title,
             query = state.searchQuery,
             onQueryChange = onSearchQueryChange,
+            path = pathInput.takeIf { showPath },
+            onPathChange = {
+                pathInput = it
+                pathError = null
+            },
+            onPathSubmit = {
+                RootPath.parse(pathInput)
+                    .onSuccess {
+                        focusManager.clearFocus()
+                        onNavigateToPath(it)
+                    }
+                    .onFailure {
+                        pathError = it.message ?: "路径格式无效"
+                    }
+            },
+            pathError = pathError,
+            pathTestTag = "browser-path",
             onBack = if (state.canGoBack) onBack else null,
             onOverflow = { menuExpanded = true },
             saveAction = saveAction,

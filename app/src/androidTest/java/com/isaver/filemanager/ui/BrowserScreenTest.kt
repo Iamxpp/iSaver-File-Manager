@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
@@ -47,6 +48,41 @@ import org.junit.Rule
 import org.junit.Test
 
 class BrowserScreenTest {
+    @Test fun editablePathSubmitsAbsoluteDirectory() {
+        var submitted: RootPath? = null
+        compose.setContent {
+            BrowserScreen(
+                state = state(),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onNavigateToPath = { submitted = it },
+                showPath = true,
+            )
+        }
+
+        compose.onNodeWithTag("browser-path").performTextReplacement("/data/local/tmp")
+        compose.onNodeWithTag("browser-path").performImeAction()
+
+        assertEquals("/data/local/tmp", submitted?.value)
+    }
+
+    @Test fun editablePathRejectsRelativeDirectory() {
+        var submissions = 0
+        compose.setContent {
+            BrowserScreen(
+                state = state(),
+                onEnterDirectory = {}, onBack = {}, onRetry = {}, onLoadMore = {},
+                onNavigateToPath = { submissions += 1 },
+                showPath = true,
+            )
+        }
+
+        compose.onNodeWithTag("browser-path").performTextReplacement("data/local/tmp")
+        compose.onNodeWithTag("browser-path").performImeAction()
+
+        assertEquals(0, submissions)
+        compose.onNodeWithText("必须使用绝对路径").assertIsDisplayed()
+    }
+
     @Test fun virtualViewAndForwardMenuActionsAreWired() {
         var forwarded = false
         var addedCurrent = false

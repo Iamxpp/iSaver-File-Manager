@@ -74,6 +74,44 @@ class BrowserViewModelTest {
     @Before fun setUp() = Dispatchers.setMain(mainDispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
 
+    @Test fun `direct path navigation preserves browser history`() = runTest {
+        val visited = mutableListOf<String>()
+        val vm = BrowserViewModel(
+            FakeFileSystem { path ->
+                visited += path.value
+                OperationResult.Success(emptyList())
+            },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+        vm.openRoot(RootPath.parse("/").getOrThrow(), "根目录")
+        advanceUntilIdle()
+
+        assertTrue(vm.navigateToPath(RootPath.parse("/data/local/tmp").getOrThrow()))
+        advanceUntilIdle()
+
+        assertEquals("/data/local/tmp", vm.state.value.currentPath.value)
+        assertTrue(vm.state.value.canGoBack)
+        assertEquals(BrowserBackResult.NAVIGATED, vm.back())
+        advanceUntilIdle()
+        assertEquals("/", vm.state.value.currentPath.value)
+        assertEquals(listOf("/", "/data/local/tmp", "/"), visited)
+    }
+
+    @Test fun `direct navigation to current path does not add history`() = runTest {
+        val vm = BrowserViewModel(
+            FakeFileSystem { OperationResult.Success(emptyList()) },
+            StandardTestDispatcher(testScheduler),
+            defaultPreferences(),
+        )
+        val path = RootPath.parse("/data/local/tmp").getOrThrow()
+        vm.openRoot(path, "测试")
+        advanceUntilIdle()
+
+        assertFalse(vm.navigateToPath(path))
+        assertFalse(vm.state.value.canGoBack)
+    }
+
     @Test fun `collects browser preferences into presentation state`() = runTest {
         val preferences = FakeBrowserPreferencesStore(
             BrowserPreferences(

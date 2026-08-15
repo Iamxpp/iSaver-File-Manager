@@ -34,6 +34,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -53,6 +55,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,6 +81,11 @@ fun FilesPageHeader(
     query: String,
     onQueryChange: (String) -> Unit,
     onOverflow: () -> Unit,
+    path: String? = null,
+    onPathChange: (String) -> Unit = {},
+    onPathSubmit: () -> Unit = {},
+    pathError: String? = null,
+    pathTestTag: String = "files-path",
     onBack: (() -> Unit)? = null,
     onMenu: (() -> Unit)? = null,
     saveAction: FilesSaveAction? = null,
@@ -104,6 +112,16 @@ fun FilesPageHeader(
             compact = compact,
             overflowMenuContent = overflowMenuContent,
         )
+        path?.let {
+            FilesPathField(
+                path = it,
+                onPathChange = onPathChange,
+                onSubmit = onPathSubmit,
+                error = pathError,
+                testTag = pathTestTag,
+                compact = compact,
+            )
+        }
         FilesSearchField(
             query = query,
             onQueryChange = onQueryChange,
@@ -683,6 +701,72 @@ private fun BackChevron() {
     Canvas(Modifier.size(24.dp)) {
         drawLine(ISaverBlue, Offset(size.width * .62f, size.height * .18f), Offset(size.width * .32f, size.height * .5f), 2.5.dp.toPx(), StrokeCap.Round)
         drawLine(ISaverBlue, Offset(size.width * .32f, size.height * .5f), Offset(size.width * .62f, size.height * .82f), 2.5.dp.toPx(), StrokeCap.Round)
+    }
+}
+
+@Composable
+fun FilesPathField(
+    path: String,
+    onPathChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    error: String? = null,
+    testTag: String = "files-path",
+    compact: Boolean = false,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = if (compact) 8.dp else 16.dp,
+                end = if (compact) 8.dp else 16.dp,
+                bottom = if (error == null) 4.dp else 2.dp,
+            ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (compact) 38.dp else 46.dp)
+                .background(ISaverBackground, RoundedCornerShape(if (compact) 6.dp else 10.dp))
+                .padding(start = if (compact) 10.dp else 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "路径",
+                color = ISaverSecondaryText,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Spacer(Modifier.width(if (compact) 6.dp else 8.dp))
+            BasicTextField(
+                value = path,
+                onValueChange = onPathChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = ISaverPrimaryText),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onSubmit() }),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag(testTag)
+                    .semantics { contentDescription = "当前路径，可编辑" },
+                decorationBox = { innerTextField ->
+                    Box(Modifier.fillMaxWidth()) { innerTextField() }
+                },
+            )
+            TextButton(
+                onClick = onSubmit,
+                contentPadding = PaddingValues(horizontal = if (compact) 8.dp else 12.dp),
+                modifier = Modifier.height(if (compact) 38.dp else 46.dp),
+            ) {
+                Text("前往", color = ISaverBlue)
+            }
+        }
+        if (error != null) {
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+            )
+        }
     }
 }
 

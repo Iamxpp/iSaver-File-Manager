@@ -616,6 +616,11 @@ class MainActivity : ComponentActivity() {
                             retry = browserViewModel::retry,
                             loadMore = browserViewModel::loadMore,
                             query = browserViewModel::setSearchQuery,
+                            navigateToPath = { path ->
+                                if (dualPaneState.lockedPane != PaneId.PRIMARY) {
+                                    browserViewModel.navigateToPath(path)
+                                }
+                            },
                             toggleSelection = browserViewModel::toggleSelection,
                             clearSelection = browserViewModel::clearSelection,
                             openEntry = browserViewModel::openEntry,
@@ -642,6 +647,11 @@ class MainActivity : ComponentActivity() {
                             retry = secondaryBrowserViewModel::retry,
                             loadMore = secondaryBrowserViewModel::loadMore,
                             query = secondaryBrowserViewModel::setSearchQuery,
+                            navigateToPath = { path ->
+                                if (dualPaneState.lockedPane != PaneId.SECONDARY) {
+                                    secondaryBrowserViewModel.navigateToPath(path)
+                                }
+                            },
                             toggleSelection = secondaryBrowserViewModel::toggleSelection,
                             clearSelection = secondaryBrowserViewModel::clearSelection,
                             openEntry = secondaryBrowserViewModel::openEntry,
@@ -778,6 +788,9 @@ class MainActivity : ComponentActivity() {
                             !fileOperationInFlight && browserViewModel.enterDirectory(entry)
                         },
                         onBrowserBack = ::handleBrowserBack,
+                        onNavigateBrowserPath = { path ->
+                            if (!fileOperationInFlight) browserViewModel.navigateToPath(path)
+                        },
                         onBrowserForward = { browserViewModel.forward() },
                         onStartDeepSearch = browserViewModel::startDeepSearch,
                         onCancelDeepSearch = browserViewModel::cancelDeepSearch,
